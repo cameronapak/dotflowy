@@ -1,8 +1,19 @@
-import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { subheaderSlots } from "../plugins/registry";
-import type { PluginContext } from "../plugins/types";
+import {
+  Fragment,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+
 import { cn } from "@/lib/utils";
+
+import type { PluginContext } from "../plugins/types";
+
+import { usePluginChrome } from "../plugins/registry";
+import { QueryFilterBar } from "./query-filter";
+import { SUBHEADER_EXPAND_MS } from "./subheader-expand";
 
 /**
  * Contextual chrome band below the main header. Plugin subheader slots render
@@ -13,16 +24,23 @@ import { cn } from "@/lib/utils";
  * centered like Header); animated height measures the shell so the border
  * isn't clipped.
  */
-export function Subheader({
-  getCtx,
-}: {
-  getCtx?: () => PluginContext;
-}) {
+export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
+  const { subheaderSlots } = usePluginChrome();
   const reduceMotion = useReducedMotion();
   const contentRef = useRef<HTMLElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const [height, setHeight] = useState(0);
+  const [{ open, height, measured, snapOpen }, setBand] = useState({
+    open: false,
+    height: 0,
+    measured: false,
+    snapOpen: false,
+  });
+  const openRef = useRef(false);
+  // The band initially uses its natural document height until the layout effects
+  // below measure it. That prevents a forced 0px frame whenever the editor (and
+  // this subheader) remounts during a day switch. Once measured, later open/close
+  // changes animate normally. Mount-time plugin chrome can explicitly keep the
+  // first measured frame snapped with `data-subheader-snap-open`.
 
   // Kept as useCallback (not redundant despite React Compiler): it's a
   // dependency of the useLayoutEffects below, so oxlint's exhaustive-deps gate
@@ -33,10 +51,24 @@ export function Subheader({
     const shell = shellRef.current;
     if (!content || !shell) return;
     const has = content.childElementCount > 0;
-    setOpen(has);
+    const shouldSnapOpen = Boolean(
+      has &&
+      !openRef.current &&
+      content.querySelector("[data-subheader-snap-open]"),
+    );
+    openRef.current = has;
     // offsetHeight on the bordered shell — scrollHeight on the inner row
     // clipped the bottom border under overflow-hidden.
-    setHeight(has ? shell.offsetHeight : 0);
+    const nextHeight = has ? shell.offsetHeight : 0;
+    setBand((current) => ({
+      open: has,
+      height: nextHeight,
+      measured: true,
+      // Keep the snap through repeated observer measurements until it has
+      // painted; publishing these fields atomically prevents Motion from
+      // observing an intermediate open=true/snap=false render.
+      snapOpen: shouldSnapOpen || (has && current.snapOpen),
+    }));
   }, []);
 
   useLayoutEffect(() => {
@@ -63,14 +95,27 @@ export function Subheader({
     <motion.div
       initial={false}
       animate={
-        reduceMotion
-          ? { height: open ? "auto" : 0 }
-          : { height: open ? height : 0, opacity: open ? 1 : 0 }
+        !measured
+          ? undefined
+          : {
+              height: open ? (reduceMotion ? "auto" : height) : 0,
+              opacity: open ? 1 : 0,
+            }
       }
-      transition={{ duration: 0.2, ease: "easeOut" }}
-      className="overflow-hidden"
+      transition={
+        !snapOpen && !reduceMotion
+          ? { duration: SUBHEADER_EXPAND_MS / 1000, ease: "easeOut" }
+          : { duration: 0 }
+      }
+      onAnimationComplete={() => {
+        if (snapOpen) setBand((current) => ({ ...current, snapOpen: false }));
+      }}
+      className="overflow-hidden bg-background"
       aria-hidden={!open}
     >
+      {/* bg-background under the translucent tint: the band is sticky, so a
+          see-through background lets scrolled bullets bleed into the filter
+          row. The tint keeps its look but now composites opaque. */}
       <div
         ref={shellRef}
         className={cn("bg-muted/30", open && "border-b border-border")}
@@ -83,6 +128,10 @@ export function Subheader({
             open && "px-6 py-2 max-sm:px-4",
           )}
         >
+          {/* The `?q=` filter is CORE chrome (ADR 0047 §6); it sits beside the
+              plugin subheader slots the way core commands sit beside plugin
+              commands. Renders nothing when idle, so the band still collapses. */}
+          <QueryFilterBar />
           {subheaderSlots.map((s) => (
             <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
           ))}

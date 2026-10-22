@@ -19,11 +19,12 @@
  * (worker/index.ts, worker/wire.test.ts) keep resolving `Node`/`ChangeOp` here.
  */
 
-import { Schema } from 'effect'
-import { ChangeOpSchema, NodeSchema } from '../src/data/wire-schema'
+import { Schema } from "effect";
 
-export { NodeSchema } from '../src/data/wire-schema'
-export type { ChangeOp, Node } from '../src/data/wire-schema'
+import { ChangeOpSchema, NodeSchema } from "../src/data/wire-schema";
+
+export { NodeSchema } from "../src/data/wire-schema";
+export type { ChangeOp, Node } from "../src/data/wire-schema";
 
 // --- Request-body schemas (the /api/nodes + /api/kv trust boundary) ----------
 
@@ -32,7 +33,11 @@ export type { ChangeOp, Node } from '../src/data/wire-schema'
 export const NodesPostBody = Schema.Struct({
   ops: Schema.optional(Schema.Array(ChangeOpSchema)),
   nodes: Schema.optional(Schema.Array(NodeSchema)),
-})
+  clientId: Schema.optional(Schema.String),
+  expectedSeq: Schema.optional(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  ),
+});
 
 /** PATCH /api/nodes — single-field edits. `changes` stays an open record; the DO
  *  filters it against its writable-column allowlist, so it can't be injected. */
@@ -43,21 +48,42 @@ export const NodesPatchBody = Schema.Struct({
       changes: Schema.Record(Schema.String, Schema.Unknown),
     }),
   ),
-})
+  clientId: Schema.optional(Schema.String),
+});
 
 /** DELETE /api/nodes. */
-export const NodesDeleteBody = Schema.Struct({ ids: Schema.Array(Schema.String) })
+export const NodesDeleteBody = Schema.Struct({
+  ids: Schema.Array(Schema.String),
+  clientId: Schema.optional(Schema.String),
+});
 
 /** POST /api/kv?op=claim — atomic get-or-create on one key. */
-export const KvClaimBody = Schema.Struct({ key: Schema.String, value: Schema.Unknown })
+export const KvClaimBody = Schema.Struct({
+  key: Schema.String,
+  value: Schema.Unknown,
+});
 
 /** POST /api/kv — batch upsert of side-collection rows. */
 export const KvUpsertBody = Schema.Struct({
-  rows: Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.Unknown })),
-})
+  rows: Schema.Array(
+    Schema.Struct({ key: Schema.String, value: Schema.Unknown }),
+  ),
+});
 
 /** DELETE /api/kv. */
-export const KvDeleteBody = Schema.Struct({ keys: Schema.Array(Schema.String) })
+export const KvDeleteBody = Schema.Struct({
+  keys: Schema.Array(Schema.String),
+});
+
+/** POST /api/daily/week-start — atomically change calendar meaning and migrate
+ *  the derived Daily scaffold in the caller's per-user Durable Object. */
+export const WeekStartPostBody = Schema.Union([
+  Schema.Struct({ operation: Schema.Literal("canonicalize") }),
+  Schema.Struct({
+    operation: Schema.Literal("set"),
+    weekStart: Schema.Literals(["sunday", "monday"]),
+  }),
+]);
 
 /** POST /api/waitlist — public alpha-waitlist signup (invite-only signup gate,
  *  worker/auth.ts). Email plausibility is checked in the route handler; the
@@ -65,4 +91,65 @@ export const KvDeleteBody = Schema.Struct({ keys: Schema.Array(Schema.String) })
 export const WaitlistPostBody = Schema.Struct({
   email: Schema.String,
   source: Schema.optional(Schema.String),
-})
+});
+
+/** POST /api/admin/invite — mint per-email single-use invite codes (#251).
+ *  Admin-gated in the route (session + ADMIN_EMAILS). Provide `emails` to invite
+ *  specific addresses, or `all`/`limit` to pull pending waitlist rows. The
+ *  schema only guards shape; targeting is resolved in the route. */
+export const AdminInvitePostBody = Schema.Struct({
+  emails: Schema.optional(Schema.Array(Schema.String)),
+  all: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(Schema.Number),
+});
+
+/** POST /api/admin/announce — email the launch "Dotflowy is open" blast (#294).
+ *  Same shape + admin gate as /api/admin/invite. Provide `emails` to announce to
+ *  specific addresses, or `all`/`limit` to pull not-yet-notified waitlist rows.
+ *  The schema only guards shape; targeting + idempotent stamping live in the
+ *  route (runAnnounceBatch -> sendAnnouncements). */
+export const AdminAnnouncePostBody = Schema.Struct({
+  emails: Schema.optional(Schema.Array(Schema.String)),
+  all: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(Schema.Number),
+});
+
+/** POST /api/admin/restore — restore one user's outline to a point in time via
+ *  the DO's 30-day PITR (#220). Admin-gated in the route (session + ADMIN_EMAILS).
+ *  Identify the user by `email` OR `userId`; restore to a time (`at`, epoch ms or
+ *  ISO string) OR a raw `bookmark` (the undo path). The schema only guards shape —
+ *  the exactly-one-of rules and the 30-day window are validated in the route
+ *  (resolveRestorePoint) and mapped to a clean 400. */
+export const AdminRestorePostBody = Schema.Struct({
+  email: Schema.optional(Schema.String),
+  userId: Schema.optional(Schema.String),
+  at: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+  bookmark: Schema.optional(Schema.String),
+});
+
+/** Restore one user from an R2 snapshot (#221): the target (exactly one of
+ *  userId/email, enforced in the route like the PITR restore) plus the UTC
+ *  calendar date of the backup object to load (shape-checked in the route via
+ *  `isBackupDateKey` — pure, worker/backup.ts). */
+export const AdminSnapshotRestorePostBody = Schema.Struct({
+  email: Schema.optional(Schema.String),
+  userId: Schema.optional(Schema.String),
+  date: Schema.String,
+});
+
+/** Temporary ADR 0061 one-user operator operation. */
+export const AdminLunoraRetirementPostBody = Schema.Struct({
+  email: Schema.optional(Schema.String),
+  userId: Schema.optional(Schema.String),
+  operation: Schema.Literals([
+    "dry-run",
+    "migrate",
+    "migrate-with-recovery",
+    "repair-classic",
+    "retry",
+    "restore",
+    "preserve-classic",
+    "recover-classic",
+  ]),
+  approvedManifestHash: Schema.optional(Schema.String),
+});

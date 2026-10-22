@@ -1,8 +1,8 @@
-"use client"
+"use client";
 
-import { PreviewCard as PreviewCardPrimitive } from "@base-ui/react/preview-card"
+import { PreviewCard as PreviewCardPrimitive } from "@base-ui/react/preview-card";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
 function HoverCardContent({
   className,
@@ -35,7 +35,7 @@ function HoverCardContent({
         />
       </PreviewCardPrimitive.Positioner>
     </PreviewCardPrimitive.Portal>
-  )
+  );
 }
 
-export { HoverCardContent }
+export { HoverCardContent };

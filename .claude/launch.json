@@ -4,8 +4,30 @@
     {
       "name": "dev",
       "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "dev:web",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "dev:web"],
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "cf:dev",
+      "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "cf:dev"],
-      "port": 8787
+      "port": 8787,
+      "autoPort": true
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "landing",
+      "port": 3100
     }
   ]
 }

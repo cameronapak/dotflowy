@@ -1,0 +1,627 @@
+import { expect, test, type Page } from "@playwright/test";
+
+import {
+  holdDailyClaims,
+  openSeededOutline,
+  seedOutline,
+  STANDARD_TREE,
+} from "./fixtures";
+
+const dialog = (page: Page) =>
+  page.getByRole("dialog", { name: "Quick add", exact: true });
+const editor = (page: Page) =>
+  page.getByRole("textbox", { name: "Quick add", exact: true });
+const destChip = (page: Page) => page.locator("[data-quick-add-dest]");
+const todayButton = (page: Page) =>
+  page.getByRole("button", { name: "Today's daily note" });
+const rowWithText = (page: Page, t: string) =>
+  page.locator("li[data-node-id] > .outline-row", { hasText: t });
+
+async function load(page: Page) {
+  await seedOutline(page, STANDARD_TREE);
+  await openSeededOutline(page, { anchorId: "alpha" });
+  await expect(
+    page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
+  ).toBeVisible();
+}
+
+/** Press the global bare-"q" hotkey (Todoist parity, ADR 0049 refinement). It's
+ *  guarded on "not typing", so blur any focused bullet first -- otherwise the "q"
+ *  just types into the outline. */
+async function pressQuickAddKey(page: Page) {
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) active.blur();
+  });
+  await page.keyboard.press("q");
+}
+
+/** Open quick-add via the "q" hotkey, then wait for the destination to resolve to
+ *  Today (a kv get-or-create round-trip) before returning -- typing before it
+ *  settles would race the born-in-destination decision. */
+async function openQuickAdd(page: Page) {
+  await pressQuickAddKey(page);
+  await expect(dialog(page)).toBeVisible();
+  await expect(destChip(page)).toHaveAttribute("data-quick-add-dest", "Today");
+  await editor(page).click();
+}
+
+async function type(page: Page, text: string) {
+  await editor(page).click();
+  await page.keyboard.type(text);
+}
+
+// Cmd+Enter = commit & next (the rapid-fire burst key, ADR 0049 amendment):
+// commits the current node, clears the editor, keeps the overlay open, appends
+// to the session list. Plain Enter now commits & CLOSES.
+async function commitNext(page: Page) {
+  await page.keyboard.press("ControlOrMeta+Enter");
+}
+
+const toastByText = (page: Page, text: string) =>
+  page.locator("[data-sonner-toast]", { hasText: text });
+
+/** The `data-parent-id` of the (first) row whose text matches, or null. */
+async function parentIdOf(page: Page, text: string): Promise<string | null> {
+  return rowWithText(page, text)
+    .first()
+    .evaluate(
+      (el) =>
+        el.closest("li[data-node-id]")?.getAttribute("data-parent-id") ?? null,
+    );
+}
+
+test("native formatting edits the capture, not the outline, and undoes separately", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+  await type(page, "Capture this");
+  // Wait for the draft's asynchronous birth before checking separate edit undo.
+  await expect(editor(page)).not.toHaveAttribute(
+    "data-history-node-id",
+    "__quick_add_draft__",
+  );
+  await editor(page).evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+  const fire = (inputType: string) =>
+    editor(page).evaluate(
+      (el, type) =>
+        !el.dispatchEvent(
+          new InputEvent("beforeinput", {
+            inputType: type,
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      inputType,
+    );
+  expect(await fire("formatBold")).toBe(true);
+  await expect(editor(page).locator("strong")).toHaveText("Capture this");
+  expect(await fire("formatSuperscript")).toBe(true);
+  await expect(editor(page).locator("sup")).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(editor(page)).toHaveText("Capture this");
+  await expect(editor(page).locator("strong")).toHaveCount(0);
+  await expect(page.locator('li[data-node-id="alpha"] .node-text')).toHaveText(
+    "Alpha",
+  );
+  await page.keyboard.press("Enter");
+  await expect(dialog(page)).toHaveCount(0);
+});
+
+test("first-paste unfurl stays with its saved draft across a rapid next capture", async ({
+  page,
+}) => {
+  let release!: () => void;
+  const unfurl = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/unfurl?*", async (route) => {
+    await unfurl;
+    await route.fulfill({ json: { title: "Captured article" } });
+  });
+  await load(page);
+  await openQuickAdd(page);
+  const gate = await holdDailyClaims(page);
+  await editor(page).evaluate((el) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "https://captured.test");
+    el.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: data,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await gate.seen;
+  await commitNext(page);
+  await expect(editor(page)).toHaveText("");
+  await type(page, "My second thought");
+  await expect(editor(page)).toHaveText("My second thought");
+  gate.release();
+  release();
+  await expect(
+    dialog(page).getByText("[Captured article](https://captured.test)", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(editor(page)).toHaveText("My second thought");
+  await page.keyboard.press("Enter");
+  await expect(dialog(page)).toBeHidden();
+  await todayButton(page).click();
+  await expect(rowWithText(page, "Captured article")).toHaveCount(1);
+  await expect(rowWithText(page, "My second thought")).toHaveCount(1);
+});
+
+test("'q' while typing in a bullet does NOT open the overlay", async ({
+  page,
+}) => {
+  await load(page);
+  // Focus a bullet and type a word containing "q" -- the guard must let it
+  // through to the contentEditable rather than summoning quick-add.
+  const alpha = page.locator('li[data-node-id="alpha"] .node-text');
+  await alpha.click();
+  await page.keyboard.type("quick");
+  await expect(dialog(page)).toBeHidden();
+  await expect(alpha).toContainText("quick");
+});
+
+test("rapid-fire Cmd+Enter commits each capture as a sibling at the bottom of Today", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+
+  await type(page, "first-capture");
+  await commitNext(page);
+  // Wait for the first capture to land in the session list (and the editor to
+  // clear) before typing the next -- otherwise the second type() races the
+  // post-commit re-render and drops keystrokes under parallel load.
+  await expect(dialog(page)).toContainText("first-capture");
+  await expect(editor(page)).toHaveText("");
+
+  await type(page, "second-capture");
+  await commitNext(page);
+
+  // Cmd+Enter keeps the overlay open; the running session list proves both
+  // landed without peeking at Today.
+  await expect(dialog(page)).toBeVisible();
+  await expect(dialog(page)).toContainText("first-capture");
+  await expect(dialog(page)).toContainText("second-capture");
+
+  // Close, then open Today and confirm both are children, in capture order.
+  await page.keyboard.press("Escape");
+  await expect(dialog(page)).toBeHidden();
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+
+  const firstRow = rowWithText(page, "first-capture");
+  const secondRow = rowWithText(page, "second-capture");
+  // Capture -> Today get-or-create -> WS echo -> nav is a longer async chain
+  // than a synchronous outline edit, so allow for it under parallel contention.
+  await expect(firstRow).toBeVisible({ timeout: 10_000 });
+  await expect(secondRow).toBeVisible({ timeout: 10_000 });
+
+  // Read both captures from one live DOM snapshot: virtualized rows can
+  // remount between separate locator evaluations while navigation settles.
+  await expect
+    .poll(async () => {
+      const texts = await page
+        .locator("li[data-node-id] > .outline-row .node-text")
+        .allTextContents();
+      return texts.filter(
+        (text) => text === "first-capture" || text === "second-capture",
+      );
+    })
+    .toEqual(["first-capture", "second-capture"]);
+});
+
+test("Enter commits and closes; the off-page toast's 'Go there' opens the captured node", async ({
+  page,
+}) => {
+  await load(page);
+  // We're on the top-level home view, NOT on Today -- so a capture to Today is
+  // off-page and must announce itself.
+  await openQuickAdd(page);
+  await type(page, "toasted-note");
+  await page.keyboard.press("Enter");
+  await expect(dialog(page)).toBeHidden();
+
+  const toast = toastByText(page, "Added to Today");
+  await expect(toast).toBeVisible({ timeout: 10_000 });
+
+  // "Go there" zooms to Today, where the capture is waiting.
+  await toast.getByRole("button", { name: "Go there" }).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await expect(rowWithText(page, "toasted-note")).toBeVisible({
+    timeout: 10_000,
+  });
+});
+
+test("Enter fires no toast when you're already viewing the destination", async ({
+  page,
+}) => {
+  await load(page);
+  // Zoom into Today FIRST, so the capture lands in the view we're already on.
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  // Let navigation focus its new empty entry before the hotkey helper blurs it.
+  await expect(page.locator(".outline-row .node-text:focus")).toHaveText("");
+
+  await openQuickAdd(page);
+  await type(page, "silent-note");
+  await page.keyboard.press("Enter");
+  await expect(dialog(page)).toBeHidden();
+
+  // On-page: the node is already on screen, so no toast interrupts.
+  await expect(rowWithText(page, "silent-note")).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(toastByText(page, "Added to")).toHaveCount(0);
+});
+
+test("/todo shows the checkbox inline once the capture is born", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+
+  await type(page, "grab coffee");
+  // Turn the born capture into a to-do via the slash palette.
+  await page.keyboard.type(" /todo");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Enter");
+
+  // The Seam-F checkbox now renders inline in the mini-editor (flow 3), just
+  // like a normal node -- proving the third render path wires the node slots.
+  await expect(dialog(page).getByRole("checkbox")).toBeVisible();
+});
+
+test("progressive Escape: the first press closes an open menu, the next closes the dialog", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+
+  // Open the `/` palette, then Escape once -- the menu closes but the dialog
+  // stays (Base UI's document Escape listener is stopped while a listbox is up).
+  await type(page, "note ");
+  await page.keyboard.type("/");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+  await expect(dialog(page)).toBeVisible();
+
+  // A second Escape now closes the whole overlay.
+  await page.keyboard.press("Escape");
+  await expect(dialog(page)).toBeHidden();
+});
+
+test("open + abandon (no keystroke) leaves no today note (lazy resolve)", async ({
+  page,
+}) => {
+  await load(page);
+  await pressQuickAddKey(page);
+  await expect(dialog(page)).toBeVisible();
+  // The chip reads Today immediately (label is known without creating anything).
+  await expect(destChip(page)).toHaveAttribute("data-quick-add-dest", "Today");
+  await page.keyboard.press("Escape");
+  await expect(dialog(page)).toBeHidden();
+  // Nothing was typed, so today's note was never minted -- no Daily container.
+  await expect(rowWithText(page, "Daily")).toHaveCount(0);
+});
+
+test("discard-if-empty: a typed-then-cleared capture leaves nothing", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+
+  await type(page, "ephemeral");
+  // Clear it back to empty, then close.
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Escape");
+  await expect(dialog(page)).toBeHidden();
+
+  // Open Today: the cleared capture must not be there.
+  await todayButton(page).click();
+  await expect(page).toHaveURL(/\/[^/]+$/);
+  await expect(rowWithText(page, "ephemeral")).toHaveCount(0);
+});
+
+test("a captured node survives closing (commit-immediately)", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+  await type(page, "kept-on-close");
+  // No Enter -- just close. A non-empty draft is already live in Today.
+  await page.keyboard.press("Escape");
+  await expect(dialog(page)).toBeHidden();
+
+  await todayButton(page).click();
+  await expect(rowWithText(page, "kept-on-close")).toBeVisible();
+});
+
+test("the Today chip retargets the current capture", async ({ page }) => {
+  await load(page);
+  await openQuickAdd(page);
+  await type(page, "moved-capture");
+
+  // Open the retarget picker (an anchored popover over the chip) and choose
+  // Bravo -- the picker input is portaled but reachable by its placeholder.
+  await destChip(page).click();
+  const picker = page.getByPlaceholder("Capture into…");
+  await expect(picker).toBeVisible();
+  await picker.fill("Bravo");
+  await page.getByRole("option", { name: "Bravo" }).click();
+
+  // The chip now reads Bravo, and the node lives under Bravo (not Today).
+  await expect(destChip(page)).toHaveAttribute("data-quick-add-dest", "Bravo");
+  await page.keyboard.press("Escape");
+
+  const moved = rowWithText(page, "moved-capture");
+  await expect(moved).toBeVisible();
+  const parentId = await moved.evaluate(
+    (el) =>
+      el.closest("li[data-node-id]")?.getAttribute("data-parent-id") ?? null,
+  );
+  expect(parentId).toBe("bravo");
+});
+
+test("tags and the slash palette work inside the mini-editor", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+
+  // A #tag folds into a chip live while composing.
+  await type(page, "read #books");
+  await expect(dialog(page).locator('.tag[data-tag="books"]')).toBeVisible();
+
+  // "/" opens the curated command palette; the structural verbs are absent.
+  await page.keyboard.type(" /");
+  const palette = page.getByRole("listbox");
+  await expect(palette).toBeVisible();
+  await expect(palette).toContainText("Paragraph");
+  await expect(palette).not.toContainText("Move");
+  await expect(palette).not.toContainText("Delete");
+});
+
+// The async-born lifecycle: with the daily claim resolving in a microtask (the
+// Map mock), the in-flight-born window never happens, hiding a cluster of race
+// bugs. These specs HOLD the real daily claim request open, drive
+// the interfering action, then release -- so each race is actually exercised.
+test("clear during an in-flight born, then retype: the retype still lands (bug 1)", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+
+  const gate = await holdDailyClaims(page);
+  await type(page, "aaa"); // born starts, blocked on the held resolve
+  await gate.seen;
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press("Backspace"); // cleared while borning
+  gate.release(); // born settles against empty text -> creates nothing
+  // History's drain barrier includes the durable scaffold echo and empty born,
+  // unlike the optimistic Daily row. Retype only after that capture finishes.
+  await page.evaluate(async () => {
+    const historyPath = "/src/data/history.ts";
+    const runtimePath = "/src/data/runtime.ts";
+    const [{ waitForPendingCapturesE }, { appRuntime }] = await Promise.all([
+      import(historyPath),
+      import(runtimePath),
+    ]);
+    await appRuntime.runPromise(waitForPendingCapturesE);
+  });
+  // The now-idle draft must accept a fresh keystroke (no poisoned dead promise).
+  await type(page, "bbb");
+  await commitNext(page);
+
+  await expect(dialog(page)).toContainText("bbb");
+  await page.keyboard.press("Escape");
+  await todayButton(page).click();
+  await expect(rowWithText(page, "bbb")).toBeVisible({ timeout: 10_000 });
+  await expect(rowWithText(page, "aaa")).toHaveCount(0);
+});
+
+test("retarget then Enter: the NEXT capture resets to Today (bug 2)", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+
+  await type(page, "note-one");
+  await destChip(page).click();
+  await page.getByPlaceholder("Capture into…").fill("Bravo");
+  await page.getByRole("option", { name: "Bravo" }).click();
+  await expect(destChip(page)).toHaveAttribute("data-quick-add-dest", "Bravo");
+  await commitNext(page); // files note-one under Bravo, keeps the overlay open
+
+  // The fresh draft must be back on Today, not still Bravo.
+  await expect(destChip(page)).toHaveAttribute("data-quick-add-dest", "Today");
+  await type(page, "note-two");
+  await commitNext(page);
+
+  await expect(dialog(page)).toContainText("note-two");
+  await page.keyboard.press("Escape");
+
+  await expect(rowWithText(page, "note-one")).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(rowWithText(page, "note-two")).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect.poll(() => parentIdOf(page, "note-one")).toBe("bravo");
+  // note-two must NOT have inherited Bravo -- it belongs to today's note.
+  await expect.poll(() => parentIdOf(page, "note-two")).not.toBe("bravo");
+});
+
+test("retarget DURING an in-flight born lands under the pick (bug 3)", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+
+  const gate = await holdDailyClaims(page);
+  await type(page, "relocated"); // born starts, blocked
+  await gate.seen;
+  await destChip(page).click(); // retarget while borning
+  await page.getByPlaceholder("Capture into…").fill("Charlie");
+  await page.getByRole("option", { name: "Charlie" }).click();
+  gate.release(); // born resolves under the NEW target
+
+  await commitNext(page);
+  await expect(dialog(page)).toContainText("relocated");
+  await page.keyboard.press("Escape");
+
+  await expect(rowWithText(page, "relocated")).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect.poll(() => parentIdOf(page, "relocated")).toBe("charlie");
+});
+
+test("/todo during an in-flight born makes a task, not a throw (bug 4)", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await load(page);
+  await openQuickAdd(page);
+
+  const gate = await holdDailyClaims(page);
+  await type(page, "buy milk"); // born starts, blocked; node id is the placeholder
+  await gate.seen;
+  await page.keyboard.type(" /todo");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Enter"); // selects To-do -> intent queued, not applied to placeholder
+  gate.release(); // born creates the node + applies the queued task intent
+
+  await commitNext(page); // commit, keep the overlay open to read the session list
+  await expect(dialog(page)).toContainText("buy milk");
+  await page.keyboard.press("Escape");
+  await todayButton(page).click();
+
+  const row = rowWithText(page, "buy milk");
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await expect(row.getByRole("checkbox")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("rapid-fire Cmd+Enter preserves order under a slow resolve (bug 6)", async ({
+  page,
+}) => {
+  await load(page);
+  await openQuickAdd(page);
+
+  const gate = await holdDailyClaims(page);
+  await type(page, "alpha-cap");
+  await gate.seen;
+  await commitNext(page);
+  // resetDraft clears the editor synchronously even while the born is held;
+  // wait for that before the next type so keystrokes aren't dropped by the
+  // post-commit re-render under load.
+  await expect(editor(page)).toHaveText("");
+  await type(page, "beta-cap");
+  await commitNext(page);
+  gate.release(); // both borns unblock; creates must run in order
+
+  await expect(dialog(page)).toContainText("alpha-cap");
+  await expect(dialog(page)).toContainText("beta-cap");
+  await page.keyboard.press("Escape");
+  await todayButton(page).click();
+
+  const first = rowWithText(page, "alpha-cap");
+  const second = rowWithText(page, "beta-cap");
+  await expect(first).toBeVisible({ timeout: 10_000 });
+  await expect(second).toBeVisible({ timeout: 10_000 });
+  // Compare a single live snapshot, not row handles that can detach while
+  // the virtualized Today view settles.
+  await expect
+    .poll(async () => {
+      const texts = await page
+        .locator("li[data-node-id] > .outline-row .node-text")
+        .allTextContents();
+      return texts.filter(
+        (text) => text === "alpha-cap" || text === "beta-cap",
+      );
+    })
+    .toEqual(["alpha-cap", "beta-cap"]);
+});
+
+// The FAB is a coarse-pointer surface (ADR 0030's presence seam), so drive it in
+// Chromium mobile emulation where `(pointer: coarse)` actually matches. The
+// overlay's geometry is checked with synthetic visualViewport events; real
+// keyboard animation remains on the manual iPhone checklist. Also covers the
+// FAB's not-editing visibility.
+test.describe("quick-add mobile FAB (coarse pointer)", () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  const fab = (page: Page) => page.locator("[data-quick-add-fab]");
+
+  test("the overlay follows keyboard resize and pan, then restores its bottom anchor", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 412, height: 900 });
+    await load(page);
+    await fab(page).tap();
+    await expect(dialog(page)).toBeVisible();
+
+    await page.evaluate(() => {
+      const vv = window.visualViewport!;
+      Object.defineProperties(vv, {
+        height: { configurable: true, value: 537 },
+        offsetTop: { configurable: true, value: 103 },
+      });
+      vv.dispatchEvent(new Event("resize"));
+      vv.dispatchEvent(new Event("scroll"));
+    });
+    await expect
+      .poll(() =>
+        dialog(page).evaluate((el) => el.getBoundingClientRect().bottom),
+      )
+      .toBe(624); // 103 + 537 visible bottom, minus the existing 16px inset.
+
+    await page.evaluate(() => {
+      const vv = window.visualViewport!;
+      Object.defineProperties(vv, {
+        height: { configurable: true, value: 900 },
+        offsetTop: { configurable: true, value: 0 },
+      });
+      vv.dispatchEvent(new Event("resize"));
+    });
+    await expect
+      .poll(() =>
+        dialog(page).evaluate((el) => el.getBoundingClientRect().bottom),
+      )
+      .toBe(884);
+  });
+
+  test("is hidden while a bullet is being edited (complement of the mobile bar)", async ({
+    page,
+  }) => {
+    await load(page);
+    await expect(fab(page)).toBeVisible();
+    // Focus a bullet -> editing -> the FAB yields to the mobile actions bar.
+    const bullet = page.locator(
+      'li[data-node-id="alpha"] > .outline-row .node-text',
+    );
+    await bullet.tap();
+    await expect(bullet).toBeFocused();
+    await expect(fab(page)).toBeHidden();
+    // Blur back out -> the FAB returns.
+    await bullet.evaluate((el) => {
+      if (el instanceof HTMLElement) el.blur();
+    });
+    await expect(fab(page)).toBeVisible();
+  });
+});

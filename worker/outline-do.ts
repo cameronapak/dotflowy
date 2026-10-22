@@ -1,57 +1,128 @@
 /// <reference types="@cloudflare/workers-types" />
 
-import { DurableObject } from 'cloudflare:workers'
+import { DurableObject } from "cloudflare:workers";
+import { Schema } from "effect";
 
-import type { ChangeFrame, ChangeOp, Node, ServerMessage } from '../src/data/wire-schema'
+import type {
+  CalendarSyncState,
+  ChangeFrame,
+  ChangeOp,
+  Node,
+  ServerMessage,
+} from "../src/data/wire-schema";
+import type { OutlineSnapshot, SnapshotKvRow } from "./backup";
+import type {
+  CaptureInput,
+  CaptureReceipt,
+  CaptureResult,
+} from "./capture-input";
+import type {
+  ClassicRecoveryReceipt,
+  PreserveClassicReceipt,
+} from "./lunora-recovery";
+import type { RestorePoint } from "./restore";
+import type { NodesPatchBody } from "./wire";
+
+import {
+  DEFAULT_WEEK_START,
+  dayKeyToScaffoldChain,
+  scaffoldKeyKind,
+  type WeekStart,
+} from "../src/data/date-links";
+import { parseNodeLinks } from "../src/data/node-links";
+import { buildTreeIndex } from "../src/data/tree";
+import {
+  planWeekStartMigration,
+  type DailyIndexRow,
+} from "../src/data/week-start-migration";
+import { SNAPSHOT_VERSION } from "./backup";
+import { canResumeChangelog, planChangeFrames } from "./changelog";
+import { validateLockedPatches, validateLockedWrite } from "./lock-policy";
+import {
+  classicSnapshotsEquivalent,
+  validateNodeGraph,
+} from "./lunora-retirement";
+import { planAddToDaily } from "./outline-ops";
+import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
+import { APP_VERSION } from "./version";
 
 // The wire types (`Node`, `ChangeOp`, `ChangeFrame`, `ServerMessage`) come from
 // the shared wire module — the one leaf the client and the Worker both derive
 // from, so the DO can't drift from what the client sends. Re-export the two the
 // existing importers (worker/index.ts) resolve from here.
-export type { ChangeOp, Node }
+export type { ChangeOp, Node };
 
 /** A row as stored in the DO's SQLite — booleans are 0/1 integers, and there is
  *  no `owner` column: the DO instance *is* the owner scope. */
 interface NodeRow {
-  id: string
-  parentId: string | null
-  prevSiblingId: string | null
-  text: string
-  isTask: number
-  completed: number
-  collapsed: number
-  bookmarkedAt: number | null
-  mirrorOf: string | null
-  createdAt: number
-  updatedAt: number
-  origin: string | null
+  id: string;
+  parentId: string | null;
+  prevSiblingId: string | null;
+  text: string;
+  isTask: number;
+  completed: number;
+  collapsed: number;
+  bookmarkedAt: number | null;
+  locked: number;
+  mirrorOf: string | null;
+  createdAt: number;
+  updatedAt: number;
+  origin: string | null;
+  kind: string | null;
 }
 
 /** A side-collection row, as carried during the one-time D1 import. */
 export interface KvRow {
-  collection: string
-  key: string
-  value: unknown
+  collection: string;
+  key: string;
+  value: unknown;
 }
 
-type SqlVal = string | number | null
+/** A kv claim value: the candidate row, narrowed to what callers store today
+ *  (the daily-index claim). Extending to richer side-collection payloads means
+ *  widening this owner contract, not passing untyped JSON. */
+export interface KvClaim {
+  key: string;
+  nodeId: string;
+}
+
+export interface RetirementStatus {
+  frozenBy: string | null;
+  appliedMigrationId: string | null;
+}
+
+export type WeekStartMigrationResult =
+  | { weekStart: WeekStart; seq: number }
+  | { error: "node_limit" | "locked" };
+
+type SqlVal = string | number | null;
+
+/** One decoded PATCH update as the Worker's boundary schema produced it
+ *  (ADR 0010: the changes record is open; the DO filters it against its
+ *  writable-column allowlist at the write). */
+type PatchUpdate = (typeof NodesPatchBody.Type)["updates"][number];
+/** One value from a PATCH changes record, still uncoerced. */
+type FieldChangeValue = PatchUpdate["changes"][string];
 
 /** Columns a client may write, and which of them are stored as 0/1 booleans.
  *  The dynamic PATCH builds its SQL only from this allowlist, so it can't be
  *  injected. */
-const BOOL_COLUMNS = new Set(['isTask', 'completed', 'collapsed'])
+const BOOL_COLUMNS = new Set(["isTask", "completed", "collapsed", "locked"]);
 const WRITABLE_COLUMNS = new Set([
-  'parentId',
-  'prevSiblingId',
-  'text',
-  'isTask',
-  'completed',
-  'collapsed',
-  'bookmarkedAt',
-  'mirrorOf',
-  'createdAt',
-  'updatedAt',
-])
+  "parentId",
+  "prevSiblingId",
+  "text",
+  "isTask",
+  "completed",
+  "collapsed",
+  "bookmarkedAt",
+  "locked",
+  "mirrorOf",
+  "createdAt",
+  "updatedAt",
+  // `setKind` is a field edit (a PATCH), so the column must be writable here.
+  "kind",
+]);
 
 // --- Realtime sync protocol -------------------------------------------------
 // `ChangeFrame` (the unit recordChange returns to broadcastChange — the SQL
@@ -63,13 +134,19 @@ const WRITABLE_COLUMNS = new Set([
 /** client -> DO. The only inbound message: the handshake, carrying the client's
  *  last-applied seq (null on a fresh/forced-resync connect). */
 interface HelloMessage {
-  type: 'hello'
-  since: number | null
+  type: "hello";
+  since: number | null;
 }
 
 /** How many recent change frames the DO retains for reconnect replay. A client
  *  offline past this many edits falls back to a full snapshot. */
-const CHANGELOG_KEEP = 1000
+const CHANGELOG_KEEP = 1000;
+
+/** Delay before `ctx.abort()` fires the armed point-in-time restore. The restore
+ *  is already persisted by `onNextSessionRestoreBookmark`, so this only has to
+ *  outlast the RPC response leaving the DO — a botched abort still applies on the
+ *  next natural restart. See `restoreToTime`. */
+const RESTORE_ABORT_DELAY_MS = 1000;
 
 function rowToNode(r: NodeRow): Node {
   return {
@@ -81,20 +158,29 @@ function rowToNode(r: NodeRow): Node {
     completed: !!r.completed,
     collapsed: !!r.collapsed,
     bookmarkedAt: r.bookmarkedAt,
+    locked: !!r.locked,
     mirrorOf: r.mirrorOf,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     origin: r.origin,
-  }
+    // The column is a plain TEXT, so narrow it back to the literal union: an
+    // unrecognized value reads as a bullet rather than escaping into a frame the
+    // client's `ServerMessageSchema` would then reject (ADR 0045 / ADR 0014).
+    kind: r.kind === "paragraph" || r.kind === "embed" ? r.kind : null,
+  };
 }
 
-function toSqlValue(key: string, value: unknown): SqlVal {
-  if (BOOL_COLUMNS.has(key)) return value ? 1 : 0
-  return (value ?? null) as SqlVal
+function toSqlValue(key: string, value: FieldChangeValue): SqlVal {
+  if (BOOL_COLUMNS.has(key)) return value ? 1 : 0;
+  // SAFETY: after the bool branch, value is a Schema-decoded ChangeOp field: string, number, or null, the whole SqlVal set.
+  return (value ?? null) as SqlVal;
 }
 
 interface Env {
-  // The DO uses only its own colocated SQLite storage; it needs no bindings yet.
+  // The DO uses only its own colocated SQLite storage; it needs no bindings.
+  /** Public Sentry DSN (wrangler.jsonc var), read by the Sentry DO wrapper in
+   *  worker/index.ts (#227). Unset => error monitoring is dormant. */
+  SENTRY_DSN?: string;
 }
 
 /**
@@ -110,15 +196,15 @@ interface Env {
  * Worker translates each request into one RPC call below.
  */
 export class UserOutlineDO extends DurableObject<Env> {
-  private sql: SqlStorage
+  private sql: SqlStorage;
 
   constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env)
-    this.sql = ctx.storage.sql
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
     // Schema setup only — never hold blockConcurrencyWhile across external I/O.
     // Runs before any request is served, so no reader ever sees a half-built
     // schema (e.g. getNodes reading a missing `mirrorOf` column).
-    ctx.blockConcurrencyWhile(async () => this.migrate())
+    ctx.blockConcurrencyWhile(async () => this.migrate());
   }
 
   // --- schema migration ------------------------------------------------------
@@ -137,8 +223,8 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  (This idempotent-baseline / exactly-once-tail split is the load-bearing
    *  invariant — see ADR 0023.) */
   private static readonly MIGRATIONS: ReadonlyArray<{
-    version: number
-    up: (sql: SqlStorage) => void
+    version: number;
+    up: (sql: SqlStorage) => void;
   }> = [
     {
       version: 1,
@@ -173,17 +259,21 @@ export class UserOutlineDO extends DurableObject<Env> {
             seq INTEGER PRIMARY KEY,
             ops TEXT NOT NULL
           );
-        `)
+        `);
         // Pre-mirror `nodes` tables (a deployed DO) were created without
         // `mirrorOf`, and `CREATE TABLE IF NOT EXISTS` above no-ops for them.
         // Add the column once, guarded by a column-existence check since SQLite
         // has no `ADD COLUMN IF NOT EXISTS`. A fresh DO already has it from the
         // CREATE, so this skips. The guard lives here (not in a later step)
         // because v1 is the one migration that can meet an already-populated DB.
+        // SAFETY: PRAGMA table_info rows always carry a `name` column in SQLite.
         const hasMirrorOf = (
-          sql.exec(`PRAGMA table_info(nodes)`).toArray() as Array<{ name: string }>
-        ).some((c) => c.name === 'mirrorOf')
-        if (!hasMirrorOf) sql.exec(`ALTER TABLE nodes ADD COLUMN mirrorOf TEXT`)
+          sql.exec(`PRAGMA table_info(nodes)`).toArray() as Array<{
+            name: string;
+          }>
+        ).some((c) => c.name === "mirrorOf");
+        if (!hasMirrorOf)
+          sql.exec(`ALTER TABLE nodes ADD COLUMN mirrorOf TEXT`);
       },
     },
     {
@@ -194,27 +284,72 @@ export class UserOutlineDO extends DurableObject<Env> {
       // to NULL, which is exactly the semantics we want.
       version: 2,
       up: (sql) => {
-        sql.exec(`ALTER TABLE nodes ADD COLUMN origin TEXT`)
+        sql.exec(`ALTER TABLE nodes ADD COLUMN origin TEXT`);
       },
     },
-  ]
+    {
+      // Node kind (ADR 0045): NULL = a bullet or a task (per `isTask`), which is
+      // exactly what every pre-existing row is, so ADD COLUMN's NULL default is
+      // the correct backfill. Exactly-once tail step, no existence guard.
+      version: 3,
+      up: (sql) => {
+        sql.exec(`ALTER TABLE nodes ADD COLUMN kind TEXT`);
+      },
+    },
+    {
+      // Per-page write correlation. NULL marks retained rows written by old
+      // clients and non-browser callers, which remain genuine external changes.
+      version: 4,
+      up: (sql) => {
+        sql.exec(`ALTER TABLE changelog ADD COLUMN clientId TEXT`);
+      },
+    },
+    {
+      // Exactly-once capture attempts (ADR 0065): one row per attemptId so a
+      // retried shortcut captures once, with the fingerprint that detects an
+      // attempt ID reused for different content.
+      version: 5,
+      up: (sql) => {
+        sql.exec(`CREATE TABLE capture_receipt (
+          attemptId TEXT PRIMARY KEY,
+          fingerprint TEXT NOT NULL,
+          nodeId TEXT NOT NULL,
+          dailyNoteId TEXT NOT NULL,
+          date TEXT NOT NULL,
+          createdAt INTEGER NOT NULL
+        )`);
+      },
+    },
+    {
+      // Owner-controlled subtree locking (ADR 0067). Existing nodes are
+      // unlocked; descendants derive effective state without row rewrites.
+      version: 6,
+      up: (sql) => {
+        sql.exec(
+          `ALTER TABLE nodes ADD COLUMN locked INTEGER NOT NULL DEFAULT 0`,
+        );
+      },
+    },
+  ];
 
   /** Run every migration newer than the recorded schema version, each atomically
    *  (its DDL + the version bump commit together or roll back together). */
   private migrate(): void {
     // Bootstrap: `meta` must exist before we can read the version. Idempotent —
     // a fresh DO has no tables; a deployed DO already has `meta` populated.
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
-    const current = this.schemaVersion()
+    this.sql.exec(
+      `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+    );
+    const current = this.schemaVersion();
     for (const step of UserOutlineDO.MIGRATIONS) {
-      if (step.version <= current) continue
+      if (step.version <= current) continue;
       this.ctx.storage.transactionSync(() => {
-        step.up(this.sql)
+        step.up(this.sql);
         this.sql.exec(
           "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
           String(step.version),
-        )
-      })
+        );
+      });
     }
   }
 
@@ -222,9 +357,11 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  Same meta single-column read shape as `currentSeq`. */
   private schemaVersion(): number {
     const row = this.sql
-      .exec<{ value: string }>("SELECT value FROM meta WHERE key = 'schema_version'")
-      .toArray()[0]
-    return row ? Number(row.value) : 0
+      .exec<{ value: string }>(
+        "SELECT value FROM meta WHERE key = 'schema_version'",
+      )
+      .toArray()[0];
+    return row ? Number(row.value) : 0;
   }
 
   /** Run a read query and return its rows as `T[]`. The one seam for the
@@ -234,15 +371,16 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  (`currentSeq`, `getKv`, `initialFrame`, …) keep using the type-checked
    *  `exec<{…}>()` overload, which needs no cast. */
   private readRows<T>(query: string, ...params: SqlVal[]): T[] {
-    return this.sql.exec(query, ...params).toArray() as unknown as T[]
+    // SAFETY: each caller's SELECT column list defines T; every call site's column list matches its T.
+    return this.sql.exec(query, ...params).toArray() as T[];
   }
 
   // --- nodes -----------------------------------------------------------------
 
   getNodes(): Node[] {
     return this.readRows<NodeRow>(
-      'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin FROM nodes',
-    ).map(rowToNode)
+      "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, locked, mirrorOf, createdAt, updatedAt, origin, kind FROM nodes",
+    ).map(rowToNode);
   }
 
   /** Upsert one node into SQLite and return the change op describing it (insert
@@ -252,18 +390,20 @@ export class UserOutlineDO extends DurableObject<Env> {
    *  type (the client's sync layer distinguishes them). */
   private putNode(n: Node): ChangeOp {
     const existed =
-      this.sql.exec('SELECT 1 FROM nodes WHERE id = ?', n.id).toArray().length > 0
+      this.sql.exec("SELECT 1 FROM nodes WHERE id = ?", n.id).toArray().length >
+      0;
     // `origin` is WRITE-ONCE: it's in the INSERT column list but deliberately
     // absent from the ON CONFLICT SET, so a later upsert (a move/reparent that
     // re-puts the full node) can never flip a node's provenance. Existing rows
     // keep whatever they were born with; legacy rows stay NULL (human).
     this.sql.exec(
-      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO nodes (id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, locked, mirrorOf, createdAt, updatedAt, origin, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          parentId=excluded.parentId, prevSiblingId=excluded.prevSiblingId, text=excluded.text,
          isTask=excluded.isTask, completed=excluded.completed, collapsed=excluded.collapsed,
-         bookmarkedAt=excluded.bookmarkedAt, mirrorOf=excluded.mirrorOf, updatedAt=excluded.updatedAt`,
+         bookmarkedAt=excluded.bookmarkedAt, locked=excluded.locked, mirrorOf=excluded.mirrorOf, updatedAt=excluded.updatedAt,
+         kind=excluded.kind`,
       n.id,
       n.parentId,
       n.prevSiblingId,
@@ -272,92 +412,633 @@ export class UserOutlineDO extends DurableObject<Env> {
       n.completed ? 1 : 0,
       n.collapsed ? 1 : 0,
       n.bookmarkedAt,
+      n.locked ? 1 : 0,
       n.mirrorOf,
       n.createdAt,
       n.updatedAt,
       n.origin,
-    )
-    return { op: existed ? 'update' : 'insert', value: n }
+      n.kind,
+    );
+    return { op: existed ? "update" : "insert", value: n };
   }
 
   /** Delete one node from SQLite and return its delete op. Shared by deleteNodes
    *  and applyBatch. */
   private deleteNodeRow(id: string): ChangeOp {
-    this.sql.exec('DELETE FROM nodes WHERE id = ?', id)
-    return { op: 'delete', key: id }
+    this.sql.exec("DELETE FROM nodes WHERE id = ?", id);
+    return { op: "delete", key: id };
   }
 
   upsertNodes(nodes: readonly Node[]): void {
+    this.assertWritable();
+    const ops = nodes.map((value) => ({ op: "update" as const, value }));
+    const violation = validateLockedWrite(this.getNodes(), ops);
+    if (violation) throw new Error(`NODE_LOCKED: ${violation.reason}`);
     this.broadcastChange(
       this.ctx.storage.transactionSync(() =>
         this.recordChange(nodes.map((n) => this.putNode(n))),
       ),
-    )
+    );
+  }
+
+  // --- free-tier node ceiling (#170) -----------------------------------------
+  // The DO enforces a numeric cap it is TOLD by its trusted Worker; it never
+  // learns what a "plan" is (the Worker resolves that from D1 via getPlan and
+  // passes the limit). `null` = unlimited (paid). The check runs INSIDE the
+  // write transaction and, on reject, returns without applying — so the commit
+  // is a clean no-op and no frame is broadcast (the batch simply didn't happen).
+  // Only genuine growth past the ceiling is refused; see batchExceedsNodeLimit.
+
+  /** Total live node rows (the cap counts every node — bullets, tasks, mirrors,
+   *  containers). A single indexed COUNT: sub-millisecond even at 17k rows, so no
+   *  maintained counter is worth its drift/backfill risk at a 10,000-node cap. */
+  private nodeCount(): number {
+    const row = this.sql
+      .exec<{ n: number }>("SELECT COUNT(*) AS n FROM nodes")
+      .toArray()[0];
+    return row?.n ?? 0;
+  }
+
+  private nodeExists(id: string): boolean {
+    return (
+      this.sql.exec("SELECT 1 FROM nodes WHERE id = ?", id).toArray().length > 0
+    );
+  }
+
+  /** ADR 0061 write fence. Reads and account deletion remain available. */
+  private assertWritable(): void {
+    const row = this.sql
+      .exec<{ value: string }>(
+        "SELECT value FROM meta WHERE key = 'write_freeze'",
+      )
+      .toArray()[0];
+    if (row) throw new Error("OUTLINE_FROZEN");
+  }
+
+  private metaValue(key: string): string | null {
+    return (
+      this.sql
+        .exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key)
+        .toArray()[0]?.value ?? null
+    );
+  }
+
+  private putImmutableMeta(key: string, value: string): void {
+    this.sql.exec("INSERT INTO meta (key, value) VALUES (?, ?)", key, value);
+  }
+
+  private disabledStoredPreference(value: string): boolean {
+    try {
+      return (
+        Schema.decodeUnknownOption(
+          Schema.Struct({ enabled: Schema.Literal(false) }),
+        )(JSON.parse(value))._tag === "Some"
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private forceRetiredPreferenceOff(): void {
+    if (!this.isLunoraRetired()) return;
+    const current = this.sql
+      .exec<{ value: string }>(
+        "SELECT value FROM kv WHERE collection = 'account-prefs' AND key = 'lunora-beta'",
+      )
+      .toArray()[0];
+    if (current && this.disabledStoredPreference(current.value)) return;
+    this.sql.exec(
+      `INSERT INTO kv (collection, key, value, updatedAt) VALUES ('account-prefs', 'lunora-beta', ?, ?)
+       ON CONFLICT(collection, key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
+      JSON.stringify({ id: "lunora-beta", enabled: false }),
+      Date.now(),
+    );
+  }
+
+  /**
+   * `applyBatch`, gated by a free-tier node ceiling. Returns the committed seq,
+   * or `null` when the batch would grow the outline past `limit` (the Worker maps
+   * that to a 403 the client surfaces). A `null` limit skips the check entirely
+   * (paid users take the same path as ungated applyBatch, one extra no-op branch).
+   *
+   * Growth is counted by `countNetGrowth` via read-only existence probes BEFORE
+   * any write: for each DISTINCT id its LAST op wins, so a delete of an absent
+   * row, an upsert of an existing id, AND a delete+reinsert of the same id all
+   * contribute zero — only ids that end the batch newly-present count as inserts,
+   * only ids that end newly-absent as deletes. The decision
+   * (batchExceedsNodeLimit) is pure and unit-tested; here we just feed it the two
+   * net counts plus the SQLite total. Rejecting writes nothing, so the client's
+   * optimistic overlay rolls back cleanly.
+   */
+  applyBatchGated(
+    ops: readonly ChangeOp[],
+    limit: number | null,
+    clientId?: string,
+    expectedSeq?: number,
+    allowLockChanges = false,
+  ): number | null | "stale" | "locked" {
+    this.assertWritable();
+    const frames = this.ctx.storage.transactionSync(() => {
+      // History replay is conditional on exactly the state it was planned
+      // against. This check is inside the write transaction and precedes both
+      // cap probes and node writes, so rejection has no observable side effect.
+      if (expectedSeq !== undefined && this.currentSeq() !== expectedSeq)
+        return "stale" as const;
+      if (validateLockedWrite(this.getNodes(), ops, allowLockChanges))
+        return "locked" as const;
+      if (limit !== null) {
+        const { inserts, deletes } = countNetGrowth(ops, (id) =>
+          this.nodeExists(id),
+        );
+        if (batchExceedsNodeLimit(this.nodeCount(), inserts, deletes, limit))
+          return null;
+      }
+      return this.recordChange(
+        ops.map((op) =>
+          op.op === "delete"
+            ? this.deleteNodeRow(op.key)
+            : this.putNode(op.value),
+        ),
+        clientId,
+      );
+    });
+    if (frames === null || frames === "stale" || frames === "locked")
+      return frames;
+    return this.broadcastChange(frames);
+  }
+
+  /** `upsertNodes`, gated by the same ceiling (the legacy first-run/seed create
+   *  path — a raw POST could otherwise bypass the cap the batch path enforces).
+   *  Every node is an upsert, so growth = ids not already present; returns false
+   *  when applying would exceed the cap (nothing written), true otherwise. */
+  upsertNodesGated(
+    nodes: readonly Node[],
+    limit: number | null,
+    clientId?: string,
+  ): boolean | "locked" {
+    this.assertWritable();
+    const frames = this.ctx.storage.transactionSync(() => {
+      const ops = nodes.map((value) => ({ op: "update" as const, value }));
+      if (validateLockedWrite(this.getNodes(), ops)) return "locked" as const;
+      if (limit !== null) {
+        const newIds = new Set<string>();
+        for (const n of nodes) if (!this.nodeExists(n.id)) newIds.add(n.id);
+        if (batchExceedsNodeLimit(this.nodeCount(), newIds.size, 0, limit))
+          return null;
+      }
+      return this.recordChange(
+        nodes.map((n) => this.putNode(n)),
+        clientId,
+      );
+    });
+    if (frames === null) return false;
+    if (frames === "locked") return frames;
+    this.broadcastChange(frames);
+    return true;
   }
 
   /**
    * Apply a heterogeneous batch of ops (insert/update/delete) as ONE atomic
-   * frame: every SQL write — the ops AND the seq bump / changelog row — runs
+   * commit: every SQL write — the ops AND the seq bumps / changelog rows — runs
    * inside a single `transactionSync`, so a throw on any op rolls the whole batch
-   * back; only on full commit does `broadcastChange` emit one frame (one seq).
-   * This is the structural write path — an insert-and-repoint (or delete-and-
-   * repoint) lands all-or-nothing, so no reader ever observes a half-relinked
-   * sibling chain, even if an op faults mid-loop. Returns the seq the frame
-   * committed at (the current seq if the batch was empty), which the originating
-   * client waits for before dropping its optimistic overlay (so a fast follow-up
-   * edit can't read a reverted state). See docs/adr/0009 and docs/adr/0014.
+   * back; only on full commit does `broadcastChange` emit the frames. A batch
+   * over 500 ops commits as multiple consecutive-seq changelog rows/frames
+   * (chunked `recordChange`, issue #124 — SQLite's 2 MB row cap), but the
+   * commit itself is still all-or-nothing. This is the structural write path —
+   * an insert-and-repoint (or delete-and-repoint) lands all-or-nothing, so no
+   * reader ever observes a half-relinked sibling chain, even if an op faults
+   * mid-loop. Returns the FINAL seq the batch committed at (the current seq if
+   * the batch was empty), which the originating client waits for before
+   * dropping its optimistic overlay (so a fast follow-up edit can't read a
+   * reverted state). See docs/adr/0009 and docs/adr/0014.
    *
    * Insert/update ops carry the full post-mutation node (an upsert); the DO
    * recomputes insert-vs-update from row existence, so the client's op type is
    * advisory. Apply order follows the array, but within one frame the ops are
    * absolute (keyed by id), so the final state is order-independent.
    */
-  applyBatch(ops: readonly ChangeOp[]): number {
-    return this.broadcastChange(
-      this.ctx.storage.transactionSync(() => {
-        const out: ChangeOp[] = []
-        for (const op of ops) {
-          out.push(op.op === 'delete' ? this.deleteNodeRow(op.key) : this.putNode(op.value))
-        }
-        return this.recordChange(out)
-      }),
-    )
+  applyBatch(ops: readonly ChangeOp[], expectedWeekStart?: WeekStart): number {
+    this.assertWritable();
+    const frames = this.ctx.storage.transactionSync(() => {
+      if (
+        expectedWeekStart !== undefined &&
+        this.currentWeekStart() !== expectedWeekStart
+      ) {
+        throw new Error(
+          "CALENDAR_CHANGED: retry against the current Week start",
+        );
+      }
+      const violation = validateLockedWrite(this.getNodes(), ops);
+      if (violation) throw new Error(`NODE_LOCKED: ${violation.reason}`);
+      const out: ChangeOp[] = [];
+      for (const op of ops) {
+        out.push(
+          op.op === "delete"
+            ? this.deleteNodeRow(op.key)
+            : this.putNode(op.value),
+        );
+      }
+      return this.recordChange(out);
+    });
+    return this.broadcastChange(frames);
   }
 
-  patchNodes(updates: readonly { id: string; changes: Record<string, unknown> }[]): void {
-    this.broadcastChange(
-      this.ctx.storage.transactionSync(() => {
-        const ops: ChangeOp[] = []
-        for (const u of updates) {
-          const sets: string[] = []
-          const vals: SqlVal[] = []
-          for (const [k, v] of Object.entries(u.changes)) {
-            if (!WRITABLE_COLUMNS.has(k)) continue
-            sets.push(`${k} = ?`)
-            vals.push(toSqlValue(k, v))
-          }
-          if (!sets.length) continue
-          vals.push(u.id)
-          this.sql.exec(`UPDATE nodes SET ${sets.join(', ')} WHERE id = ?`, ...vals)
-          // Broadcast the full post-patch row (canonical booleans, every field) so
-          // a remote client applies an unambiguous update regardless of rowUpdateMode.
-          const row = this.readRows<NodeRow>(
-            'SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, mirrorOf, createdAt, updatedAt, origin FROM nodes WHERE id = ?',
-            u.id,
-          )[0] as NodeRow | undefined
-          if (row) ops.push({ op: 'update', value: rowToNode(row) })
-        }
-        return this.recordChange(ops)
-      }),
-    )
+  private currentWeekStart(): WeekStart {
+    const row = this.sql
+      .exec<{ value: string }>(
+        "SELECT value FROM kv WHERE collection = 'account-prefs' AND key = 'daily:week-start'",
+      )
+      .toArray()[0];
+    if (!row) return DEFAULT_WEEK_START;
+    try {
+      const decoded = Schema.decodeUnknownOption(
+        Schema.Struct({
+          key: Schema.Literal("daily:week-start"),
+          weekStart: Schema.Literals(["sunday", "monday"]),
+        }),
+      )(JSON.parse(row.value));
+      return decoded._tag === "Some"
+        ? decoded.value.weekStart
+        : DEFAULT_WEEK_START;
+    } catch {
+      return DEFAULT_WEEK_START;
+    }
   }
 
-  deleteNodes(ids: readonly string[]): void {
+  /** Preference, mappings, and tree move together or not at all (ADR 0068). */
+  migrateWeekStart(
+    weekStart: WeekStart,
+    limit: number | null,
+  ): WeekStartMigrationResult {
+    return this.applyWeekStartMigration(weekStart, limit);
+  }
+
+  /** Canonicalize legacy keys against the preference read inside this DO turn.
+   * Automatic callers never echo a stale client-side preference back here. */
+  canonicalizeWeekStart(limit: number | null): WeekStartMigrationResult {
+    return this.applyWeekStartMigration(this.currentWeekStart(), limit);
+  }
+
+  private applyWeekStartMigration(
+    weekStart: WeekStart,
+    limit: number | null,
+  ): WeekStartMigrationResult {
+    this.assertWritable();
+    const committed = this.ctx.storage.transactionSync<
+      | {
+          result: WeekStartMigrationResult;
+          frames: ChangeFrame[];
+          calendar: CalendarSyncState;
+        }
+      | { result: { error: "node_limit" | "locked" }; frames: [] }
+    >(() => {
+      const rows = this.getKv("daily-index").map((row) =>
+        Schema.decodeUnknownSync(
+          Schema.Struct({ key: Schema.String, nodeId: Schema.String }),
+        )(row),
+      ) satisfies DailyIndexRow[];
+      const previousWeekStart = this.currentWeekStart();
+      if (
+        previousWeekStart === weekStart &&
+        rows.every(
+          (row) =>
+            scaffoldKeyKind(row.key) !== "week" || row.key.startsWith("week:"),
+        )
+      ) {
+        return {
+          result: { weekStart, seq: this.currentSeq() },
+          frames: [],
+          calendar: { weekStart },
+        };
+      }
+      const plan = planWeekStartMigration(
+        this.getNodes(),
+        rows,
+        weekStart,
+        Date.now(),
+        () => crypto.randomUUID(),
+      );
+      const growth = countNetGrowth(plan.ops, (id) => this.nodeExists(id));
+      if (
+        batchExceedsNodeLimit(
+          this.nodeCount(),
+          growth.inserts,
+          growth.deletes,
+          limit,
+        )
+      ) {
+        return { result: { error: "node_limit" }, frames: [] };
+      }
+      if (validateLockedWrite(this.getNodes(), plan.ops)) {
+        return { result: { error: "locked" }, frames: [] };
+      }
+
+      const now = Date.now();
+      for (const key of plan.deletes) {
+        this.sql.exec(
+          "DELETE FROM kv WHERE collection = 'daily-index' AND key = ?",
+          key,
+        );
+      }
+      for (const row of plan.upserts) {
+        this.sql.exec(
+          `INSERT INTO kv (collection, key, value, updatedAt)
+           VALUES ('daily-index', ?, ?, ?)
+           ON CONFLICT(collection, key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
+          row.key,
+          JSON.stringify(row),
+          now,
+        );
+      }
+      this.sql.exec(
+        `INSERT INTO kv (collection, key, value, updatedAt)
+         VALUES ('account-prefs', 'daily:week-start', ?, ?)
+         ON CONFLICT(collection, key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
+        JSON.stringify({ key: "daily:week-start", weekStart }),
+        now,
+      );
+      const frames = this.recordChange(
+        plan.ops.map((op) =>
+          op.op === "delete"
+            ? this.deleteNodeRow(op.key)
+            : this.putNode(op.value),
+        ),
+        undefined,
+        previousWeekStart !== weekStart ||
+          plan.upserts.length > 0 ||
+          plan.deletes.length > 0,
+      );
+      const seq = frames.at(-1)?.seq ?? this.currentSeq();
+      return {
+        result: { weekStart, seq },
+        frames,
+        calendar: {
+          weekStart,
+          upserts: plan.upserts,
+          deletes: plan.deletes,
+        },
+      };
+    });
+    if ("calendar" in committed) {
+      this.broadcastChange(committed.frames, committed.calendar);
+    }
+    return committed.result;
+  }
+
+  /** Claims, current-tail planning, quota, nodes, receipt, and changelog share
+   *  one synchronous transaction. No stale Worker snapshot or per-level RPCs. */
+  captureDaily(input: CaptureInput, limit: number | null): CaptureResult {
+    this.assertWritable();
+    const weekStart = this.currentWeekStart();
+    const migration = this.migrateWeekStart(weekStart, limit);
+    if ("error" in migration) {
+      if (migration.error === "node_limit") return { error: "node_limit" };
+      throw new Error("NODE_LOCKED: calendar migration blocked by a lock");
+    }
+    const committed = this.ctx.storage.transactionSync<{
+      result: CaptureResult;
+      frames: ChangeFrame[];
+    }>(() => {
+      const prior = this.sql
+        .exec<{
+          fingerprint: string;
+          nodeId: string;
+          dailyNoteId: string;
+          date: string;
+        }>(
+          "SELECT fingerprint, nodeId, dailyNoteId, date FROM capture_receipt WHERE attemptId = ?",
+          input.attemptId,
+        )
+        .toArray()[0];
+      if (prior) {
+        const result: CaptureResult =
+          prior.fingerprint !== input.fingerprint
+            ? { error: "attempt_conflict" }
+            : {
+                receipt: {
+                  saved: true,
+                  nodeId: prior.nodeId,
+                  dailyNoteId: prior.dailyNoteId,
+                  date: prior.date,
+                },
+                replayed: true,
+              };
+        return { result, frames: [] };
+      }
+      const now = Date.now();
+      const index = buildTreeIndex(this.getNodes());
+      const rows = this.getKv("daily-index").map((row) =>
+        Schema.decodeUnknownSync(
+          Schema.Struct({ key: Schema.String, nodeId: Schema.String }),
+        )(row),
+      );
+      const ids = new Map(rows.map((row) => [row.key, row.nodeId]));
+      const pending: KvRow[] = [];
+      const claim = (key: string) => {
+        const existing = ids.get(key);
+        if (existing) return existing;
+        const nodeId = crypto.randomUUID();
+        ids.set(key, nodeId);
+        pending.push({
+          collection: "daily-index",
+          key,
+          value: { key, nodeId },
+        });
+        return nodeId;
+      };
+      const containerId = claim("container");
+      const dayId = claim(input.date);
+      const chain = dayKeyToScaffoldChain(input.date, weekStart);
+      if (!chain) throw new Error("invalid capture date");
+      const levels = index.byId.has(dayId)
+        ? {}
+        : {
+            yearId: claim(chain.yearKey),
+            monthId: claim(chain.monthKey),
+            weekId: claim(chain.weekKey),
+          };
+      const plan = planAddToDaily(index, {
+        dateKey: input.date,
+        weekStart,
+        containerId,
+        dayId,
+        ...levels,
+        keyByNodeId: new Map([...ids].map(([key, id]) => [id, key])),
+        newNodeId: crypto.randomUUID(),
+        text: input.text,
+        isTask: false,
+        origin: null,
+        timestamp: now,
+      });
+      const growth = countNetGrowth(plan.ops, (id) => this.nodeExists(id));
+      if (
+        batchExceedsNodeLimit(
+          this.nodeCount(),
+          growth.inserts,
+          growth.deletes,
+          limit,
+        )
+      ) {
+        const result: CaptureResult = { error: "node_limit" };
+        return { result, frames: [] };
+      }
+      const violation = validateLockedWrite(this.getNodes(), plan.ops);
+      if (violation) throw new Error(`NODE_LOCKED: ${violation.reason}`);
+      for (const row of pending) {
+        this.sql.exec(
+          "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
+          row.collection,
+          row.key,
+          JSON.stringify(row.value),
+          now,
+        );
+      }
+      const frames = this.recordChange(
+        plan.ops.map((op) =>
+          op.op === "delete"
+            ? this.deleteNodeRow(op.key)
+            : this.putNode(op.value),
+        ),
+      );
+      const receipt: CaptureReceipt = {
+        saved: true,
+        nodeId: plan.nodeId,
+        dailyNoteId: dayId,
+        date: input.date,
+      };
+      this.sql.exec(
+        "INSERT INTO capture_receipt (attemptId, fingerprint, nodeId, dailyNoteId, date, createdAt) VALUES (?, ?, ?, ?, ?, ?)",
+        input.attemptId,
+        input.fingerprint,
+        receipt.nodeId,
+        dayId,
+        input.date,
+        now,
+      );
+      const result: CaptureResult = { receipt, replayed: false };
+      return { result, frames };
+    });
+    this.broadcastChange(committed.frames);
+    return committed.result;
+  }
+
+  /** Only the untouched node created by this receipt may receive enrichment.
+   *  Replays/deletion never recreate it; the compare and patch are atomic. */
+  upgradeCaptureText(
+    attemptId: string,
+    expected: string,
+    text: string,
+  ): boolean {
+    this.assertWritable();
+    const frames = this.ctx.storage.transactionSync(() => {
+      const row = this.sql
+        .exec<NodeRow & Record<string, SqlStorageValue>>(
+          `SELECT n.* FROM nodes n JOIN capture_receipt r ON n.id = r.nodeId
+         WHERE r.attemptId = ? AND n.text = ? AND n.updatedAt = r.createdAt`,
+          attemptId,
+          expected,
+        )
+        .toArray()[0];
+      if (!row) return [];
+      const value = { ...rowToNode(row), text, updatedAt: Date.now() };
+      if (validateLockedWrite(this.getNodes(), [{ op: "update", value }]))
+        return [];
+      return this.recordChange([this.putNode(value)]);
+    });
+    this.broadcastChange(frames);
+    return frames.length > 0;
+  }
+
+  /** Best-effort metadata must never overwrite a concurrent edit. The text
+   * comparison and patch share one transaction, including the lock guard. */
+  upgradeLinkText(nodeId: string, expected: string, text: string): boolean {
+    this.assertWritable();
+    const frames = this.ctx.storage.transactionSync(() => {
+      const row = this.sql
+        .exec<NodeRow & Record<string, SqlStorageValue>>(
+          "SELECT * FROM nodes WHERE id = ? AND text = ?",
+          nodeId,
+          expected,
+        )
+        .toArray()[0];
+      if (!row || row.mirrorOf || row.kind === "embed" || text === expected)
+        return [];
+      const value = { ...rowToNode(row), text, updatedAt: Date.now() };
+      if (validateLockedWrite(this.getNodes(), [{ op: "update", value }]))
+        return [];
+      return this.recordChange([this.putNode(value)]);
+    });
+    this.broadcastChange(frames);
+    return frames.length > 0;
+  }
+
+  patchNodes(
+    updates: readonly PatchUpdate[],
+    clientId?: string,
+    allowLockChanges = false,
+  ): number | "locked" {
+    this.assertWritable();
+    const frames = this.ctx.storage.transactionSync(() => {
+      const current = this.getNodes();
+      const planned: Array<{ id: string; changes: Partial<Node> }> = [];
+      for (const u of updates) {
+        const changes = Object.fromEntries(
+          Object.entries(u.changes).filter(([key]) =>
+            WRITABLE_COLUMNS.has(key),
+          ),
+        );
+        if (Object.keys(changes).length === 0) continue;
+        planned.push({
+          id: u.id,
+          // SAFETY: changes contains only WRITABLE_COLUMNS and the wire schema has already validated each corresponding Node field value.
+          changes: changes as Partial<Node>,
+        });
+      }
+      if (validateLockedPatches(current, planned, allowLockChanges))
+        return "locked" as const;
+      const ops: ChangeOp[] = [];
+      for (const u of updates) {
+        const sets: string[] = [];
+        const vals: SqlVal[] = [];
+        for (const [k, v] of Object.entries(u.changes)) {
+          if (!WRITABLE_COLUMNS.has(k)) continue;
+          sets.push(`${k} = ?`);
+          vals.push(toSqlValue(k, v));
+        }
+        if (!sets.length) continue;
+        vals.push(u.id);
+        this.sql.exec(
+          `UPDATE nodes SET ${sets.join(", ")} WHERE id = ?`,
+          ...vals,
+        );
+        // Broadcast the full post-patch row (canonical booleans, every field) so
+        // a remote client applies an unambiguous update regardless of rowUpdateMode.
+        // SAFETY: the SELECT lists exactly the NodeRow columns; index 0 is absent when the row vanished, hence the union.
+        const row = this.readRows<NodeRow>(
+          "SELECT id, parentId, prevSiblingId, text, isTask, completed, collapsed, bookmarkedAt, locked, mirrorOf, createdAt, updatedAt, origin, kind FROM nodes WHERE id = ?",
+          u.id,
+        )[0] as NodeRow | undefined;
+        if (row) ops.push({ op: "update", value: rowToNode(row) });
+      }
+      return this.recordChange(ops, clientId);
+    });
+    if (frames === "locked") return frames;
+    return this.broadcastChange(frames);
+  }
+
+  deleteNodes(ids: readonly string[], clientId?: string): boolean {
+    this.assertWritable();
+    const ops = ids.map((key) => ({ op: "delete" as const, key }));
+    if (validateLockedWrite(this.getNodes(), ops)) return false;
     this.broadcastChange(
       this.ctx.storage.transactionSync(() =>
-        this.recordChange(ids.map((id) => this.deleteNodeRow(id))),
+        this.recordChange(
+          ids.map((id) => this.deleteNodeRow(id)),
+          clientId,
+        ),
       ),
-    )
+    );
+    return true;
   }
 
   // --- realtime sync (WebSocket Hibernation) ---------------------------------
@@ -366,63 +1047,104 @@ export class UserOutlineDO extends DurableObject<Env> {
   private currentSeq(): number {
     const row = this.sql
       .exec<{ value: string }>("SELECT value FROM meta WHERE key = 'seq'")
-      .toArray()[0]
-    return row ? Number(row.value) : 0
+      .toArray()[0];
+    return row ? Number(row.value) : 0;
   }
 
-  /** Allocate the next monotonic sequence number and persist it. */
-  private bumpSeq(): number {
-    const next = this.currentSeq() + 1
+  /** Persist a committed sequence number (the meta cursor `currentSeq` reads). */
+  private setSeq(seq: number): void {
     this.sql.exec(
       "INSERT INTO meta (key, value) VALUES ('seq', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      String(next),
-    )
-    return next
+      String(seq),
+    );
   }
 
   /**
-   * Record a batch of ops at a new seq and prune the changelog to its window —
-   * the SQL half of a commit, run INSIDE the caller's `transactionSync` alongside
-   * the row writes so the seq bump and the changelog row roll back with the ops
-   * on any fault. A no-op for an empty batch (e.g. a patch that touched no
-   * writable columns), so the seq only advances on real changes. Returns the
-   * frame (committed seq + ops) for `broadcastChange` to emit once the
-   * transaction has committed.
+   * Record a batch of ops as ≤500-op changelog rows and prune the changelog to
+   * its window — the SQL half of a commit, run INSIDE the caller's
+   * `transactionSync` alongside the row writes so the seq bump and every
+   * changelog row roll back with the ops on any fault. A large batch (an OPML
+   * import can be thousands of ops, megabytes of JSON) is CHUNKED via
+   * `planChangeFrames` (worker/changelog.ts) into consecutive-seq rows so no
+   * single row nears SQLite's 2 MB cap; op order is preserved across chunk
+   * boundaries, so every frame prefix stays chain-valid for a live remote
+   * client. An empty batch normally leaves seq unchanged; `forceFrame` records
+   * an empty frame when committed calendar semantics changed without node ops.
+   * Returns the frames (committed seqs + ops) for `broadcastChange` to emit, in
+   * order, once the transaction has committed.
    */
-  private recordChange(ops: ChangeOp[]): ChangeFrame {
-    if (!ops.length) return { seq: this.currentSeq(), ops }
-    const seq = this.bumpSeq()
-    this.sql.exec('INSERT INTO changelog (seq, ops) VALUES (?, ?)', seq, JSON.stringify(ops))
-    this.sql.exec('DELETE FROM changelog WHERE seq <= ?', seq - CHANGELOG_KEEP)
-    return { seq, ops }
+  private recordChange(
+    ops: ChangeOp[],
+    clientId?: string,
+    forceFrame = false,
+  ): ChangeFrame[] {
+    let frames = planChangeFrames(ops, this.currentSeq(), undefined, clientId);
+    if (!frames.length && forceFrame) {
+      const seq = this.currentSeq() + 1;
+      const frame: ChangeFrame =
+        clientId === undefined ? { seq, ops: [] } : { seq, ops: [], clientId };
+      frames = [frame];
+    }
+    if (!frames.length) return frames;
+    for (const f of frames) {
+      this.sql.exec(
+        "INSERT INTO changelog (seq, ops, clientId) VALUES (?, ?, ?)",
+        f.seq,
+        JSON.stringify(f.ops),
+        f.clientId ?? null,
+      );
+    }
+    const finalSeq = frames[frames.length - 1]?.seq;
+    if (finalSeq === undefined) return frames;
+    this.setSeq(finalSeq);
+    this.sql.exec(
+      "DELETE FROM changelog WHERE seq <= ?",
+      finalSeq - CHANGELOG_KEEP,
+    );
+    return frames;
   }
 
   /**
-   * Broadcast a committed frame to every connected device, and return its seq.
-   * Runs AFTER `recordChange`'s `transactionSync` has committed — events only go
-   * out for state that durably landed, never for a batch that rolled back. A
-   * no-op for an empty frame (nothing changed, so nobody is notified).
+   * Broadcast the committed frames to every connected device, in seq order, and
+   * return the FINAL seq (what the originating client `waitForSeq`s before
+   * dropping its optimistic overlay). Runs AFTER `recordChange`'s
+   * `transactionSync` has committed — events only go out for state that durably
+   * landed, never for a batch that rolled back. A no-op for an empty commit
+   * (nothing changed, so nobody is notified; returns the current seq).
    *
    * Broadcasting is free (outgoing WS); the send runs inside the DO window the
    * triggering write already opened, so it adds negligible billed duration.
    */
-  private broadcastChange(frame: ChangeFrame): number {
-    if (frame.ops.length) {
-      const data = JSON.stringify({
-        type: 'change',
+  private broadcastChange(
+    frames: readonly ChangeFrame[],
+    calendar?: CalendarSyncState,
+  ): number {
+    if (!frames.length) return this.currentSeq();
+    const sockets = this.ctx.getWebSockets();
+    for (const [index, frame] of frames.entries()) {
+      const frameCalendar = index === frames.length - 1 ? calendar : undefined;
+      let message: ServerMessage = {
+        type: "change",
         seq: frame.seq,
         ops: frame.ops,
-      } satisfies ServerMessage)
-      for (const ws of this.ctx.getWebSockets()) {
+      };
+      if (frame.clientId !== undefined) {
+        message = { ...message, clientId: frame.clientId };
+      }
+      if (frameCalendar !== undefined) {
+        message = { ...message, calendar: frameCalendar };
+      }
+      const data = JSON.stringify(message);
+      for (const ws of sockets) {
         // A socket can race a close; the runtime will fire webSocketClose for it.
         try {
-          ws.send(data)
+          ws.send(data);
         } catch {
           // already gone
         }
       }
     }
-    return frame.seq
+    return frames[frames.length - 1]?.seq ?? this.currentSeq();
   }
 
   /**
@@ -432,28 +1154,35 @@ export class UserOutlineDO extends DurableObject<Env> {
    * handshake by sending a `hello` (see webSocketMessage); we just return 101.
    */
   async fetch(request: Request): Promise<Response> {
-    if (request.headers.get('Upgrade') !== 'websocket') {
-      return new Response('expected a WebSocket upgrade', { status: 426 })
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return new Response("expected a WebSocket upgrade", { status: 426 });
     }
-    const pair = new WebSocketPair()
-    const client = pair[0]
-    const server = pair[1]
-    this.ctx.acceptWebSocket(server)
-    return new Response(null, { status: 101, webSocket: client })
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    this.ctx.acceptWebSocket(server);
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   /** The only inbound message is the `hello` handshake; reply with the snapshot
    *  or the gap since the client's cursor. Anything else is ignored. */
-  async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
-    const hello = this.parseHello(raw)
-    if (!hello) return
-    ws.send(JSON.stringify(this.initialFrame(hello.since)))
+  async webSocketMessage(
+    ws: WebSocket,
+    raw: string | ArrayBuffer,
+  ): Promise<void> {
+    const hello = this.parseHello(raw);
+    if (!hello) return;
+    ws.send(JSON.stringify(this.initialFrame(hello.since)));
   }
 
   /** Complete the closing handshake (CF best practice for Hibernation). */
-  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+  async webSocketClose(
+    ws: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
     try {
-      ws.close(code, reason)
+      ws.close(code, reason);
     } catch {
       // already closed
     }
@@ -461,19 +1190,20 @@ export class UserOutlineDO extends DurableObject<Env> {
 
   async webSocketError(ws: WebSocket): Promise<void> {
     try {
-      ws.close(1011, 'error')
+      ws.close(1011, "error");
     } catch {
       // already closed
     }
   }
 
   private parseHello(raw: string | ArrayBuffer): HelloMessage | null {
-    if (typeof raw !== 'string') return null
+    if (raw instanceof ArrayBuffer) return null;
     try {
-      const m = JSON.parse(raw) as HelloMessage
-      return m && m.type === 'hello' ? m : null
+      // SAFETY: the m.type === "hello" guard on the next line rejects anything that is not a HelloMessage.
+      const m = JSON.parse(raw) as HelloMessage;
+      return m && m.type === "hello" ? m : null;
     } catch {
-      return null
+      return null;
     }
   }
 
@@ -482,45 +1212,91 @@ export class UserOutlineDO extends DurableObject<Env> {
    * still inside the retained changelog window, send just the gap (`resume`);
    * otherwise send the whole outline (`snapshot`). A null cursor always takes
    * the snapshot path.
+   *
+   * Both handshake frames carry `serverVersion` — the deploy the client is now
+   * talking to. It rides here rather than on `change` frames because a reconnect
+   * is exactly when a days-old tab meets a newer Worker (ADR 0046).
    */
   private initialFrame(since: number | null): ServerMessage {
-    const seq = this.currentSeq()
-    if (since !== null && since <= seq) {
+    const seq = this.currentSeq();
+    if (since !== null) {
       const oldest =
         this.sql
-          .exec<{ m: number | null }>('SELECT MIN(seq) AS m FROM changelog')
-          .toArray()[0]?.m ?? null
+          .exec<{ m: number | null }>("SELECT MIN(seq) AS m FROM changelog")
+          .toArray()[0]?.m ?? null;
+      const resumeFloor = Number(
+        this.sql
+          .exec<{ value: string }>(
+            "SELECT value FROM meta WHERE key = 'resume_floor'",
+          )
+          .toArray()[0]?.value ?? 0,
+      );
       // Resumable iff the client is already current (nothing to send) or the
-      // next frame it needs (since + 1) is still retained.
-      const canResume = since === seq || (oldest !== null && since + 1 >= oldest)
+      // next frame it needs (since + 1) is retained, without crossing the last
+      // full snapshot replacement.
+      const canResume = canResumeChangelog(since, seq, oldest, resumeFloor);
       if (canResume) {
         const rows = this.sql
-          .exec<{ seq: number; ops: string }>(
-            'SELECT seq, ops FROM changelog WHERE seq > ? ORDER BY seq',
+          .exec<{ seq: number; ops: string; clientId: string | null }>(
+            "SELECT seq, ops, clientId FROM changelog WHERE seq > ? ORDER BY seq",
             since,
           )
-          .toArray()
+          .toArray();
         return {
-          type: 'resume',
+          type: "resume",
           seq,
-          changes: rows.map((r) => ({ seq: r.seq, ops: JSON.parse(r.ops) as ChangeOp[] })),
-        }
+          changes: rows.map((r) => {
+            // SAFETY: the ops column is only ever written by recordChange as JSON.stringify(ChangeOp[]).
+            const ops = JSON.parse(r.ops) as ChangeOp[];
+            return r.clientId === null
+              ? { seq: r.seq, ops }
+              : { seq: r.seq, ops, clientId: r.clientId };
+          }),
+          serverVersion: APP_VERSION,
+          calendar: { weekStart: this.currentWeekStart() },
+        };
       }
     }
-    return { type: 'snapshot', seq, nodes: this.getNodes() }
+    return {
+      type: "snapshot",
+      seq,
+      nodes: this.getNodes(),
+      serverVersion: APP_VERSION,
+      calendar: { weekStart: this.currentWeekStart() },
+    };
   }
 
   // --- kv side-collections ---------------------------------------------------
 
   getKv(collection: string): unknown[] {
     return this.sql
-      .exec<{ value: string }>('SELECT value FROM kv WHERE collection = ?', collection)
+      .exec<{ value: string }>(
+        "SELECT value FROM kv WHERE collection = ?",
+        collection,
+      )
       .toArray()
-      .map((r) => JSON.parse(r.value))
+      .map((r) => JSON.parse(r.value));
   }
 
-  upsertKv(collection: string, rows: readonly { key: string; value: unknown }[]): void {
-    const ts = Date.now()
+  upsertKv(
+    collection: string,
+    rows: readonly { key: string; value: unknown }[],
+  ): void {
+    this.assertWritable();
+    if (
+      this.isLunoraRetired() &&
+      collection === "account-prefs" &&
+      rows.some(
+        (row) =>
+          row.key === "lunora-beta" &&
+          Schema.decodeUnknownOption(
+            Schema.Struct({ enabled: Schema.Literal(false) }),
+          )(row.value)._tag === "None",
+      )
+    ) {
+      throw new Error("retired Lunora preference must remain disabled");
+    }
+    const ts = Date.now();
     for (const r of rows) {
       this.sql.exec(
         `INSERT INTO kv (collection, key, value, updatedAt)
@@ -530,13 +1306,18 @@ export class UserOutlineDO extends DurableObject<Env> {
         r.key,
         JSON.stringify(r.value),
         ts,
-      )
+      );
     }
   }
 
   deleteKv(collection: string, keys: readonly string[]): void {
+    this.assertWritable();
     for (const k of keys)
-      this.sql.exec('DELETE FROM kv WHERE collection = ? AND key = ?', collection, k)
+      this.sql.exec(
+        "DELETE FROM kv WHERE collection = ? AND key = ?",
+        collection,
+        k,
+      );
   }
 
   /**
@@ -549,7 +1330,8 @@ export class UserOutlineDO extends DurableObject<Env> {
    * Generic on purpose: the DO never learns what "daily" is, it just gains an
    * atomic op on its existing kv table, reusable by any future side-collection.
    */
-  getOrCreateKv(collection: string, key: string, value: unknown): unknown {
+  getOrCreateKv(collection: string, key: string, value: KvClaim): KvClaim {
+    this.assertWritable();
     this.sql.exec(
       `INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)
        ON CONFLICT(collection, key) DO NOTHING`,
@@ -557,15 +1339,52 @@ export class UserOutlineDO extends DurableObject<Env> {
       key,
       JSON.stringify(value),
       Date.now(),
-    )
+    );
     const row = this.sql
       .exec<{ value: string }>(
-        'SELECT value FROM kv WHERE collection = ? AND key = ?',
+        "SELECT value FROM kv WHERE collection = ? AND key = ?",
         collection,
         key,
       )
-      .toArray()[0]
-    return row ? JSON.parse(row.value) : value
+      .toArray()[0];
+    return row ? JSON.parse(row.value) : value;
+  }
+
+  // --- account deletion ------------------------------------------------------
+
+  /**
+   * Permanently erase this user's outline + side-collections and drop every
+   * live sync socket. Called from the self-serve account-deletion lifecycle
+   * (worker/auth.ts `user.deleteUser.beforeDelete`) AFTER the user's Stripe
+   * subscription is cancelled and BEFORE Better Auth removes the D1 identity
+   * rows, so a deletion always takes the DO with it (ticket #224).
+   *
+   * `deleteAll()` on a SQLite-backed DO wipes BOTH the SQL tables and the KV
+   * storage in one atomic operation — nodes, kv side-collections, changelog,
+   * seq cursor, the `seeded` flag, and the schema version all go. The DO is
+   * never routed to again (the caller's `user.id` is gone and Better Auth mints
+   * fresh ids, so a re-signup with the same email gets a DIFFERENT DO), and
+   * `ensureSeeded` (worker/index.ts) re-imports legacy D1 rows ONLY for the
+   * 'default' owner DO — which self-serve deletion refuses. So a wiped DO stays
+   * empty and inert; nothing resurrects it. Note the constructor does NOT
+   * re-run on a live, non-evicted instance reached post-wipe: its `migrate()`
+   * only runs at construction, so a straggler request against this same
+   * instance throws on the dropped tables (safe — no data can materialize; a
+   * fresh instance after eviction re-creates empty tables).
+   *
+   * Closing the sockets first tells any live tab's sync stream to drop; the
+   * client also hard-navigates away at the auth boundary, so this is belt-and-
+   * suspenders, not the only teardown.
+   */
+  async wipe(): Promise<void> {
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(1000, "account deleted");
+      } catch {
+        // already gone
+      }
+    }
+    await this.ctx.storage.deleteAll();
   }
 
   // --- one-time import from the legacy D1 tables -----------------------------
@@ -573,26 +1392,525 @@ export class UserOutlineDO extends DurableObject<Env> {
   isSeeded(): boolean {
     const row = this.sql
       .exec<{ value: string }>("SELECT value FROM meta WHERE key = 'seeded'")
-      .toArray()[0]
-    return row?.value === '1'
+      .toArray()[0];
+    return row?.value === "1";
   }
 
   /** Idempotently load the user's existing rows (read from D1 by the Worker,
    *  which owns the D1 binding) into this DO, then mark it seeded so it never
    *  re-imports. Non-destructive: D1 is left intact. */
   seed(data: { nodes: Node[]; kv: KvRow[] }): void {
-    if (this.isSeeded()) return
-    this.upsertNodes(data.nodes)
+    this.assertWritable();
+    if (this.isSeeded()) return;
+    this.upsertNodes(data.nodes);
     for (const collection of new Set(data.kv.map((r) => r.collection))) {
       this.upsertKv(
         collection,
         data.kv
           .filter((r) => r.collection === collection)
           .map((r) => ({ key: r.key, value: r.value })),
-      )
+      );
     }
     this.sql.exec(
       "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
-    )
+    );
+  }
+
+  // --- operator restore (Point-in-Time Recovery, ticket #220) ----------------
+
+  /**
+   * Roll this DO's entire storage back to a point within Cloudflare's free
+   * 30-day PITR window, driven by an admin-gated Worker route. Isolation is by
+   * construction: DO = user, so restoring one object never touches another.
+   *
+   * Sequencing is the load-bearing subtlety. `ctx.abort()` restarts the object
+   * IMMEDIATELY — calling it inline would kill this RPC's in-flight reply and the
+   * operator would never receive `previousBookmark`, the handle that makes a bad
+   * restore itself reversible (pass it back as `{ kind: "bookmark" }` to undo).
+   * So we: capture the pre-recovery bookmark ("now"), resolve the target, ARM the
+   * restore (`onNextSessionRestoreBookmark`, which persists across the restart),
+   * return the two bookmarks, and only THEN — after the response has left the DO —
+   * `ctx.abort()`. Because the restore is already armed and durable, a lost abort
+   * timer (eviction) still applies on the next natural restart; the delay only
+   * makes the rollback prompt for any live tabs.
+   *
+   * Live clients reconnect after the abort with their last-applied seq, which now
+   * sits ABOVE the restored DO's seq (time went backwards). The DO's handshake
+   * (`initialFrame`) already answers a `since > seq` cursor with a full snapshot,
+   * not a resume, and the client's `resetAppliedSeq` drops its cursor to match —
+   * so a restore can't leave a live tab on a broken resume (ADR 0008). No client
+   * change needed; see docs/runbooks/restore-user-pitr.md.
+   */
+  async restoreToTime(
+    point: RestorePoint,
+  ): Promise<{ previousBookmark: string; targetBookmark: string }> {
+    const result = await this.ctx.blockConcurrencyWhile(async () => {
+      this.assertWritable();
+      if (
+        this.metaValue("preserve_classic_receipt") ||
+        this.metaValue("applied_retirement_migration") ||
+        this.metaValue("lunora_retired")
+      ) {
+        throw new Error("PITR is unavailable after retirement has begun");
+      }
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('pitr_armed', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+      );
+      try {
+        // These are local Durable Object storage operations, not remote I/O.
+        const previousBookmark = await this.ctx.storage.getCurrentBookmark();
+        const targetBookmark =
+          point.kind === "bookmark"
+            ? point.bookmark
+            : await this.ctx.storage.getBookmarkForTime(point.at);
+        await this.ctx.storage.onNextSessionRestoreBookmark(targetBookmark);
+        return { previousBookmark, targetBookmark };
+      } catch (error) {
+        this.sql.exec("DELETE FROM meta WHERE key = 'pitr_armed'");
+        throw error;
+      }
+    });
+    this.deferredAbort("point-in-time restore");
+    return result;
+  }
+
+  /** Restart the DO shortly after the current RPC reply has left, kicking
+   *  every live socket into a reconnect. Shared by both restore paths — the
+   *  delay-then-abort choreography (and its lost-abort tolerance) must stay
+   *  identical between them. A lost abort is harmless in both: the PITR
+   *  restore is armed durably and applies on the next natural restart, and
+   *  the snapshot restore's data is already committed. */
+  private deferredAbort(reason: string): void {
+    setTimeout(() => {
+      try {
+        this.ctx.abort(reason);
+      } catch {
+        // Already torn down / restarted.
+      }
+    }, RESTORE_ABORT_DELAY_MS);
+  }
+
+  // --- off-site backup: R2 export / snapshot restore (ticket #221) -----------
+
+  /**
+   * The whole outline as one portable JSON value: every node plus every kv row
+   * with its `value` left as the RAW stored TEXT (parsed by nobody on the way
+   * out, inserted verbatim on the way back), so a snapshot round-trips the kv
+   * table byte-for-byte. Read by the daily cron sweep in worker/index.ts and
+   * written to R2 keyed `backups/<doName>/<YYYY-MM-DD>.json`.
+   */
+  exportSnapshot(): OutlineSnapshot {
+    return {
+      version: SNAPSHOT_VERSION,
+      exportedAt: Date.now(),
+      seq: this.currentSeq(),
+      nodes: this.getNodes(),
+      kv: this.readRows<SnapshotKvRow>(
+        "SELECT collection, key, value, updatedAt FROM kv",
+      ),
+    };
+  }
+
+  /**
+   * Replace this DO's entire contents with a snapshot: truncate nodes + kv +
+   * changelog and reinsert, all in ONE transactionSync (a mid-restore fault
+   * rolls the whole thing back, never a half-restored outline). The seq is
+   * BUMPED (not reset) and the changelog emptied, so every reconnecting client
+   * fails the resume check and falls back to a full snapshot — a reset-to-0 seq
+   * would let a client whose cursor is coincidentally 0 "resume" its stale
+   * view. The deferred abort then kicks live sockets into that reconnect (the
+   * `restoreToTime` pattern; the data is already committed, so a lost abort
+   * only delays the refresh until the next natural restart).
+   *
+   * `seeded` is stamped so the legacy D1 import (`ensureSeeded`, 'default' DO
+   * only) can never run again on top of restored data. Returns the
+   * pre-restore bookmark: the undo path is the existing PITR restore
+   * (`/api/admin/restore`) with that bookmark. Best-effort null where PITR
+   * doesn't exist (local dev) — the restore itself is plain SQL and works
+   * everywhere.
+   */
+  async restoreSnapshot(data: {
+    nodes: readonly Node[];
+    kv: readonly SnapshotKvRow[];
+  }): Promise<{ previousBookmark: string | null; nodes: number; kv: number }> {
+    const previousBookmark = await this.ctx.blockConcurrencyWhile(async () => {
+      this.assertWritable();
+      if (this.preserveClassicReceipt() || this.isLunoraRetired()) {
+        throw new Error(
+          "snapshot replacement is unavailable after permanent retirement",
+        );
+      }
+      let bookmark: string | null = null;
+      try {
+        bookmark = await this.ctx.storage.getCurrentBookmark();
+      } catch {
+        // PITR bookmarks are unavailable in local development.
+      }
+      this.ctx.storage.transactionSync(() => {
+        this.assertWritable();
+        this.sql.exec("DELETE FROM nodes");
+        this.sql.exec("DELETE FROM kv");
+        this.sql.exec("DELETE FROM changelog");
+        for (const n of data.nodes) this.putNode(n);
+        for (const r of data.kv) {
+          this.sql.exec(
+            "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
+            r.collection,
+            r.key,
+            r.value,
+            r.updatedAt,
+          );
+        }
+        this.setSeq(this.currentSeq() + 1);
+        this.sql.exec(
+          "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+        );
+        this.forceRetiredPreferenceOff();
+      });
+      return bookmark;
+    });
+    this.deferredAbort("snapshot restore");
+    return { previousBookmark, nodes: data.nodes.length, kv: data.kv.length };
+  }
+
+  /** Freeze classic writes and return one atomic pre-migration snapshot. */
+  freezeAndExportRetirement(migrationId: string): OutlineSnapshot {
+    return this.ctx.storage.transactionSync(() => {
+      if (this.metaValue("pitr_armed")) {
+        throw new Error("retirement cannot begin while PITR is armed");
+      }
+      const existing = this.sql
+        .exec<{ value: string }>(
+          "SELECT value FROM meta WHERE key = 'write_freeze'",
+        )
+        .toArray()[0]?.value;
+      if (existing && existing !== migrationId) {
+        throw new Error("classic outline is fenced by another migration");
+      }
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('write_freeze', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        migrationId,
+      );
+      return this.exportSnapshot();
+    });
+  }
+
+  releaseRetirementFreeze(migrationId: string): void {
+    const released = this.ctx.storage.transactionSync(() => {
+      const existing = this.sql
+        .exec<{ value: string }>(
+          "SELECT value FROM meta WHERE key = 'write_freeze'",
+        )
+        .toArray()[0]?.value;
+      if (!existing) return false;
+      if (existing !== migrationId) {
+        throw new Error("classic outline is fenced by another migration");
+      }
+      this.sql.exec("DELETE FROM meta WHERE key = 'write_freeze'");
+      return true;
+    });
+    if (!released) return;
+    // Reconnect after verification so clients cross the replacement barrier
+    // through initialFrame and receive a full snapshot when required.
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(1012, "outline backend changed");
+      } catch {
+        // already gone
+      }
+    }
+  }
+
+  retirementStatus(): RetirementStatus {
+    const rows = this.sql
+      .exec<{ key: string; value: string }>(
+        "SELECT key, value FROM meta WHERE key IN ('write_freeze', 'applied_retirement_migration')",
+      )
+      .toArray();
+    const values = new Map(rows.map((row) => [row.key, row.value]));
+    return {
+      frozenBy: values.get("write_freeze") ?? null,
+      appliedMigrationId: values.get("applied_retirement_migration") ?? null,
+    };
+  }
+
+  preserveClassicReceipt(): PreserveClassicReceipt | null {
+    const value = this.metaValue("preserve_classic_receipt");
+    // SAFETY: this immutable private meta value is written only below from a PreserveClassicReceipt.
+    return value ? (JSON.parse(value) as PreserveClassicReceipt) : null;
+  }
+
+  preserveClassicRetirement(data: {
+    migrationId: string;
+    classicSnapshotHash: string;
+    lunoraSnapshotHash: string;
+    nodes: readonly Node[];
+    kv: readonly SnapshotKvRow[];
+  }): PreserveClassicReceipt {
+    return this.ctx.storage.transactionSync(() => {
+      const receipt: PreserveClassicReceipt = {
+        policy: "preserve-classic-v1",
+        migrationId: data.migrationId,
+        classicSnapshotHash: data.classicSnapshotHash,
+        lunoraSnapshotHash: data.lunoraSnapshotHash,
+      };
+      const existing = this.preserveClassicReceipt();
+      if (existing) {
+        if (JSON.stringify(existing) !== JSON.stringify(receipt)) {
+          throw new Error(
+            "classic preservation is already bound to another manifest",
+          );
+        }
+        return existing;
+      }
+      if (this.retirementStatus().frozenBy !== data.migrationId) {
+        throw new Error("matching classic write fence is required");
+      }
+      const actualNodes = this.getNodes();
+      const actualKv = this.readRows<SnapshotKvRow>(
+        "SELECT collection, key, value, updatedAt FROM kv",
+      );
+      if (
+        !classicSnapshotsEquivalent({ nodes: actualNodes, kv: actualKv }, data)
+      ) {
+        throw new Error(
+          "classic content does not match the preserved snapshot",
+        );
+      }
+      const preference = actualKv.find(
+        (row) =>
+          row.collection === "account-prefs" && row.key === "lunora-beta",
+      );
+      if (!preference || !this.disabledStoredPreference(preference.value)) {
+        throw new Error("classic preservation requires disabled preference");
+      }
+      this.putImmutableMeta(
+        "preserve_classic_receipt",
+        JSON.stringify(receipt),
+      );
+      return receipt;
+    });
+  }
+
+  finalizeRetirementRouting(migrationId: string): void {
+    this.ctx.storage.transactionSync(() => {
+      const existing = this.metaValue("lunora_retired");
+      if (existing) {
+        if (existing !== migrationId)
+          throw new Error("Lunora retirement is bound to another migration");
+        return;
+      }
+      const status = this.retirementStatus();
+      const preserved = this.preserveClassicReceipt();
+      if (
+        status.frozenBy !== migrationId ||
+        (status.appliedMigrationId !== migrationId &&
+          preserved?.migrationId !== migrationId)
+      ) {
+        throw new Error("matching fenced retirement is required");
+      }
+      this.putImmutableMeta("lunora_retired", migrationId);
+      this.forceRetiredPreferenceOff();
+    });
+  }
+
+  isLunoraRetired(): boolean {
+    return this.metaValue("lunora_retired") !== null;
+  }
+
+  classicRecoveryReceipt(): ClassicRecoveryReceipt | null {
+    const value = this.metaValue("classic_recovery_receipt");
+    // SAFETY: this immutable private meta value is written only below from a ClassicRecoveryReceipt.
+    return value ? (JSON.parse(value) as ClassicRecoveryReceipt) : null;
+  }
+
+  importClassicRecovery(data: {
+    migrationId: string;
+    manifestHash: string;
+    rootId: string | null;
+    nodes: readonly Node[];
+  }): ClassicRecoveryReceipt {
+    const committed = this.ctx.storage.transactionSync(() => {
+      const existing = this.classicRecoveryReceipt();
+      if (existing) {
+        if (
+          existing.migrationId !== data.migrationId ||
+          existing.manifestHash !== data.manifestHash
+        ) {
+          throw new Error(
+            "classic recovery is already bound to another manifest",
+          );
+        }
+        const frames: ChangeFrame[] = [];
+        return { receipt: existing, frames };
+      }
+      const preserved = this.preserveClassicReceipt();
+      if (
+        preserved?.migrationId !== data.migrationId ||
+        this.metaValue("lunora_retired") !== data.migrationId
+      ) {
+        throw new Error("recovery requires preserved and retired Classic");
+      }
+      this.assertWritable();
+      if (
+        (data.rootId === null && data.nodes.length !== 0) ||
+        (data.rootId !== null &&
+          (data.nodes.filter((node) => node.parentId === null).length !== 1 ||
+            !data.nodes.some(
+              (node) => node.id === data.rootId && node.parentId === null,
+            ))) ||
+        !validateNodeGraph(data.nodes).ok
+      ) {
+        throw new Error("recovery payload is not a detached rooted graph");
+      }
+      const current = this.getNodes();
+      if (!validateNodeGraph(current).ok)
+        throw new Error("current Classic graph is invalid");
+      const reserved = new Set<string>();
+      for (const node of current) {
+        reserved.add(node.id);
+        for (const id of [
+          node.parentId,
+          node.prevSiblingId,
+          node.mirrorOf,
+          ...parseNodeLinks(node.text),
+        ])
+          if (id !== null) reserved.add(id);
+      }
+      for (const row of this.readRows<{ value: string }>(
+        "SELECT value FROM kv WHERE collection = 'daily-index'",
+      )) {
+        try {
+          const claim = Schema.decodeUnknownOption(
+            Schema.Struct({ nodeId: Schema.String }),
+          )(JSON.parse(row.value));
+          if (claim._tag === "Some") reserved.add(claim.value.nodeId);
+        } catch {
+          // Malformed side data claims no usable id.
+        }
+      }
+      if (data.nodes.some((node) => reserved.has(node.id)))
+        throw new Error("recovery node id collides with Classic");
+
+      let imported = [...data.nodes];
+      if (data.rootId !== null) {
+        const roots = current.filter((node) => node.parentId === null);
+        const followed = new Set(roots.map((node) => node.prevSiblingId));
+        const tail = roots.find((node) => !followed.has(node.id)) ?? null;
+        imported = imported.map((node) =>
+          node.id === data.rootId
+            ? { ...node, parentId: null, prevSiblingId: tail?.id ?? null }
+            : node,
+        );
+      }
+      if (!validateNodeGraph([...current, ...imported]).ok)
+        throw new Error("recovery cannot attach to current Classic graph");
+      const frames = this.recordChange(
+        imported.map((node) => this.putNode(node)),
+      );
+      const receipt: ClassicRecoveryReceipt = {
+        migrationId: data.migrationId,
+        manifestHash: data.manifestHash,
+        applied: true,
+        seq: frames.at(-1)?.seq ?? this.currentSeq(),
+        rootId: data.rootId,
+        nodes: imported.length,
+      };
+      this.putImmutableMeta(
+        "classic_recovery_receipt",
+        JSON.stringify(receipt),
+      );
+      return { receipt, frames };
+    });
+    this.broadcastChange(committed.frames);
+    return committed.receipt;
+  }
+
+  /** Replace content while retaining classic changelog and migration fence. */
+  restoreRetirementSnapshot(data: {
+    migrationId: string;
+    nodes: readonly Node[];
+    kv: readonly SnapshotKvRow[];
+  }): { applied: boolean; nodes: number; kv: number } {
+    return this.ctx.storage.transactionSync(() => {
+      if (this.preserveClassicReceipt() || this.isLunoraRetired()) {
+        throw new Error(
+          "replacement cannot overwrite permanently retired Classic",
+        );
+      }
+      const status = this.retirementStatus();
+      if (status.appliedMigrationId === data.migrationId) {
+        return { applied: false, nodes: this.nodeCount(), kv: data.kv.length };
+      }
+      if (status.frozenBy !== data.migrationId) {
+        throw new Error("matching classic write fence is required");
+      }
+      this.sql.exec("DELETE FROM nodes");
+      this.sql.exec("DELETE FROM kv");
+      for (const node of data.nodes) this.putNode(node);
+      for (const row of data.kv) {
+        this.sql.exec(
+          "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
+          row.collection,
+          row.key,
+          row.value,
+          row.updatedAt,
+        );
+      }
+      const replacementSeq = this.currentSeq() + 1;
+      this.setSeq(replacementSeq);
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('resume_floor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        String(replacementSeq),
+      );
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('seeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+      );
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('applied_retirement_migration', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        data.migrationId,
+      );
+      return { applied: true, nodes: data.nodes.length, kv: data.kv.length };
+    });
+  }
+
+  /** Operator rollback to the verified immutable pre-migration payload. */
+  restorePreRetirementSnapshot(data: {
+    migrationId: string;
+    nodes: readonly Node[];
+    kv: readonly SnapshotKvRow[];
+  }): { nodes: number; kv: number } {
+    return this.ctx.storage.transactionSync(() => {
+      if (this.preserveClassicReceipt()) {
+        throw new Error("rollback cannot overwrite preserved Classic");
+      }
+      const status = this.retirementStatus();
+      if (status.frozenBy !== data.migrationId) {
+        throw new Error("matching classic write fence is required");
+      }
+      this.sql.exec("DELETE FROM nodes");
+      this.sql.exec("DELETE FROM kv");
+      for (const node of data.nodes) this.putNode(node);
+      for (const row of data.kv) {
+        this.sql.exec(
+          "INSERT INTO kv (collection, key, value, updatedAt) VALUES (?, ?, ?, ?)",
+          row.collection,
+          row.key,
+          row.value,
+          row.updatedAt,
+        );
+      }
+      const replacementSeq = this.currentSeq() + 1;
+      this.setSeq(replacementSeq);
+      this.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('resume_floor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        String(replacementSeq),
+      );
+      this.sql.exec(
+        "DELETE FROM meta WHERE key = 'applied_retirement_migration'",
+      );
+      this.forceRetiredPreferenceOff();
+      return { nodes: data.nodes.length, kv: data.kv.length };
+    });
   }
 }

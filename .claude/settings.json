@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/create-worktree.ts"],
+            "timeout": 600,
+            "statusMessage": "Installing deps and applying the local D1 schema..."
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/remove-worktree.ts"],
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-nudges.ts"],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

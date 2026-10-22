@@ -1,6 +1,6 @@
-import * as React from "react"
+import * as React from "react";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
 function InputGroupText({ className, ...props }: React.ComponentProps<"span">) {
   return (
@@ -11,7 +11,7 @@ function InputGroupText({ className, ...props }: React.ComponentProps<"span">) {
       )}
       {...props}
     />
-  )
+  );
 }
 
-export { InputGroupText }
+export { InputGroupText };

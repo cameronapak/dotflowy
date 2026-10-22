@@ -11,11 +11,13 @@
 // and this heals automatically (the id-pointer model paying off).
 
 import { Link2, Unlink } from "lucide-react";
-import { buildTrail } from "../../data/tree";
-import { getTreeIndex, useNode } from "../../data/tree-store";
+
+import type { WidgetProps } from "../types";
+
 import { flattenInline } from "../../data/inline-text";
 import { linkTargetId, linkedNodeLabel } from "../../data/node-links";
-import type { WidgetProps } from "../types";
+import { buildTrail } from "../../data/tree";
+import { getTreeIndex, useNode } from "../../data/tree-store";
 
 /** The label clamp (ADR 0032): node text can be a paragraph; the chip shows a
  *  readable head, the hover breadcrumb carries the rest. */
@@ -56,7 +58,7 @@ export function NodeLinkChip({ source }: WidgetProps) {
 
   return (
     <span
-      className="inline-flex max-w-full items-center gap-1 align-baseline text-[0.95em] font-medium text-primary underline decoration-primary/35 underline-offset-2 cursor-pointer select-none hover:decoration-primary"
+      className="inline-flex max-w-full cursor-pointer items-center gap-1 align-baseline text-[0.95em] font-medium text-primary underline decoration-primary/35 underline-offset-2 select-none hover:decoration-primary"
       title={title}
     >
       <Link2 className="size-[0.85em] shrink-0 opacity-80" aria-hidden="true" />

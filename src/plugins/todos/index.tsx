@@ -9,18 +9,21 @@
 // Seams contributed: F (checkbox row slot), G (hide-completed view transform),
 // D (Mod+Enter / Mod+D toggle), C (`/todo` + `/bullet`), I (`[]` autoformat).
 // Still core-wired (next passes): the fade-inheritance cascade and the
-// Backspace-on-the-checkbox demotion read `completed`/`isTask` in OutlineNode --
+// Backspace-on-the-checkbox demotion read `completed`/`isTask` in OutlineRow --
 // they await a row-decoration / reserved-key seam.
 
 import { ListIcon, SquareCheckIcon } from "lucide-react";
-import { Checkbox } from "@/plugins/kit";
+
 import { cn } from "@/lib/utils";
-import { definePlugin, type PluginContext } from "../types";
-import { type Node } from "../../data/tree";
+import { Checkbox } from "@/plugins/kit";
+
+import { capture } from "../../data/history";
 import { setIsTask } from "../../data/mutations";
 import { runStructural } from "../../data/structural";
-import { capture } from "../../data/history";
+import { type Node } from "../../data/tree";
 import { isProtected } from "../registry";
+import { definePlugin, type PluginContext } from "../types";
+import { TODO_FILTER_OPERATORS } from "./filter-operators";
 
 // Toggle completion on a node, shared by Mod+Enter and Mod+D. Reads the live
 // node off the tree so it flips relative to the current state.
@@ -46,14 +49,17 @@ function TaskCheckbox({
   getCtx: () => PluginContext;
   placement: "row" | "title";
 }) {
-  if (!node.isTask) return null;
+  // `kind` outranks `isTask` (ADR 0045): if a stale client or a raw PATCH ever
+  // writes the illegal pair, the node renders as a paragraph with no checkbox,
+  // and the next kind-touching edit normalizes it.
+  if (node.kind !== null || !node.isTask) return null;
   return (
     <Checkbox
       className={cn(
         "checkbox touch-hitbox border-muted-foreground",
         // Larger control + a little more breathing room next to the 24px title
         // (the title's flex gap alone reads tight at that text size).
-        placement === "title" && "size-5 me-1",
+        placement === "title" && "me-1 size-5",
       )}
       checked={node.completed}
       onCheckedChange={(checked) =>
@@ -144,26 +150,46 @@ export default definePlugin({
       description: "Turn into a plain bullet",
       icon: ListIcon,
       keywords: ["bullet", "plain", "text", "list", "into"],
-      available: (node) => node.isTask,
+      // The single "back to a plain bullet, whatever you were" command: it
+      // offers itself to a task AND to a paragraph, and `onSetTask` clears both
+      // fields on the way through (ADR 0045). There is no `/paragraph`-off.
+      available: (node) => node.isTask || node.kind !== null,
       run: (id, ctx) => ctx.mutations.onSetTask(id, false),
     },
   ],
 
-  // Seam I: typing `[]` or `[ ]` at the very start of a plain bullet turns it
-  // into a task and strips the marker (mirrors the Backspace-on-the-checkbox
-  // demotion, which stays core for now). The core writes the stripped text and
-  // places the caret; this only decides the rewrite + the type flip.
+  // Seam I: typing `[]`, `[ ]` or `[x]` at the very start of a plain bullet
+  // turns it into a task and strips the marker (mirrors the
+  // Backspace-on-the-checkbox demotion, which stays core for now). The core
+  // writes the stripped text and places the caret; this only decides the
+  // rewrite + the type flip.
+  //
+  // The `[x]` spelling exists so the SAME markdown a paste understands is also
+  // typeable: todos speak markdown at every boundary a user or agent can touch
+  // (paste, Copy as Markdown, OPML, MCP), even though the `isTask`/`completed`
+  // FIELDS remain the storage (ADR 0044: markdown is the interchange format for
+  // node state, never its storage).
   input: {
     autoformat: ({ text, node }) => {
       if (node.isTask) return null;
-      const marker = text.match(/^\[ ?\] ?/);
+      const marker = text.match(/^\[( |x|X)?\] ?/);
       if (!marker) return null;
+      const done = marker[1]?.toLowerCase() === "x";
       return {
         text: text.slice(marker[0].length),
         // The stripped marker sat at the start, so the caret lands there.
         caret: 0,
-        before: (ctx) => ctx.mutations.onSetTask(node.id, true),
+        before: (ctx) => {
+          ctx.mutations.onSetTask(node.id, true);
+          if (done) ctx.mutations.onToggleCompleted(node.id, true);
+        },
       };
     },
   },
+
+  // Query filter (ADR 0047 §4): `is:complete`. Completion is the todos plugin's
+  // concept (D9), so the operator that reads it lives here too -- registered
+  // beside the core `is:todo|bullet|paragraph|mirror`, sharing the `is` key
+  // without collision (the guard is on the (key, value) pair).
+  filterOperators: TODO_FILTER_OPERATORS,
 });

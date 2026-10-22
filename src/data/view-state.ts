@@ -1,5 +1,7 @@
-import { useEffect } from 'react'
-import type { Node } from './tree'
+import { useEffect } from "react";
+
+import type { QueryFilter } from "./filter-query";
+import type { Node } from "./tree";
 
 /**
  * The editor's ephemeral *view* state (the zoom root and the composed
@@ -8,7 +10,7 @@ import type { Node } from './tree'
  * depending on this render -- exactly as {@link getTreeIndex} does for the tree
  * itself (tree-store.ts). Keeping these out of the closures' deps is what lets
  * `commands` keep its identity across renders, a prop on every memoized
- * OutlineNode (see docs/adr/0004-localized-rendering-via-the-tree-store.md).
+ * OutlineRow (see docs/adr/0004-localized-rendering-via-the-tree-store.md).
  *
  * Two read paths for the same value:
  *  - **Render reads** use the React value directly (the `rootId` prop, the
@@ -23,20 +25,44 @@ import type { Node } from './tree'
  * bailout.
  */
 
-let rootId: string | null = null
-let isHidden: (node: Node) => boolean = () => false
+let rootId: string | null = null;
+// In a view stream (ADR 0070) every section is its own root for commands: the
+// section holding the caret or pointer. Null outside a stream.
+let sectionRootId: string | null = null;
+let isHidden: (node: Node) => boolean = () => false;
+let filter: QueryFilter | null = null;
 
 /** The current zoom root, read live OUTSIDE render (event handlers, command
  *  closures, drag, hotkeys). Render reads must use the `rootId` prop instead so
  *  they stay reactive. */
 export function getViewRootId(): string | null {
-  return rootId
+  return sectionRootId ?? rootId;
+}
+
+/**
+ * Point event-time commands at one section of a view stream (ADR 0070). Each
+ * section is a zoom root of its own, so outdent limits, sibling ranges, drag
+ * targets, and the caret walk all read the section the user is working in.
+ * Pass null to fall back to the route's zoom root.
+ */
+export function setViewSectionRoot(next: string | null): void {
+  sectionRootId = next;
 }
 
 /** The current composed visibility prune (Seam-G; hide-completed today), read
  *  live OUTSIDE render. Render reads must use the `isHidden` memo instead. */
 export function getViewIsHidden(): (node: Node) => boolean {
-  return isHidden
+  return isHidden;
+}
+
+/** The active `?q=` query filter's pruned set (ADR 0047), read live OUTSIDE render. Null
+ *  when no filter is on. Event-time readers: the caret/focus walks (arrow nav,
+ *  delete-focus, selection caret exits -- they must hand back RENDERED rows,
+ *  ADR 0047 amendment) and the markdown paste, which must know whether what it
+ *  just inserted actually landed on screen (ADR 0044: a paste never mutates
+ *  view state, so it discloses instead). */
+export function getViewFilter(): QueryFilter | null {
+  return filter;
 }
 
 /**
@@ -51,7 +77,22 @@ export function useSyncViewState(
   nextIsHidden: (node: Node) => boolean,
 ): void {
   useEffect(() => {
-    rootId = nextRootId
-    isHidden = nextIsHidden
-  }, [nextRootId, nextIsHidden])
+    rootId = nextRootId;
+    isHidden = nextIsHidden;
+  }, [nextRootId, nextIsHidden]);
+  // A new zoom view starts outside any stream section.
+  useEffect(() => {
+    sectionRootId = null;
+    return () => {
+      sectionRootId = null;
+    };
+  }, [nextRootId]);
+}
+
+/** The filter is derived further down the editor than `useSyncViewState`'s
+ *  inputs (it needs `isHidden` first), so it mirrors on its own. */
+export function useSyncViewFilter(nextFilter: QueryFilter | null): void {
+  useEffect(() => {
+    filter = nextFilter;
+  }, [nextFilter]);
 }

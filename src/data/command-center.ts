@@ -1,4 +1,3 @@
-import type { ComponentType } from "react";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -13,12 +12,19 @@ import {
   MoveIcon,
   Trash2Icon,
 } from "lucide-react";
-import type { Node, TreeIndex } from "./tree";
-import { childrenOf } from "./tree";
-import { isMirrorsEnabled } from "./flags";
-import { getViewRootId } from "./view-state";
-import { commandSpecs } from "../plugins/registry";
+
+import type { CommandSpec } from "../plugins/types";
 import type { NodeActionBridge } from "./command-bridge";
+import type { CommandCenterAction } from "./command-center-types";
+import type { Node, TreeIndex } from "./tree";
+
+import { commandSpecs } from "../plugins/registry";
+import { lockCommand, paragraphCommand, unlockCommand } from "./core-commands";
+import { isMirrorsEnabled } from "./flags";
+import { childrenOf } from "./tree";
+import { getViewRootId } from "./view-state";
+
+export type { ActionScope, CommandCenterAction } from "./command-center-types";
 
 /**
  * Command center (ADR 0034): the ONE unified row descriptor the Cmd+K palette
@@ -47,20 +53,6 @@ export function resolveAmbientTargetId(
 ): string | null {
   if (focusedNodeId) return focusedNodeId;
   return getViewRootId();
-}
-
-export type ActionScope = "global" | "node";
-
-export interface CommandCenterAction {
-  id: string;
-  label: string;
-  description: string;
-  icon: ComponentType<{ className?: string }>;
-  scope: ActionScope;
-  keywords?: string[];
-  /** Display-only shortcut, one string per key cap (e.g. `["⌘", "⇧", "↑"]`). */
-  hotkey?: string[];
-  run: () => void;
 }
 
 /**
@@ -215,10 +207,14 @@ export function buildNodeVerbActions(
 }
 
 /**
- * The plugin-`CommandSpec` adapter: whole-node commands that opt IN to the
- * palette by NOT being `caretScoped` (ADR 0034 -- emphasis wrap is excluded, it
- * needs the live caret the overlay steals). Gated by each spec's own
- * `available(node)`. `run` is bound to the target id + the live PluginContext.
+ * The `CommandSpec` adapter: whole-node commands that opt IN to the palette by
+ * NOT being `caretScoped` (ADR 0034 -- emphasis wrap is excluded, it needs the
+ * live caret the overlay steals). Gated by each spec's own `available(node)`.
+ * `run` is bound to the target id + the live PluginContext.
+ *
+ * Plugin specs, then core's `/paragraph` (ADR 0045). Move/Mirror/Zoom are core
+ * specs too, but they already appear above as node VERBS, so only the paragraph
+ * spec crosses over -- no row is doubled.
  */
 export function buildCommandSpecActions(
   node: Node,
@@ -226,9 +222,15 @@ export function buildCommandSpecActions(
 ): CommandCenterAction[] {
   const { getCtx } = bridge;
   const out: CommandCenterAction[] = [];
-  for (const spec of commandSpecs) {
+  const specs: readonly CommandSpec[] = [
+    ...commandSpecs,
+    paragraphCommand,
+    lockCommand,
+    unlockCommand,
+  ];
+  for (const spec of specs) {
     if (spec.caretScoped) continue;
-    if (!spec.available(node)) continue;
+    if (!spec.available(node, getCtx())) continue;
     out.push({
       id: `cmd:${spec.id}`,
       label: spec.label,

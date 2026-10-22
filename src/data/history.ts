@@ -1,7 +1,40 @@
-import { nodesCollection } from './collection'
-import type { Node } from './schema'
-import type { TreeIndex } from './tree'
-import { instanceIdForKey } from './visible-order'
+import { Effect, Latch } from "effect";
+
+import type { Node } from "./schema";
+import type { TreeIndex } from "./tree";
+
+import { isSyncReady, nodesCollection, nodesLoadError } from "./collection";
+import { appRuntime } from "./runtime";
+import { instanceIdForKey } from "./visible-order";
+
+export interface HistoryLocation {
+  rootId: string | null;
+  rowKey: string | null;
+  caret: { start: number; end: number } | null;
+  selection: { anchorId: string; focusId: string } | null;
+}
+
+export type HistoryLabel =
+  | "edit"
+  | "typing"
+  | "create"
+  | "delete"
+  | "move"
+  | "indent"
+  | "outdent"
+  | "join"
+  | "completion"
+  | "kind"
+  | "lock"
+  | "mirror"
+  | "paste"
+  | "import"
+  | "capture";
+
+let readLocation: ((focusId: string | null) => HistoryLocation) | null = null;
+export function setHistoryLocationReader(reader: typeof readLocation): void {
+  readLocation = reader;
+}
 
 /**
  * Undo/redo history for the outline.
@@ -12,8 +45,8 @@ import { instanceIdForKey } from './visible-order'
  * ones). TanStack DB has no built-in undo -- its rollback only covers failed
  * sync -- so we own this. Snapshots beat inverse-patches here because the
  * sibling-relinking mutations are intricate and a snapshot can't drift out of
- * sync with them. The outline is small (a personal doc), so copying the whole
- * node set per action is cheap; we still cap the stack to bound memory.
+ * sync with them. Capture still copies the whole node set per action; the
+ * stack cap bounds the number of snapshots, not their outline-dependent size.
  *
  * Redo is the mirror image: undo pushes the pre-undo state onto a redo stack
  * before restoring, and redo pops it back (pushing the pre-redo state onto the
@@ -21,28 +54,139 @@ import { instanceIdForKey } from './visible-order'
  * the timeline, so the old forward history is gone. `drop` restores it, since a
  * captured-then-dropped no-op never actually changed anything.
  *
+ * `undo`/`redo` return a `RestorePlan` -- the snapshot diff pre-chunked into
+ * apply slices -- instead of writing to the collection themselves, so the
+ * caller can pick the apply path by size: a small diff (the common,
+ * keystroke-adjacent case) runs synchronously through `runStructural`, while a
+ * huge one (undoing a 17k-node OPML import or big delete) streams through
+ * `runStructuralSliced` with progress UI instead of freezing the main thread.
+ * See `components/history-restore.tsx`, the single funnel both paths share.
+ *
  * Like mutations.ts, this operates on the singleton collection directly.
  */
 
 interface Entry {
-  nodes: Node[]
+  nodes: Node[];
+  label: HistoryLabel;
+  scope: string | null;
+  location: HistoryLocation | null;
   /** Node to focus after this entry is restored (the pre-action focus). */
-  focusId: string | null
+  focusId: string | null;
   /** Coalesces consecutive same-tag captures (e.g. a typing run) into one. */
-  tag: string | null
+  tag: string | null;
 }
 
-const undoStack: Entry[] = []
-const redoStack: Entry[] = []
-const MAX_ENTRIES = 100
+const undoStack: Entry[] = [];
+const redoStack: Entry[] = [];
+const MAX_ENTRIES = 100;
+const listeners = new Set<() => void>();
+let pendingCaptures = 0;
+const capturesDrained = Latch.makeUnsafe(true);
+
+/** Quick-add can finish its destination claim after its editor has closed. */
+export function trackPendingCapture(promise: Promise<unknown>): void {
+  pendingCaptures++;
+  capturesDrained.closeUnsafe();
+  appRuntime.runFork(
+    Effect.promise(() => promise).pipe(
+      Effect.exit,
+      Effect.ensuring(
+        Effect.sync(() => {
+          pendingCaptures--;
+          if (!pendingCaptures) capturesDrained.openUnsafe();
+        }),
+      ),
+    ),
+  );
+}
+
+export const waitForPendingCapturesE = capturesDrained.await;
+
+let epoch = 0;
+let busy = false;
+let state = {
+  canUndo: false,
+  canRedo: false,
+  undoLabel: "Undo",
+  redoLabel: "Redo",
+  busy: false,
+};
+
+export function getHistoryState() {
+  return state;
+}
+export function subscribeHistory(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+function notify() {
+  const u = undoStack.at(-1);
+  const r = redoStack.at(-1);
+  state = {
+    canUndo: !busy && !!u,
+    canRedo: !busy && !!r,
+    undoLabel: u ? `Undo ${u.label}` : "Undo",
+    redoLabel: r ? `Redo ${r.label}` : "Redo",
+    busy,
+  };
+  for (const listener of listeners) listener();
+}
+export function setHistoryBusy(next: boolean) {
+  busy = next;
+  notify();
+}
+
+/** Clear both directions on external edits or session replacement. */
+export function clearHistory(): boolean {
+  const hadHistory = undoStack.length + redoStack.length > 0;
+  epoch++;
+  undoStack.length = redoStack.length = 0;
+  redoBackup = null;
+  lastCaptureRefused = false;
+  notify();
+  return hadHistory;
+}
+
+/** Fold contiguous draft steps; never reorder an independent outline action. */
+export function finishHistoryScope(scope: string, index?: TreeIndex): void {
+  for (let first = 0; first < undoStack.length; first++) {
+    const entry = undoStack[first]!;
+    if (entry.scope !== scope) continue;
+    let end = first + 1;
+    while (undoStack[end]?.scope === scope) end++;
+    undoStack.splice(first + 1, end - first - 1);
+    entry.scope = null;
+    entry.tag = null;
+    if (
+      index &&
+      first === undoStack.length - 1 &&
+      entry.nodes.length === index.byId.size &&
+      entry.nodes.every((node) => {
+        const live = index.byId.get(node.id);
+        return live && sameAuthoring(node, live);
+      })
+    )
+      undoStack.splice(first, 1);
+  }
+  for (let i = redoStack.length - 1; i >= 0; i--)
+    if (redoStack[i]!.scope === scope) redoStack.splice(i, 1);
+  notify();
+}
 
 // The redo stack as it stood just before the most recent `capture` cleared it,
 // so a captured-then-dropped no-op can put it back (see `drop`).
-let redoBackup: Entry[] | null = null
+let redoBackup: Entry[] | null = null;
+
+// Did the most recent `capture` refuse (empty index)? The command layer pairs
+// every capture with a `drop()` on the no-op arm, and that drop would otherwise
+// pop an UNRELATED older entry the refused capture never pushed. See `drop`.
+let lastCaptureRefused = false;
 
 function snapshot(index: TreeIndex): Node[] {
   // Nodes are flat records, so a shallow per-node copy is a full deep copy.
-  return Array.from(index.byId.values()).map((n) => ({ ...n }))
+  return Array.from(index.byId.values()).map((n) => ({ ...n }));
 }
 
 /**
@@ -53,20 +197,53 @@ function snapshot(index: TreeIndex): Node[] {
  * pushing. Pass `text:<id>` for keystrokes so an entire typing run on one
  * bullet collapses to a single undo step; pass null for discrete structural
  * actions so each is independently undoable.
+ *
+ * An empty snapshot is valid only after successful sync and when the live
+ * collection is also empty. Refuse incomplete reads rather than classifying
+ * every live node as a delete; genuinely empty outlines can undo creation.
  */
 export function capture(
   index: TreeIndex,
   focusId: string | null = null,
   tag: string | null = null,
+  options: {
+    label?: HistoryLabel;
+    scope?: string | null;
+    location?: HistoryLocation;
+  } = {},
 ): void {
-  const top = undoStack[undoStack.length - 1]
-  if (tag !== null && top && top.tag === tag) return
-  undoStack.push({ nodes: snapshot(index), focusId, tag })
-  if (undoStack.length > MAX_ENTRIES) undoStack.shift()
+  if (
+    index.byId.size === 0 &&
+    (!isSyncReady() || nodesLoadError() || nodesCollection.size !== 0)
+  ) {
+    lastCaptureRefused = true;
+    if (import.meta.env.DEV) {
+      console.error(
+        "[history] capture() refused an unsynced or inconsistent empty index.",
+        { focusId, tag },
+      );
+    }
+    return;
+  }
+  lastCaptureRefused = false;
+
+  const top = undoStack[undoStack.length - 1];
+  if (tag !== null && top && top.tag === tag && redoStack.length === 0) return;
+  const location = options.location ?? readLocation?.(focusId) ?? null;
+  undoStack.push({
+    nodes: snapshot(index),
+    focusId: location?.rowKey ?? focusId,
+    tag,
+    scope: options.scope ?? null,
+    location,
+    label: options.label ?? (tag?.startsWith("text:") ? "typing" : "edit"),
+  });
+  if (undoStack.length > MAX_ENTRIES) undoStack.shift();
   // A fresh action forks the timeline: the forward history no longer applies.
   // Stash it first so a no-op that gets dropped can restore it.
-  redoBackup = redoStack.slice()
-  redoStack.length = 0
+  redoBackup = redoStack.slice();
+  redoStack.length = 0;
+  notify();
 }
 
 /**
@@ -75,75 +252,218 @@ export function capture(
  * don't leave a redundant entry that makes Cmd+Z look like it did nothing.
  * Also restores the redo stack the matching `capture` cleared, since a no-op
  * never actually forked the timeline.
+ *
+ * No-ops when the matching `capture` REFUSED: there is no entry of ours to pop,
+ * and popping anyway would silently eat an unrelated older undo point. A
+ * refusal never cleared `redoStack` either, so there is nothing to restore.
  */
 export function drop(): void {
-  undoStack.pop()
-  if (redoBackup) {
-    redoStack.length = 0
-    redoStack.push(...redoBackup)
-    redoBackup = null
+  if (lastCaptureRefused) {
+    lastCaptureRefused = false;
+    return;
   }
+  undoStack.pop();
+  if (redoBackup) {
+    redoStack.length = 0;
+    redoStack.push(...redoBackup);
+    redoBackup = null;
+  }
+  notify();
 }
 
 /**
- * Reconcile the live collection to `entry`'s snapshot. Returns the id to focus
- * afterwards, or null if that node no longer exists in the restored state.
+ * At or above this many collection writes a restore should stream through
+ * `runStructuralSliced` (yielding slices + progress UI) instead of one
+ * synchronous burst; it doubles as the per-slice write count. Matches the OPML
+ * import / big-delete slice size (ADR 0037).
  */
-function restore(index: TreeIndex, entry: Entry): string | null {
-  const target = new Map(entry.nodes.map((n) => [n.id, n]))
-  const current = index.byId
+export const RESTORE_SLICE_OPS = 500;
+
+/**
+ * A snapshot restore, planned but not yet applied. The caller must run EVERY
+ * slice, in order, inside ONE transaction -- a `runStructural` body for the
+ * small case, one `runStructuralSliced` call for the big one -- or call
+ * `revert` if the apply failed and rolled back.
+ *
+ */
+export interface RestorePlan {
+  label: HistoryLabel;
+  location: HistoryLocation | null;
+  changedIds: readonly string[];
+  /** Total collection writes the restore will make. */
+  opCount: number;
+  /** Apply closures in order; each makes at most RESTORE_SLICE_OPS writes. */
+  slices: ReadonlyArray<() => void>;
+  /** Writes applied so far -- the sliced path's progress read. */
+  applied: () => number;
+  /** Row key to focus after the restore, or null if that node is gone. */
+  focusId: string | null;
+  /** Roll the stack bookkeeping back after a failed (rolled-back) apply. */
+  revert: () => void;
+}
+
+/** Only authoring fields participate in undo. Browsing and metadata remain live. */
+const AUTHORING_FIELDS = [
+  "parentId",
+  "prevSiblingId",
+  "text",
+  "isTask",
+  "completed",
+  "mirrorOf",
+  "kind",
+] as const satisfies readonly (keyof Node)[];
+
+export function sameAuthoring(a: Node, b: Node): boolean {
+  return AUTHORING_FIELDS.every((key) => a[key] === b[key]);
+}
+
+/**
+ * Diff the live collection against `entry`'s snapshot into chunked apply
+ * slices: delete rows added since, re-insert removed ones, overwrite changed
+ * ones. Unchanged nodes are skipped -- the diff size is also what picks the
+ * sync-vs-sliced apply path, so it must reflect real writes, not outline size.
+ */
+function planRestore(
+  index: TreeIndex,
+  entry: Entry,
+  revert: () => void,
+): RestorePlan {
+  const target = new Map(entry.nodes.map((n) => [n.id, n]));
+  const current = index.byId;
 
   // Anything that exists now but not in the snapshot was added since: remove it.
+  const deletes: string[] = [];
   for (const id of current.keys()) {
-    if (!target.has(id)) nodesCollection.delete(id)
+    if (!target.has(id)) deletes.push(id);
   }
-  // Re-insert removed nodes and overwrite changed ones to match the snapshot.
+  // Re-insert removed nodes; overwrite only the ones that actually changed.
+  const upserts: Node[] = [];
   for (const [id, node] of target) {
-    if (!current.has(id)) {
-      nodesCollection.insert({ ...node })
-    } else {
-      nodesCollection.update(id, (draft) => Object.assign(draft, node))
-    }
+    const live = current.get(id);
+    if (!live || !sameAuthoring(live, node)) upserts.push(node);
   }
 
-  // Only focus if the focused node still exists in the restored state. The focus
-  // identity may be a row KEY (a path address inside a mirror, ADR 0022); gate on
-  // the node it points at (the key's last segment) but return the full key, so
-  // focus lands back in the same instance the user was editing. For a mirror-free
-  // row key === id, so this is identical to a bare-id check.
-  return entry.focusId && target.has(instanceIdForKey(entry.focusId))
-    ? entry.focusId
-    : null
+  let applied = 0;
+  const slices: Array<() => void> = [];
+  for (let i = 0; i < deletes.length; i += RESTORE_SLICE_OPS) {
+    const chunk = deletes.slice(i, i + RESTORE_SLICE_OPS);
+    slices.push(() => {
+      nodesCollection.delete(chunk);
+      applied += chunk.length;
+    });
+  }
+  for (let i = 0; i < upserts.length; i += RESTORE_SLICE_OPS) {
+    const chunk = upserts.slice(i, i + RESTORE_SLICE_OPS);
+    slices.push(() => {
+      // Insert-vs-update is decided at apply time: an earlier slice (or the
+      // surrounding transaction) may already have written the row.
+      const inserts: Node[] = [];
+      for (const node of chunk) {
+        if (nodesCollection.has(node.id)) {
+          nodesCollection.update(node.id, (draft) => {
+            for (const key of AUTHORING_FIELDS) {
+              // Each value comes from the same field on a schema-validated row.
+              Object.assign(draft, { [key]: node[key] });
+            }
+            draft.updatedAt = Date.now();
+          });
+        } else {
+          inserts.push({ ...node });
+        }
+      }
+      if (inserts.length) nodesCollection.insert(inserts);
+      applied += chunk.length;
+    });
+  }
+
+  return {
+    label: entry.label,
+    location: entry.location,
+    changedIds: [...deletes, ...upserts.map((n) => n.id)],
+    opCount: deletes.length + upserts.length,
+    slices,
+    applied: () => applied,
+    // Only focus if the focused node still exists in the restored state. The focus
+    // identity may be a row KEY (a path address inside a mirror, ADR 0022); gate on
+    // the node it points at (the key's last segment) but return the full key, so
+    // focus lands back in the same instance the user was editing. For a mirror-free
+    // row key === id, so this is identical to a bare-id check.
+    focusId:
+      entry.focusId && target.has(instanceIdForKey(entry.focusId))
+        ? entry.focusId
+        : null,
+    revert,
+  };
 }
 
 /**
- * Restore the most recent undo point. Before overwriting the live state we push
- * it onto the redo stack (tagged with the currently-focused node) so redo can
- * return to it. Returns the id to focus afterwards, or null if there was
- * nothing to undo.
+ * Plan a restore of the most recent undo point. Before handing out the plan we
+ * push the live state onto the redo stack (tagged with the currently-focused
+ * node) so redo can return to it. Returns null if there was nothing to undo.
  */
-export function undo(index: TreeIndex, focusId: string | null = null): string | null {
-  const entry = undoStack.pop()
-  if (!entry) return null
+export function undo(
+  index: TreeIndex,
+  focusId: string | null = null,
+  scope?: string,
+): RestorePlan | null {
+  if (scope !== undefined && undoStack.at(-1)?.scope !== scope) return null;
+  const entry = undoStack.pop();
+  if (!entry) return null;
 
-  redoStack.push({ nodes: snapshot(index), focusId, tag: null })
-  if (redoStack.length > MAX_ENTRIES) redoStack.shift()
+  const atEpoch = epoch;
+  redoStack.push({
+    nodes: snapshot(index),
+    focusId,
+    tag: null,
+    label: entry.label,
+    scope: entry.scope,
+    location: readLocation?.(focusId) ?? null,
+  });
+  const overflow =
+    redoStack.length > MAX_ENTRIES ? redoStack.shift() : undefined;
+  notify();
 
-  return restore(index, entry)
+  return planRestore(index, entry, () => {
+    if (epoch !== atEpoch) return;
+    redoStack.pop();
+    if (overflow) redoStack.unshift(overflow);
+    undoStack.push(entry);
+    notify();
+  });
 }
 
 /**
- * Re-apply the most recently undone action. The mirror of `undo`: push the
- * current (pre-redo) state back onto the undo stack, then restore the redo
- * snapshot. Returns the id to focus afterwards, or null if there was nothing to
- * redo.
+ * Plan a re-apply of the most recently undone action. The mirror of `undo`:
+ * push the current (pre-redo) state back onto the undo stack, then plan the
+ * restore of the redo snapshot. Returns null if there was nothing to redo.
  */
-export function redo(index: TreeIndex, focusId: string | null = null): string | null {
-  const entry = redoStack.pop()
-  if (!entry) return null
+export function redo(
+  index: TreeIndex,
+  focusId: string | null = null,
+  scope?: string,
+): RestorePlan | null {
+  if (scope !== undefined && redoStack.at(-1)?.scope !== scope) return null;
+  const entry = redoStack.pop();
+  if (!entry) return null;
 
-  undoStack.push({ nodes: snapshot(index), focusId, tag: null })
-  if (undoStack.length > MAX_ENTRIES) undoStack.shift()
+  const atEpoch = epoch;
+  undoStack.push({
+    nodes: snapshot(index),
+    focusId,
+    tag: null,
+    label: entry.label,
+    scope: entry.scope,
+    location: readLocation?.(focusId) ?? null,
+  });
+  const overflow =
+    undoStack.length > MAX_ENTRIES ? undoStack.shift() : undefined;
+  notify();
 
-  return restore(index, entry)
+  return planRestore(index, entry, () => {
+    if (epoch !== atEpoch) return;
+    undoStack.pop();
+    if (overflow) undoStack.unshift(overflow);
+    redoStack.push(entry);
+    notify();
+  });
 }

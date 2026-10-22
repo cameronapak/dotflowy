@@ -14,11 +14,33 @@
  * container can't be deleted, blanked, made a task, or completed (ADR 0015).
  */
 
-import { Data, Effect, Schema } from 'effect'
-import { createId } from '../src/data/tree'
-import type { ChangeOp, Node } from '../src/data/wire-schema'
+import { Clock, Data, Effect, Schema } from "effect";
+
+import type { ChangeOp, Node } from "../src/data/wire-schema";
+import type { KvClaim } from "./outline-do";
+
 import {
+  DEFAULT_WEEK_START,
+  PROTECTED_SCAFFOLD_KINDS,
+  dayKeyToScaffoldChain,
+  scaffoldKeyKind,
+  scaffoldLabel,
+  type WeekStart,
+} from "../src/data/date-links";
+import { embedUrl } from "../src/data/embed-url";
+import { exportOpml } from "../src/data/opml-export";
+import {
+  OPML_MCP_MAX_NODES,
+  type OpmlImportReport,
+  parseOpml,
+  planOpmlImport,
+} from "../src/data/opml-import";
+import { redactSpoilers } from "../src/data/spoiler";
+import { childrenOf, createId } from "../src/data/tree";
+import {
+  type NodeFieldChanges,
   DAILY_CONTAINER_TEXT,
+  type DailyScaffold,
   type TreeIndex,
   buildTreeIndex,
   flattenSubtree,
@@ -32,17 +54,19 @@ import {
   planAddSubtreeToDaily,
   planAddToDaily,
   planDeleteNode,
+  planEnsureDaily,
   planMirrorNode,
   planMirrorToDaily,
   planReparent,
   planUpdateNode,
-  searchNodes,
+  redactSpoilerIndex,
   trueSourceOf,
-} from './outline-ops'
+} from "./outline-ops";
+import { SearchInput, SearchPage, searchPage } from "./search";
 
 // Re-exported so worker/index.ts can hand the DO stub over without importing
 // the planner module directly.
-export type { ChangeOp, Node }
+export type { ChangeOp, Node };
 
 /**
  * The slice of the per-user DO a tool needs. `DurableObjectStub<UserOutlineDO>`
@@ -50,27 +74,77 @@ export type { ChangeOp, Node }
  * cover an in-process fake in tests).
  */
 export interface OutlineStore {
-  getNodes(): Node[] | Promise<Node[]>
-  applyBatch(ops: readonly ChangeOp[]): number | Promise<number>
-  getKv(collection: string): unknown[] | Promise<unknown[]>
-  getOrCreateKv(collection: string, key: string, value: unknown): unknown | Promise<unknown>
+  getNodes(): Node[] | Promise<Node[]>;
+  applyBatch(
+    ops: readonly ChangeOp[],
+    expectedWeekStart?: WeekStart,
+  ): number | Promise<number>;
+  getKv(collection: string): unknown[] | Promise<unknown[]>;
+  getOrCreateKv(
+    collection: string,
+    key: string,
+    value: KvClaim,
+  ): KvClaim | Promise<KvClaim>;
+  migrateWeekStart?(
+    weekStart: WeekStart,
+    limit: number | null,
+  ):
+    | { weekStart: WeekStart; seq: number }
+    | { error: "node_limit" | "locked" }
+    | Promise<
+        | { weekStart: WeekStart; seq: number }
+        | { error: "node_limit" | "locked" }
+      >;
+  canonicalizeWeekStart?(
+    limit: number | null,
+  ):
+    | { weekStart: WeekStart; seq: number }
+    | { error: "node_limit" | "locked" }
+    | Promise<
+        | { weekStart: WeekStart; seq: number }
+        | { error: "node_limit" | "locked" }
+      >;
 }
 
 /** A tool execution failure — surfaces as an `isError` tool result (the MCP
  *  shape for "the tool ran and refused"), never a protocol-level error. */
-export class ToolError extends Data.TaggedError('ToolError')<{ reason: string }> {
+export class ToolError extends Data.TaggedError("ToolError")<{
+  reason: string;
+}> {
   get message() {
-    return this.reason
+    return this.reason;
   }
 }
 
+export interface ToolResult {
+  content: Array<{ type: "text"; text: string }>;
+  structuredContent?: SearchPage;
+  isError?: boolean;
+}
+
+export type AfterTextWrite = (
+  writes: Array<{
+    nodeId: string;
+    before: string;
+    text: string;
+  }>,
+) => void;
+
 export interface ToolDef {
-  name: string
-  description: string
-  /** Input contract; also the source of the published JSON Schema. */
-  input: Schema.Struct<any>
+  name: string;
+  /** Human-readable name published as MCP `annotations.title`. */
+  title: string;
+  description: string;
+  /** Input contract; also the source of the published JSON Schema. Typed as
+   *  the decode-ready schema seam (never services) so consumers of the
+   *  registry don't inherit `any` from an erased `Schema.Struct<any>`. */
+  input: Schema.Top & { readonly DecodingServices: never };
+  /** Published contract for tools that return structuredContent. */
+  output?: Schema.Top & { readonly DecodingServices: never };
   /** MCP `readOnlyHint` — true for tools that never write. */
-  readOnly: boolean
+  readOnly: boolean;
+  /** True when the tool can delete or overwrite existing node content. */
+  destructive: boolean;
   /** `origin` is the caller's provenance stamp — the OAuth client's harness name
    *  (worker/index.ts resolves it from the bearer token), written onto every node
    *  a write tool creates so the editor can tell agent edits from the user's own.
@@ -79,34 +153,119 @@ export interface ToolDef {
     input: any,
     store: OutlineStore,
     origin: string | null,
-  ) => Effect.Effect<string, ToolError>
+    afterTextWrite?: AfterTextWrite,
+  ) => Effect.Effect<string | ToolResult, ToolError>;
 }
 
 // --- Shared plumbing ----------------------------------------------------------
 
-const loadIndex = (store: OutlineStore): Effect.Effect<TreeIndex> =>
-  Effect.promise(async () => buildTreeIndex(await store.getNodes()))
+/** Store failures carry real diagnostics (e.g. the Lunora shard's SQLite
+ *  message). `Effect.promise` would turn them into defects, which the MCP
+ *  endpoint reports as a bare "internal error" — so every store call goes
+ *  through `tryPromise` with a catch that lifts the failure's message into
+ *  the typed ToolError channel. */
+const toolErrorFrom = (error: Error): ToolError =>
+  new ToolError({ reason: error.message });
 
-const commit = (store: OutlineStore, ops: ReadonlyArray<ChangeOp>): Effect.Effect<void> =>
-  Effect.promise(async () => {
-    if (ops.length) await store.applyBatch(ops)
-  })
+const loadIndex = (store: OutlineStore): Effect.Effect<TreeIndex, ToolError> =>
+  Effect.tryPromise({
+    try: async () => buildTreeIndex(await store.getNodes()),
+    // SAFETY: Effect's catch hands us the untyped rejection; Error messages carry the real diagnostics (e.g. the shard's SQLite error), anything else stringifies.
+    catch: (error) =>
+      error instanceof Error
+        ? toolErrorFrom(error)
+        : new ToolError({ reason: String(error) }),
+  });
+
+const commit = (
+  store: OutlineStore,
+  ops: ReadonlyArray<ChangeOp>,
+  expectedWeekStart?: WeekStart,
+): Effect.Effect<void, ToolError> =>
+  Effect.tryPromise({
+    try: async () => {
+      if (ops.length) await store.applyBatch(ops, expectedWeekStart);
+    },
+    // SAFETY: Effect's catch hands us the untyped rejection; Error messages carry the real diagnostics (e.g. the shard's SQLite error), anything else stringifies.
+    catch: (error) =>
+      error instanceof Error
+        ? toolErrorFrom(error)
+        : new ToolError({ reason: String(error) }),
+  });
+
+/** Only explicit text-authoring tools schedule enrichment, never moves,
+ * imports, mirrors, or generic persistence. The response need not wait. */
+const commitText = (
+  store: OutlineStore,
+  ops: readonly ChangeOp[],
+  index: TreeIndex,
+  afterTextWrite: AfterTextWrite | undefined,
+  expectedWeekStart?: WeekStart,
+) =>
+  commit(store, ops, expectedWeekStart).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        const writes = ops.flatMap((op) => {
+          if (
+            op.op === "delete" ||
+            op.value.mirrorOf ||
+            op.value.kind === "embed"
+          )
+            return [];
+          const before = index.byId.get(op.value.id)?.text ?? "";
+          return before === op.value.text
+            ? []
+            : [{ nodeId: op.value.id, before, text: op.value.text }];
+        });
+        afterTextWrite?.(writes);
+      }),
+    ),
+  );
 
 /** Lift a planner's value-shaped failure into the tool error channel,
  *  narrowing the success side (the planners' errors all extend `Error`). */
 const unwrap = <A>(result: A): Effect.Effect<Exclude<A, Error>, ToolError> =>
   result instanceof Error
     ? Effect.fail(new ToolError({ reason: result.message }))
-    : Effect.succeed(result as Exclude<A, Error>)
+    : // SAFETY: the instanceof Error branch above removed the Error side of A.
+      Effect.succeed(result as Exclude<A, Error>);
 
-const clock = Effect.sync(() => Date.now())
+const explicitText = (
+  kind: "paragraph" | "embed" | null | undefined,
+  text: string,
+): Effect.Effect<string, ToolError> => {
+  if (kind !== "embed") return Effect.succeed(text);
+  const url = embedUrl(text);
+  return url
+    ? Effect.succeed(url)
+    : Effect.fail(
+        new ToolError({
+          reason:
+            "Embed text must be a single HTTPS URL without credentials (a sole markdown link is also accepted)",
+        }),
+      );
+};
+
+const normalizeForest = (
+  nodes: ReadonlyArray<SubtreeInput>,
+): Effect.Effect<SubtreeInput[], ToolError> =>
+  Effect.forEach(nodes, (node) =>
+    Effect.gen(function* () {
+      const text = yield* explicitText(node.kind, node.text);
+      const children = yield* normalizeForest(node.children ?? []);
+      return { ...node, text, children };
+    }),
+  );
 
 // --- Daily-index claims -------------------------------------------------------
 
-const KV_DAILY = 'daily-index'
-const CONTAINER_KEY = 'container'
+const KV_DAILY = "daily-index";
+const CONTAINER_KEY = "container";
 
-const DailyRowSchema = Schema.Struct({ key: Schema.String, nodeId: Schema.String })
+const DailyRowSchema = Schema.Struct({
+  key: Schema.String,
+  nodeId: Schema.String,
+});
 
 /** Atomically claim `key -> candidate` in the daily index and return the
  *  authoritative winner — the DO-side twin of the client's `claimMapping`. */
@@ -116,144 +275,389 @@ const claimDailyId = (
   candidate: string,
 ): Effect.Effect<string, ToolError> =>
   Effect.gen(function* () {
-    const raw = yield* Effect.promise(() =>
-      Promise.resolve(store.getOrCreateKv(KV_DAILY, key, { key, nodeId: candidate })),
-    )
+    const raw = yield* Effect.tryPromise({
+      try: () =>
+        Promise.resolve(
+          store.getOrCreateKv(KV_DAILY, key, { key, nodeId: candidate }),
+        ),
+      // SAFETY: Effect's catch hands us the untyped rejection; Error messages carry the real diagnostics (e.g. the shard's SQLite error), anything else stringifies.
+      catch: (error) =>
+        error instanceof Error
+          ? toolErrorFrom(error)
+          : new ToolError({ reason: String(error) }),
+    });
     const row = yield* Schema.decodeUnknownEffect(DailyRowSchema)(raw).pipe(
-      Effect.mapError(() => new ToolError({ reason: `daily index row for "${key}" is malformed` })),
-    )
-    return row.nodeId
-  })
+      Effect.mapError(
+        () =>
+          new ToolError({
+            reason: `daily index row for "${key}" is malformed`,
+          }),
+      ),
+    );
+    return row.nodeId;
+  });
 
-/** The daily container's node id, if one has been claimed (no side effects). */
-const containerIdOf = (store: OutlineStore): Effect.Effect<string | null> =>
+/** The daily-index reverse map (nodeId -> scaffold key) — powers both the
+ *  chronological-ascending sibling insertion in `planEnsureDaily` and the
+ *  server-side protection guards (which resolve a node id to its scaffold kind).
+ *  A read, no side effects. */
+const loadDailyReverseMap = (
+  store: OutlineStore,
+): Effect.Effect<ReadonlyMap<string, string>, ToolError> =>
   Effect.gen(function* () {
-    const rows = yield* Effect.promise(() => Promise.resolve(store.getKv(KV_DAILY)))
+    const rows = yield* Effect.tryPromise({
+      try: () => Promise.resolve(store.getKv(KV_DAILY)),
+      // SAFETY: Effect's catch hands us the untyped rejection; Error messages carry the real diagnostics (e.g. the shard's SQLite error), anything else stringifies.
+      catch: (error) =>
+        error instanceof Error
+          ? toolErrorFrom(error)
+          : new ToolError({ reason: String(error) }),
+    });
+    const map = new Map<string, string>();
     for (const raw of rows) {
-      const row = Schema.decodeUnknownOption(DailyRowSchema)(raw)
-      if (row._tag === 'Some' && row.value.key === CONTAINER_KEY) return row.value.nodeId
+      const row = Schema.decodeUnknownOption(DailyRowSchema)(raw);
+      if (row._tag === "Some") map.set(row.value.nodeId, row.value.key);
     }
-    return null
-  })
+    return map;
+  });
 
-/** Resolve the tool's optional `date` input to a valid `YYYY-MM-DD` key. The
- *  default is the server's UTC today — tools advertise that callers should pass
- *  the user's local date, since the Worker can't know their timezone. */
-const resolveDateKey = (date: string | null | undefined): Effect.Effect<string, ToolError> =>
-  date == null
-    ? Effect.sync(() => new Date().toISOString().slice(0, 10))
-    : isValidDateKey(date)
+const loadWeekStart = (
+  store: OutlineStore,
+): Effect.Effect<WeekStart, ToolError> =>
+  Effect.gen(function* () {
+    const rows = yield* Effect.tryPromise({
+      try: () => Promise.resolve(store.getKv("account-prefs")),
+      catch: (error) =>
+        error instanceof Error
+          ? toolErrorFrom(error)
+          : new ToolError({ reason: String(error) }),
+    });
+    const schema = Schema.Struct({
+      key: Schema.Literal("daily:week-start"),
+      weekStart: Schema.Literals(["sunday", "monday"]),
+    });
+    for (const raw of rows) {
+      const decoded = Schema.decodeUnknownOption(schema)(raw);
+      if (decoded._tag === "Some") return decoded.value.weekStart;
+    }
+    return DEFAULT_WEEK_START;
+  });
+
+/** The claimed ids of the whole `Daily > YYYY > Month > Week > Day` chain plus
+ *  the reverse map — the DO-side twin of the client's ensure cascade (issue
+ *  #271). Each level is claimed atomically PER LEVEL through `getOrCreateKv`, so
+ *  two concurrent agents converge on ONE node per level; `planEnsureDaily` then
+ *  materializes whichever rows are missing and sorts them into place. */
+const claimDailyScaffold = (
+  store: OutlineStore,
+  dateKey: string,
+): Effect.Effect<DailyScaffold & { index: TreeIndex }, ToolError> =>
+  Effect.gen(function* () {
+    if (store.canonicalizeWeekStart) {
+      const migrated = yield* Effect.tryPromise({
+        try: () => Promise.resolve(store.canonicalizeWeekStart!(null)),
+        catch: (error) =>
+          error instanceof Error
+            ? toolErrorFrom(error)
+            : new ToolError({ reason: String(error) }),
+      });
+      if ("error" in migrated) {
+        return yield* Effect.fail(
+          new ToolError({
+            reason:
+              migrated.error === "locked"
+                ? "calendar migration is blocked by a locked node"
+                : "calendar migration exceeds the node limit",
+          }),
+        );
+      }
+    }
+    const weekStart = yield* loadWeekStart(store);
+    const chain = dayKeyToScaffoldChain(dateKey, weekStart);
+    if (!chain) {
+      return yield* Effect.fail(
+        new ToolError({
+          reason: `invalid date "${dateKey}" — can't place it on the calendar`,
+        }),
+      );
+    }
+    // Container + day claims and the reverse-map fetch are independent, so run
+    // them CONCURRENTLY (finding 6/8b: was 6 sequential RPCs). Each claim is a
+    // per-key atomic `getOrCreateKv` on a FRESH candidate id, and nothing reads
+    // another claim's result, so the batch is race-safe.
+    const [containerId, dayId, keyByNodeId] = yield* Effect.all(
+      [
+        claimDailyId(store, CONTAINER_KEY, createId()),
+        claimDailyId(store, dateKey, createId()),
+        loadDailyReverseMap(store),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    // The Y/M/W scaffold is claimed ONLY when the day node is absent (finding 6,
+    // mirroring `planEnsureDaily`'s early-return): an existing (pre-migration
+    // flat) day is reused verbatim and never gets a parallel scaffold, so no
+    // dangling kv mappings. One index read decides -- and it's RETURNED so the
+    // caller reuses it (finding 6): nothing between here and the caller's plan
+    // mutates nodes (only kv claims), so a second `loadIndex` would rebuild the
+    // identical tree.
+    const index = yield* loadIndex(store);
+    if (index.byId.has(dayId))
+      return { containerId, dayId, keyByNodeId, weekStart, index };
+
+    const [yearId, monthId, weekId] = yield* Effect.all(
+      [
+        claimDailyId(store, chain.yearKey, createId()),
+        claimDailyId(store, chain.monthKey, createId()),
+        claimDailyId(store, chain.weekKey, createId()),
+      ],
+      { concurrency: "unbounded" },
+    );
+    return {
+      containerId,
+      yearId,
+      monthId,
+      weekId,
+      dayId,
+      keyByNodeId,
+      weekStart,
+      index,
+    };
+  });
+
+/** The calendar day a given instant falls on in a given IANA timezone — the
+ *  server-side twin of the client's `localDateKey`, for an arbitrary zone
+ *  instead of the browser's own. Uses the formatter rather than offset math so
+ *  DST and historical zone changes are the engine's problem, not ours. */
+const todayInZone = (now: number, timeZone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(now));
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+};
+
+/** Resolve the tool's optional `date` input to a valid `YYYY-MM-DD` key. An
+ *  explicit `date` wins outright. Otherwise "today" is the caller's local day
+ *  when a `timeZone` is given (matching `localDateKey` in the app), else UTC
+ *  today — tools advertise that callers should pass the user's local date, since
+ *  the Worker can't otherwise know their timezone. */
+const resolveDateKey = (
+  date: string | null | undefined,
+  timeZone: string | null | undefined,
+  now: number,
+): Effect.Effect<string, ToolError> => {
+  // Validate the timezone even when `date` wins: a typo'd zone is a caller bug
+  // worth surfacing, and it keeps `tools/list`'s promise that a bad value is
+  // refused rather than silently ignored.
+  if (timeZone != null) {
+    try {
+      // Throws RangeError for anything that isn't a real IANA zone name.
+      new Intl.DateTimeFormat("en", { timeZone });
+    } catch {
+      return Effect.fail(
+        new ToolError({
+          reason: `invalid timeZone "${timeZone}" — expected a real IANA name (e.g. America/New_York)`,
+        }),
+      );
+    }
+  }
+  if (date != null) {
+    return isValidDateKey(date)
       ? Effect.succeed(date)
-      : Effect.fail(new ToolError({ reason: `invalid date "${date}" — expected a real YYYY-MM-DD` }))
+      : Effect.fail(
+          new ToolError({
+            reason: `invalid date "${date}" — expected a real YYYY-MM-DD`,
+          }),
+        );
+  }
+  const key =
+    timeZone != null
+      ? todayInZone(now, timeZone)
+      : new Date(now).toISOString().slice(0, 10);
+  return Effect.succeed(key);
+};
 
 // --- Protection (ADR 0015, server-enforced) -----------------------------------
+// The daily container AND every intermediate calendar scaffold node (year,
+// month, week) are protected: no delete / blank / to-do / complete (issue #271
+// decision 6). Deleting any of them cascades — an unprotected week delete would
+// take its days with it. Days themselves are content, so they stay editable and
+// deletable. A node's protection is resolved from the daily-index reverse map:
+// its key's `scaffoldKeyKind` tells container/year/month/week apart from day.
 
-const guardContainerDelete = (
-  containerId: string | null,
+/** The human label for a PROTECTED scaffold node (container/year/month/week), or
+ *  null when the key is a day or unknown (not protected). */
+const protectedScaffoldLabel = (key: string): string | null => {
+  const kind = scaffoldKeyKind(key);
+  // Which kinds are protected is the shared source of truth (finding 10b), so
+  // the client and Worker can't drift on it. The label derives from the shared
+  // `scaffoldLabel` (10c); the phrasing stays Worker-local.
+  if (!kind || !PROTECTED_SCAFFOLD_KINDS.has(kind)) return null;
+  switch (kind) {
+    case "container":
+      return `the "${DAILY_CONTAINER_TEXT}" container`;
+    case "year":
+      return `the "${scaffoldLabel(key)}" calendar year`;
+    case "month":
+      return `the "${scaffoldLabel(key)}" calendar month`;
+    case "week":
+      return `the "${scaffoldLabel(key)}" calendar week`;
+    default:
+      return null; // day (content) or unknown
+  }
+};
+
+const guardScaffoldDelete = (
+  keyByNodeId: ReadonlyMap<string, string>,
   deletedIds: ReadonlyArray<string>,
-): Effect.Effect<void, ToolError> =>
-  containerId && deletedIds.includes(containerId)
-    ? Effect.fail(
+): Effect.Effect<void, ToolError> => {
+  for (const id of deletedIds) {
+    const key = keyByNodeId.get(id);
+    const label = key ? protectedScaffoldLabel(key) : null;
+    if (label)
+      return Effect.fail(
         new ToolError({
-          reason: `the "${DAILY_CONTAINER_TEXT}" container is protected and can't be deleted`,
+          reason: `${label} is protected and can't be deleted (it holds your daily notes)`,
         }),
-      )
-    : Effect.void
+      );
+  }
+  return Effect.void;
+};
 
-const guardContainerUpdate = (
+const guardScaffoldUpdate = (
   index: TreeIndex,
-  containerId: string | null,
+  keyByNodeId: ReadonlyMap<string, string>,
   nodeId: string,
   changes: { text?: string; isTask?: boolean; completed?: boolean },
 ): Effect.Effect<void, ToolError> => {
-  if (!containerId) return Effect.void
-  if (!index.byId.has(nodeId)) return Effect.void
-  if (trueSourceOf(index, nodeId) !== containerId && nodeId !== containerId) return Effect.void
+  if (!index.byId.has(nodeId)) return Effect.void;
+  // A content edit follows the mirror's true source; check both the raw id and
+  // its source so a mirror of a scaffold node is guarded too.
+  const key =
+    keyByNodeId.get(trueSourceOf(index, nodeId)) ?? keyByNodeId.get(nodeId);
+  const label = key ? protectedScaffoldLabel(key) : null;
+  if (!label) return Effect.void;
   const violation =
     changes.text !== undefined && !changes.text.trim()
-      ? "blanked (it's how daily notes are found)"
+      ? "blanked (it's how your daily notes are found)"
       : changes.isTask
-        ? 'made a to-do'
+        ? "made a to-do"
         : changes.completed
-          ? 'completed'
-          : null
+          ? "completed"
+          : null;
   return violation
     ? Effect.fail(
         new ToolError({
-          reason: `the "${DAILY_CONTAINER_TEXT}" container is protected and can't be ${violation}`,
+          reason: `${label} is protected and can't be ${violation}`,
         }),
       )
-    : Effect.void
-}
+    : Effect.void;
+};
 
 // --- Input schemas ------------------------------------------------------------
 // `Schema.optional(Schema.NullOr(...))` throughout: the published JSON Schema
 // advertises `T | null`, and the decoder accepts BOTH an omitted key and an
 // explicit null — agents routinely send either.
 
-const optional = <S extends Schema.Top>(schema: S) => Schema.optional(Schema.NullOr(schema))
+const optional = <S extends Schema.Top>(schema: S) =>
+  Schema.optional(Schema.NullOr(schema));
+
+/** Core node kind. Omit it (or pass null) for an ordinary bullet/to-do. */
+const kindField = optional(
+  Schema.Literals(["paragraph", "embed"]).annotate({
+    description:
+      "Create as paragraph prose or as an Embed. Embed text must be one HTTPS URL (a sole markdown link is accepted and normalized). Mutually exclusive with isTask.",
+  }),
+);
+
+const dateField = optional(
+  Schema.String.annotate({
+    description:
+      "The day's date as YYYY-MM-DD. Pass the user's local date; defaults to today in UTC.",
+  }),
+);
+
+/** The caller's IANA timezone (e.g. "America/New_York", "Asia/Tokyo"). When the
+ *  `date` is omitted, "today" resolves in this timezone instead of UTC — so a
+ *  late-evening capture lands on the user's own calendar day. On the tools where
+ *  `date` is a required target selector (add_subtree / import_opml), it is
+ *  ignored unless `date` is present, and an explicit `date` always wins. */
+const timeZoneField = optional(
+  Schema.String.annotate({
+    description:
+      "The caller's IANA timezone (e.g. America/New_York, Asia/Tokyo). When `date` is omitted, today resolves in this timezone instead of UTC; an explicit date always wins.",
+  }),
+);
 
 const GetOutlineInput = Schema.Struct({
   nodeId: optional(
     Schema.String.annotate({
-      description: 'Root node to read from. Omit to read the whole outline from the top level.',
+      description:
+        "Root node to read from. Omit to read the whole outline from the top level.",
     }),
   ),
   maxDepth: optional(
     Schema.Int.annotate({
-      description: 'How many levels deep to read (default: unlimited).',
+      description: "How many levels deep to read (default: unlimited).",
     }),
   ),
-})
-
-const SearchNodesInput = Schema.Struct({
-  query: Schema.String.annotate({
-    description: 'Case-insensitive text to find in node text.',
-  }),
-})
+});
 
 const AddNodeInput = Schema.Struct({
-  text: Schema.String.annotate({ description: 'The bullet text.' }),
+  text: Schema.String.annotate({ description: "The bullet text." }),
   parentId: optional(
     Schema.String.annotate({
-      description: 'Parent node id. Omit to add at the top level.',
+      description: "Parent node id. Omit to add at the top level.",
     }),
   ),
   position: optional(
-    Schema.Literals(['first', 'last']).annotate({
-      description: 'Insert as the first or last child (default: last).',
+    Schema.Literals(["first", "last"]).annotate({
+      description: "Insert as the first or last child (default: last).",
     }),
   ),
   isTask: optional(
-    Schema.Boolean.annotate({ description: 'Create as a to-do with a checkbox (default: false).' }),
+    Schema.Boolean.annotate({
+      description: "Create as a to-do with a checkbox (default: false).",
+    }),
   ),
-})
+  kind: kindField,
+});
 
 /** One node in an `add_subtree` forest — recursive via `Schema.suspend`, which
  *  publishes as a named `$ref`/`$defs` in `tools/list` (ADR 0028). Fresh content
  *  only: text + optional to-do flag + optional nested children. The decoded type
  *  IS the planner's own `SubtreeInput` — one shape, one source. */
 const SubtreeNodeInput: Schema.Codec<SubtreeInput> = Schema.Struct({
-  text: Schema.String.annotate({ description: 'The bullet text.' }),
+  text: Schema.String.annotate({ description: "The bullet text." }),
   isTask: optional(
-    Schema.Boolean.annotate({ description: 'Create as a to-do with a checkbox (default: false).' }),
-  ),
-  children: optional(
-    Schema.Array(Schema.suspend((): Schema.Codec<SubtreeInput> => SubtreeNodeInput)).annotate({
-      description: 'Nested child bullets, each with this same shape.',
+    Schema.Boolean.annotate({
+      description: "Create as a to-do with a checkbox (default: false).",
     }),
   ),
-}).annotate({ identifier: 'SubtreeNode' })
+  kind: kindField,
+  children: optional(
+    Schema.Array(
+      Schema.suspend((): Schema.Codec<SubtreeInput> => SubtreeNodeInput),
+    ).annotate({
+      description: "Nested child bullets, each with this same shape.",
+    }),
+  ),
+}).annotate({ identifier: "SubtreeNode" });
 
 const AddSubtreeInput = Schema.Struct({
   nodes: Schema.Array(SubtreeNodeInput).annotate({
     description:
-      'The bullets to create, as a nested forest. Each node may carry its own `children`, so a whole outline lands in one call.',
+      "The bullets to create, as a nested forest. Each node may carry its own `children`, so a whole outline lands in one call.",
   }),
   parentId: optional(
     Schema.String.annotate({
       description:
-        'Parent node id to add under. Omit for the top level. Mutually exclusive with `date`.',
+        "Parent node id to add under. Omit for the top level. Mutually exclusive with `date`.",
     }),
   ),
   date: optional(
@@ -262,295 +666,538 @@ const AddSubtreeInput = Schema.Struct({
         "Add onto the daily note for this YYYY-MM-DD instead of a parent (pass the user's local date). Mutually exclusive with `parentId`.",
     }),
   ),
-  position: optional(
-    Schema.Literals(['first', 'last']).annotate({
+  timeZone: optional(
+    Schema.String.annotate({
       description:
-        'Insert the forest as the first or last children of the parent (default: last). Ignored for the `date` path, which always appends.',
+        "The caller's IANA timezone (e.g. America/New_York). Refines an omitted `date` on the daily path; ignored at the top level (no `date`), and an explicit `date` wins.",
     }),
   ),
-})
+  position: optional(
+    Schema.Literals(["first", "last"]).annotate({
+      description:
+        "Insert the forest as the first or last children of the parent (default: last). Ignored for the `date` path, which always appends.",
+    }),
+  ),
+});
 
 const UpdateNodeInput = Schema.Struct({
-  nodeId: Schema.String.annotate({ description: 'The node to update.' }),
-  text: optional(Schema.String.annotate({ description: 'New bullet text.' })),
+  nodeId: Schema.String.annotate({ description: "The node to update." }),
+  text: optional(Schema.String.annotate({ description: "New bullet text." })),
   isTask: optional(
-    Schema.Boolean.annotate({ description: 'Turn the checkbox on (true) or off (false).' }),
+    Schema.Boolean.annotate({
+      description:
+        "Turn the checkbox on (true) or off (false). Either value also turns a paragraph back into a list item — a node is exactly one of bullet, to-do, or paragraph.",
+    }),
   ),
   completed: optional(
-    Schema.Boolean.annotate({ description: 'Mark done (true) or not done (false).' }),
+    Schema.Boolean.annotate({
+      description: "Mark done (true) or not done (false).",
+    }),
   ),
   collapsed: optional(
-    Schema.Boolean.annotate({ description: 'Collapse (true) or expand (false) the bullet.' }),
+    Schema.Boolean.annotate({
+      description: "Collapse (true) or expand (false) the bullet.",
+    }),
   ),
-})
+  // Two explicit words rather than `"paragraph" | null`: an omitted key and an
+  // explicit null both decode to "no change" everywhere else in this schema set,
+  // so null cannot also mean "make it a bullet". `"bullet"` says it out loud.
+  kind: optional(
+    Schema.Literals(["paragraph", "embed", "bullet"]).annotate({
+      description:
+        "Turn the node into a paragraph, Embed, or plain bullet. Embed requires text in this call to contain one HTTPS URL. Overrides isTask.",
+    }),
+  ),
+});
 
 const DeleteNodeInput = Schema.Struct({
   nodeId: Schema.String.annotate({
-    description: 'The node to delete. Its whole subtree is deleted with it.',
+    description: "The node to delete. Its whole subtree is deleted with it.",
   }),
-})
+});
 
 const MoveNodesInput = Schema.Struct({
   nodeIds: Schema.Array(Schema.String).annotate({
-    description: 'The nodes to move. Each moves with its whole subtree; the order you pass is kept.',
+    description:
+      "The nodes to move. Each moves with its whole subtree; the order you pass is kept.",
   }),
   newParentId: optional(
     Schema.String.annotate({
-      description: 'Where to move them. Omit or null for the top level.',
+      description: "Where to move them. Omit or null for the top level.",
     }),
   ),
   position: optional(
-    Schema.Literals(['first', 'last']).annotate({
-      description: 'Land as the first or last children of the parent (default: last).',
+    Schema.Literals(["first", "last"]).annotate({
+      description:
+        "Land as the first or last children of the parent (default: last).",
     }),
   ),
-})
-
-const dateField = optional(
-  Schema.String.annotate({
-    description:
-      "The day's date as YYYY-MM-DD. Pass the user's local date; defaults to today in UTC.",
-  }),
-)
+});
 
 const AddToTodayInput = Schema.Struct({
-  text: Schema.String.annotate({ description: 'The bullet text to add to the daily note.' }),
+  text: Schema.String.annotate({
+    description: "The bullet text to add to the daily note.",
+  }),
   isTask: optional(
-    Schema.Boolean.annotate({ description: 'Create as a to-do with a checkbox (default: false).' }),
-  ),
-  date: dateField,
-})
-
-const MirrorNodeInput = Schema.Struct({
-  nodeId: Schema.String.annotate({ description: 'The node to mirror (its subtree comes with it).' }),
-  parentId: optional(
-    Schema.String.annotate({
-      description: 'Where to put the mirror. Omit to mirror to the top level.',
+    Schema.Boolean.annotate({
+      description: "Create as a to-do with a checkbox (default: false).",
     }),
   ),
-})
+  kind: kindField,
+  date: dateField,
+  timeZone: timeZoneField,
+});
+
+const MirrorNodeInput = Schema.Struct({
+  nodeId: Schema.String.annotate({
+    description: "The node to mirror (its subtree comes with it).",
+  }),
+  parentId: optional(
+    Schema.String.annotate({
+      description: "Where to put the mirror. Omit to mirror to the top level.",
+    }),
+  ),
+});
 
 const MirrorToTodayInput = Schema.Struct({
-  nodeId: Schema.String.annotate({ description: 'The node to mirror onto the daily note.' }),
+  nodeId: Schema.String.annotate({
+    description: "The node to mirror onto the daily note.",
+  }),
   date: dateField,
-})
+  timeZone: timeZoneField,
+});
+
+// The OPML pair (ADR 0037). The document travels as a plain string — a
+// non-recursive input, so no `identifier` annotation is needed (unlike
+// add_subtree's forest). Deliberately NO url-fetch argument: fetching a
+// caller-supplied URL from the Worker is an authenticated SSRF surface
+// re-treading unfurl.ts for territory the string argument already covers.
+
+const ImportOpmlInput = Schema.Struct({
+  opml: Schema.String.annotate({
+    description:
+      "The OPML document to import, as an XML string (e.g. a Workflowy export).",
+  }),
+  parentId: optional(
+    Schema.String.annotate({
+      description:
+        "Parent node id to import under. Omit for the top level. Mutually exclusive with `date`.",
+    }),
+  ),
+  date: optional(
+    Schema.String.annotate({
+      description:
+        "Import onto the daily note for this YYYY-MM-DD instead of a parent (pass the user's local date). Mutually exclusive with `parentId`.",
+    }),
+  ),
+  timeZone: optional(
+    Schema.String.annotate({
+      description:
+        "The caller's IANA timezone (e.g. America/New_York). Refines an omitted `date` on the daily path; ignored at the top level (no `date`), and an explicit `date` wins.",
+    }),
+  ),
+  dryRun: optional(
+    Schema.Boolean.annotate({
+      description:
+        "Parse and plan without writing anything; returns the same receipt (default: false).",
+    }),
+  ),
+});
+
+const ExportOpmlInput = Schema.Struct({
+  nodeId: optional(
+    Schema.String.annotate({
+      description:
+        "Root node to export (the node and its whole subtree). Omit to export the whole outline.",
+    }),
+  ),
+});
 
 // --- The tools ----------------------------------------------------------------
 
-const MAX_OUTLINE_NODES = 500
-const MAX_SEARCH_HITS = 25
+const MAX_OUTLINE_NODES = 500;
 /** One `add_subtree` batch = one DO `transactionSync` = one sync frame; cap the
  *  forest at the same ceiling an agent hits reading back (ADR 0028). */
-const MAX_BATCH_NODES = 500
+const MAX_BATCH_NODES = 500;
+
+/** Finalize agent-facing write receipts at the shared MCP boundary. Keep the
+ * planner inputs and committed node text verbatim; only text returned to the
+ * agent is redacted (ADR 0043). */
+const mcpReceipt = (text: string): string => redactSpoilers(text);
 
 /** Render a freshly-planned forest as the agent-facing bullet list with ids —
  *  built from the plan's own insert ops, so no extra read of the store. */
-const renderCreatedForest = (ops: ReadonlyArray<ChangeOp>, rootIds: ReadonlyArray<string>): string => {
-  const created = buildTreeIndex(ops.flatMap((o) => (o.op === 'insert' ? [o.value] : [])))
+const renderCreatedForest = (
+  ops: ReadonlyArray<ChangeOp>,
+  rootIds: ReadonlyArray<string>,
+): string => {
+  const created = buildTreeIndex(
+    ops.flatMap((o) => (o.op === "insert" ? [o.value] : [])),
+  );
   const lines = rootIds.flatMap((id) => {
     const r = flattenSubtree(created, id, {
       maxDepth: Number.POSITIVE_INFINITY,
       maxNodes: MAX_BATCH_NODES,
-    })
-    return r instanceof Error ? [] : r.lines
-  })
-  return formatOutlineLines(lines)
-}
+    });
+    return r instanceof Error ? [] : r.lines;
+  });
+  return formatOutlineLines(lines);
+};
+
+// --- OPML receipt (ADR 0037) ----------------------------------------------------
+// import_opml never echoes the forest back (the caller already holds the
+// document); it answers with a COMPACT receipt — root ids + texts, counts, and
+// the degradation tally with zero-count lines omitted. This is the only place
+// MCP disclosure can live, so the "degraded, never silent" bar lands here.
+
+/** Cap the receipt's root listing — a wide document can carry thousands of
+ *  top-level outlines, and the receipt must stay compact. */
+const MAX_RECEIPT_ROOTS = 20;
+
+const tallyLines = (record: Record<string, number>): string[] =>
+  Object.entries(record).map(([msg, n]) => `- ${msg}: ${n}`);
+
+const renderImportReceipt = (args: {
+  report: OpmlImportReport;
+  rootIds: ReadonlyArray<string>;
+  rootTexts: ReadonlyArray<string>;
+  landing: string;
+  dryRun: boolean;
+}): string => {
+  const { report } = args;
+  const lines: string[] = [
+    args.dryRun
+      ? `Dry run — would import ${report.nodesPost} node(s) ${args.landing}. Nothing was written.`
+      : `Imported ${report.nodesPost} node(s) ${args.landing}.`,
+    `Root bullet(s) (${args.rootIds.length}):`,
+  ];
+  const shown = args.rootIds.slice(0, MAX_RECEIPT_ROOTS);
+  shown.forEach((id, i) => {
+    lines.push(`- "${args.rootTexts[i] || "(empty)"}" (id: ${id})`);
+  });
+  if (args.rootIds.length > shown.length) {
+    lines.push(`- … and ${args.rootIds.length - shown.length} more`);
+  }
+  const counts: string[] = [];
+  if (report.nodesPost !== report.nodesPre) {
+    counts.push(
+      `${report.nodesPre} OPML outline(s) became ${report.nodesPost} bullet(s) after note/newline splitting`,
+    );
+  }
+  if (report.notes)
+    counts.push(
+      `${report.notes} _note attribute(s) -> ${report.noteLines} child bullet(s)`,
+    );
+  if (report.textNewlineSplits)
+    counts.push(
+      `${report.textNewlineSplits} bullet(s) split on embedded newlines`,
+    );
+  if (report.emptyText) counts.push(`${report.emptyText} empty-text bullet(s)`);
+  if (report.mirrorsLinked)
+    counts.push(`${report.mirrorsLinked} mirror(s) re-linked`);
+  if (report.mirrorsDetached)
+    counts.push(
+      `${report.mirrorsDetached} mirror(s) imported as detached copies`,
+    );
+  if (counts.length) {
+    lines.push("Counts:");
+    for (const c of counts) lines.push(`- ${c}`);
+  }
+  if (report.degradedTotal === 0) {
+    lines.push("No fidelity degradations.");
+  } else {
+    lines.push(`Fidelity degradations (${report.degradedTotal}):`);
+    lines.push(...tallyLines(report.degraded));
+  }
+  if (Object.keys(report.anomalies).length) {
+    lines.push("Tolerated HTML anomalies:");
+    lines.push(...tallyLines(report.anomalies));
+  }
+  if (Object.keys(report.unknownAttributes).length) {
+    lines.push("Unknown OPML attributes (ignored):");
+    lines.push(...tallyLines(report.unknownAttributes));
+  }
+  return lines.join("\n");
+};
 
 export const tools: ReadonlyArray<ToolDef> = [
   {
-    name: 'get_outline',
+    name: "get_outline",
+    title: "Get outline",
     description:
-      'Read the outline (or one node and its subtree) as an indented bullet list. Every line carries its node id — use those ids with the other tools.',
+      "Read the outline (or one node and its subtree) as an indented bullet list. Every line carries its node id — use those ids with the other tools.",
     input: GetOutlineInput,
     readOnly: true,
+    destructive: false,
     handle: (input: typeof GetOutlineInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
+        const index = yield* loadIndex(store);
         const result = yield* unwrap(
           flattenSubtree(index, input.nodeId ?? null, {
             maxDepth: input.maxDepth ?? Number.POSITIVE_INFINITY,
             maxNodes: MAX_OUTLINE_NODES,
           }),
-        )
-        if (!result.lines.length) return 'The outline is empty.'
-        const body = formatOutlineLines(result.lines)
+        );
+        if (!result.lines.length) return "The outline is empty.";
+        const body = formatOutlineLines(result.lines);
         return result.truncated
           ? `${body}\n\n(truncated at ${MAX_OUTLINE_NODES} nodes — read a subtree via nodeId for more)`
-          : body
+          : body;
       }),
   },
   {
-    name: 'search_nodes',
+    name: "search_nodes",
+    title: "Search nodes",
     description:
-      'Find nodes by text (case-insensitive substring). Returns each match with its id and breadcrumb path.',
-    input: SearchNodesInput,
+      "Find nodes with DQL, the same grammar as the app filter: is:todo -is:complete #dotflowy, has:link, highlight:red, is:agent, is:mirror, phrases, negation, and adjacent-term OR. Tags are exact and case-sensitive; text is case-insensitive. Mirrors match source content. Spoiler interiors cannot match. Returns readable text and structured nodes with ids and breadcrumbs. Pages default to 25 matches; use nextCursor until null for a complete list. Restart if searchable data changes.",
+    input: SearchInput,
+    output: SearchPage,
     readOnly: true,
-    handle: (input: typeof SearchNodesInput.Type, store) =>
+    destructive: false,
+    handle: (input: typeof SearchInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const hits = searchNodes(index, input.query, MAX_SEARCH_HITS)
-        if (!hits.length) return `No nodes match "${input.query}".`
-        const body = hits
+        const index = yield* loadIndex(store);
+        const page = yield* searchPage(index, input).pipe(
+          Effect.mapError((error) => new ToolError({ reason: error.reason })),
+        );
+        const body = page.nodes
           .map((h) => {
-            const path = h.path.length ? ` — in: ${h.path.join(' > ')}` : ''
-            return `- "${h.text}" (id: ${h.id})${path}`
+            const path = h.path.length ? ` — in: ${h.path.join(" > ")}` : "";
+            const meta = [`id: ${h.id}`];
+            if (h.kind) meta.push(h.kind);
+            if (h.mirrorOf) meta.push(`mirror of ${h.mirrorOf}`);
+            if (h.completed) meta.push("completed");
+            if (h.locked) meta.push("locked");
+            return `- ${h.isTask ? (h.completed ? "[x] " : "[ ] ") : ""}"${h.text}" (${meta.join(", ")})${path}`;
           })
-          .join('\n')
-        return hits.length >= MAX_SEARCH_HITS ? `${body}\n\n(first ${MAX_SEARCH_HITS} matches)` : body
+          .join("\n");
+        const content: ToolResult["content"] = [
+          {
+            type: "text",
+            text: body || `No nodes match "${input.query}".`,
+          },
+        ];
+        if (page.nextCursor)
+          content.push({
+            type: "text",
+            text: `More matches remain. Repeat the same query, scope, and limit with cursor: ${page.nextCursor}`,
+          });
+        return { content, structuredContent: page };
       }),
   },
   {
-    name: 'add_node',
+    name: "add_node",
+    title: "Add node",
     description:
-      'Add a new bullet to the outline — under a parent node or at the top level. Returns the new node id.',
+      'Add a new bullet to the outline — under a parent node or at the top level. Pass kind: "paragraph" for prose. Returns the new node id.',
     input: AddNodeInput,
     readOnly: false,
-    handle: (input: typeof AddNodeInput.Type, store, origin) =>
+    destructive: false,
+    handle: (input: typeof AddNodeInput.Type, store, origin, afterTextWrite) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const timestamp = yield* clock
+        const text = yield* explicitText(input.kind, input.text);
+        const index = yield* loadIndex(store);
+        const timestamp = yield* Clock.currentTimeMillis;
         const plan = yield* unwrap(
           planAddNode(index, {
             id: createId(),
-            text: input.text,
+            text,
             parentId: input.parentId ?? null,
-            position: input.position ?? 'last',
+            position: input.position ?? "last",
             isTask: input.isTask ?? false,
+            kind: input.kind ?? null,
             origin,
             timestamp,
           }),
-        )
-        yield* commit(store, plan.ops)
+        );
+        yield* commitText(store, plan.ops, index, afterTextWrite);
+        const parentText = plan.parentId
+          ? index.byId.get(plan.parentId)?.text
+          : undefined;
         const where = plan.parentId
-          ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
-          : 'at the top level'
-        return `Added "${input.text}" ${where} (id: ${plan.nodeId}).`
+          ? `under "${parentText == null ? plan.parentId : redactSpoilers(parentText)}"`
+          : "at the top level";
+        return `Added "${redactSpoilers(input.text)}" ${where} (id: ${plan.nodeId}).`;
       }),
   },
   {
-    name: 'add_subtree',
+    name: "add_subtree",
+    title: "Add subtree",
     description:
       "Add a whole nested outline — a forest of bullets, each with its own children — in ONE atomic call. Use this instead of many add_node calls when building structure. Target a parent (parentId), the top level (omit both), or the user's daily note (date). Returns the created bullets with their ids.",
     input: AddSubtreeInput,
     readOnly: false,
-    handle: (input: typeof AddSubtreeInput.Type, store, origin) =>
+    destructive: false,
+    handle: (
+      input: typeof AddSubtreeInput.Type,
+      store,
+      origin,
+      afterTextWrite,
+    ) =>
       Effect.gen(function* () {
         if (input.parentId != null && input.date != null) {
           return yield* Effect.fail(
-            new ToolError({ reason: 'pass either parentId or date, not both' }),
-          )
+            new ToolError({ reason: "pass either parentId or date, not both" }),
+          );
         }
-        const timestamp = yield* clock
+        const timestamp = yield* Clock.currentTimeMillis;
+        const nodes = yield* normalizeForest(input.nodes);
 
         // Daily path: claim the container + day ids atomically, then ensure-and-
         // append the forest under the day (position is ignored — always last).
         if (input.date != null) {
-          const dateKey = yield* resolveDateKey(input.date)
+          const dateKey = yield* resolveDateKey(
+            input.date,
+            input.timeZone,
+            timestamp,
+          );
           // Validate the forest BEFORE claiming any daily-index ids, so an empty
           // or over-cap forest can't leave orphan container/day mappings pointing
           // at nodes we never insert (ADR 0028 all-or-nothing).
-          const sizeError = guardForestSize(input.nodes, MAX_BATCH_NODES)
+          const sizeError = guardForestSize(nodes, MAX_BATCH_NODES);
           if (sizeError != null) {
-            return yield* Effect.fail(new ToolError({ reason: sizeError.message }))
+            return yield* Effect.fail(
+              new ToolError({ reason: sizeError.message }),
+            );
           }
-          const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
-          const dayId = yield* claimDailyId(store, dateKey, createId())
-          const index = yield* loadIndex(store)
+          const scaffold = yield* claimDailyScaffold(store, dateKey);
+          // Reuse the index claimDailyScaffold already built -- only kv claims ran
+          // since, so a reload would rebuild the identical tree (finding 6).
+          const index = scaffold.index;
           const plan = yield* unwrap(
             planAddSubtreeToDaily(index, {
-              nodes: input.nodes,
+              nodes,
               dateKey,
-              containerId,
-              dayId,
+              ...scaffold,
               origin,
               timestamp,
               newId: createId,
               maxNodes: MAX_BATCH_NODES,
             }),
-          )
-          yield* commit(store, plan.ops)
-          return `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`
+          );
+          yield* commitText(
+            store,
+            plan.ops,
+            index,
+            afterTextWrite,
+            scaffold.weekStart,
+          );
+          return mcpReceipt(
+            `Added ${plan.rootIds.length} bullet(s) to ${formatDayText(dateKey)} (daily note id: ${scaffold.dayId}):\n${renderCreatedForest(plan.ops, plan.rootIds)}`,
+          );
         }
 
         // Parent (or top-level) path.
-        const index = yield* loadIndex(store)
+        const index = yield* loadIndex(store);
         const plan = yield* unwrap(
           planAddSubtree(index, {
-            nodes: input.nodes,
+            nodes,
             parentId: input.parentId ?? null,
-            position: input.position ?? 'last',
+            position: input.position ?? "last",
             origin,
             timestamp,
             newId: createId,
             maxNodes: MAX_BATCH_NODES,
           }),
-        )
-        yield* commit(store, plan.ops)
+        );
+        yield* commitText(store, plan.ops, index, afterTextWrite);
         const where = plan.parentId
           ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}"`
-          : 'at the top level'
-        const kind = plan.parentId ? 'bullet(s)' : 'top-level bullet(s)'
-        return `Added ${plan.rootIds.length} ${kind} ${where}:\n${renderCreatedForest(plan.ops, plan.rootIds)}`
+          : "at the top level";
+        const kind = plan.parentId ? "bullet(s)" : "top-level bullet(s)";
+        return mcpReceipt(
+          `Added ${plan.rootIds.length} ${kind} ${where}:\n${renderCreatedForest(plan.ops, plan.rootIds)}`,
+        );
       }),
   },
   {
-    name: 'update_node',
+    name: "update_node",
+    title: "Update node",
     description:
-      "Edit a node's text, to-do state, done state, or collapsed state. Editing a mirror edits the shared content everywhere it appears.",
+      "Edit a node's text, to-do state, done state, or collapsed state. Editing a mirror edits the shared content everywhere it appears. WARNING: spoiler runs (||...||) are redacted to `[spoiler]` when you read a node, so passing that read-back text as the new `text` DESTROYS the hidden spoiler content. When editing a node that shows `[spoiler]`, ask the user for the intended full text instead of writing back what you were given.",
     input: UpdateNodeInput,
     readOnly: false,
-    handle: (input: typeof UpdateNodeInput.Type, store) =>
+    destructive: true,
+    handle: (
+      input: typeof UpdateNodeInput.Type,
+      store,
+      _origin,
+      afterTextWrite,
+    ) =>
       Effect.gen(function* () {
-        const changes = {
-          ...(input.text != null ? { text: input.text } : {}),
-          ...(input.isTask != null ? { isTask: input.isTask } : {}),
-          ...(input.completed != null ? { completed: input.completed } : {}),
-          ...(input.collapsed != null ? { collapsed: input.collapsed } : {}),
+        // Built field by field: only present fields are edited (absent =
+        // untouched); `"bullet"` is the explicit kind reset (stored nullable).
+        const changes: NodeFieldChanges = {};
+        if (input.text != null) changes.text = input.text;
+        if (input.isTask != null) changes.isTask = input.isTask;
+        if (input.completed != null) changes.completed = input.completed;
+        if (input.collapsed != null) changes.collapsed = input.collapsed;
+        if (input.kind === "embed") {
+          if (input.text == null) {
+            return yield* Effect.fail(
+              new ToolError({
+                reason: "converting to Embed requires text in the same call",
+              }),
+            );
+          }
+          changes.kind = "embed";
+          changes.text = yield* explicitText("embed", input.text);
+        } else if (input.kind != null) {
+          changes.kind = input.kind === "paragraph" ? "paragraph" : null;
         }
         if (!Object.keys(changes).length) {
           return yield* Effect.fail(
             new ToolError({
-              reason: 'nothing to change — pass at least one of text, isTask, completed, collapsed',
+              reason:
+                "nothing to change — pass at least one of text, isTask, completed, collapsed, kind",
             }),
-          )
+          );
         }
-        const index = yield* loadIndex(store)
-        const containerId = yield* containerIdOf(store)
-        yield* guardContainerUpdate(index, containerId, input.nodeId, changes)
-        const timestamp = yield* clock
-        const plan = yield* unwrap(planUpdateNode(index, { nodeId: input.nodeId, changes, timestamp }))
-        yield* commit(store, plan.ops)
-        return `Updated ${Object.keys(changes).join(', ')} on node ${input.nodeId}.`
+        const index = yield* loadIndex(store);
+        const scaffold = yield* loadDailyReverseMap(store);
+        yield* guardScaffoldUpdate(index, scaffold, input.nodeId, changes);
+        const timestamp = yield* Clock.currentTimeMillis;
+        const plan = yield* unwrap(
+          planUpdateNode(index, { nodeId: input.nodeId, changes, timestamp }),
+        );
+        yield* commitText(store, plan.ops, index, afterTextWrite);
+        return `Updated ${Object.keys(changes).join(", ")} on node ${input.nodeId}.`;
       }),
   },
   {
-    name: 'delete_node',
-    description: 'Delete a node and its whole subtree. This cannot be undone by the agent.',
+    name: "delete_node",
+    title: "Delete node",
+    description:
+      "Delete a node and its whole subtree. This cannot be undone by the agent.",
     input: DeleteNodeInput,
     readOnly: false,
+    destructive: true,
     handle: (input: typeof DeleteNodeInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const containerId = yield* containerIdOf(store)
-        const timestamp = yield* clock
-        const plan = yield* unwrap(planDeleteNode(index, input.nodeId, timestamp))
-        yield* guardContainerDelete(containerId, plan.deletedIds)
-        yield* commit(store, plan.ops)
-        return `Deleted ${plan.deletedIds.length} node(s) (node ${input.nodeId} and its subtree).`
+        const index = yield* loadIndex(store);
+        const scaffold = yield* loadDailyReverseMap(store);
+        const timestamp = yield* Clock.currentTimeMillis;
+        const plan = yield* unwrap(
+          planDeleteNode(index, input.nodeId, timestamp),
+        );
+        yield* guardScaffoldDelete(scaffold, plan.deletedIds);
+        yield* commit(store, plan.ops);
+        return `Deleted ${plan.deletedIds.length} node(s) (node ${input.nodeId} and its subtree).`;
       }),
   },
   {
-    name: 'move_nodes',
+    name: "move_nodes",
+    title: "Move nodes",
     description:
-      'Move existing nodes (each with its subtree) under a new parent, or to the top level. Preserves node ids, mirrors, and all state — it reorganizes, it never recreates. The order you pass nodeIds is kept.',
+      "Move existing nodes (each with its subtree) under a new parent, or to the top level. Preserves node ids, mirrors, and all state — it reorganizes, it never recreates. The order you pass nodeIds is kept.",
     input: MoveNodesInput,
     readOnly: false,
+    destructive: false,
     handle: (input: typeof MoveNodesInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const timestamp = yield* clock
-        const position = input.position ?? 'last'
+        const index = yield* loadIndex(store);
+        const timestamp = yield* Clock.currentTimeMillis;
+        const position = input.position ?? "last";
         const plan = yield* unwrap(
           planReparent(index, {
             nodeIds: input.nodeIds,
@@ -558,60 +1205,83 @@ export const tools: ReadonlyArray<ToolDef> = [
             position,
             timestamp,
           }),
-        )
-        yield* commit(store, plan.ops)
+        );
+        yield* commit(store, plan.ops);
         // An empty plan committed nothing (no nodes given, or every node was
         // already exactly where asked) — say so rather than claim a phantom move.
         if (plan.ops.length === 0) {
           return input.nodeIds.length === 0
-            ? 'No nodes to move.'
-            : 'No change — the node(s) are already in that position.'
+            ? "No nodes to move."
+            : "No change — the node(s) are already in that position.";
         }
         const where = plan.parentId
           ? `under "${index.byId.get(plan.parentId)?.text ?? plan.parentId}" (id: ${plan.parentId})`
-          : 'to the top level'
-        const noun = plan.parentId ? 'children' : 'items'
-        const pos = position === 'first' ? `as the first ${noun}` : `as the last ${noun}`
-        return `Moved ${plan.movedIds.length} node(s) ${where} ${pos}.`
+          : "to the top level";
+        const noun = plan.parentId ? "children" : "items";
+        const pos =
+          position === "first" ? `as the first ${noun}` : `as the last ${noun}`;
+        return mcpReceipt(
+          `Moved ${plan.movedIds.length} node(s) ${where} ${pos}.`,
+        );
       }),
   },
   {
-    name: 'add_to_today',
+    name: "add_to_today",
+    title: "Add to daily note",
     description:
       "Add a new bullet to the user's daily note, creating today's note (and the Daily container) if needed. One of the fastest ways to capture something for the user.",
     input: AddToTodayInput,
     readOnly: false,
-    handle: (input: typeof AddToTodayInput.Type, store, origin) =>
+    destructive: false,
+    handle: (
+      input: typeof AddToTodayInput.Type,
+      store,
+      origin,
+      afterTextWrite,
+    ) =>
       Effect.gen(function* () {
-        const dateKey = yield* resolveDateKey(input.date)
-        const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
-        const dayId = yield* claimDailyId(store, dateKey, createId())
-        const index = yield* loadIndex(store)
-        const timestamp = yield* clock
+        const text = yield* explicitText(input.kind, input.text);
+        const now = yield* Clock.currentTimeMillis;
+        const dateKey = yield* resolveDateKey(input.date, input.timeZone, now);
+        const scaffold = yield* claimDailyScaffold(store, dateKey);
+        // Reuse the index claimDailyScaffold already built -- only kv claims ran
+        // since, so a reload would rebuild the identical tree (finding 6).
+        const index = scaffold.index;
+        const timestamp = now;
         const plan = planAddToDaily(index, {
           dateKey,
-          containerId,
-          dayId,
+          ...scaffold,
           newNodeId: createId(),
-          text: input.text,
+          text,
           isTask: input.isTask ?? false,
+          kind: input.kind ?? null,
           origin,
           timestamp,
-        })
-        yield* commit(store, plan.ops)
-        return `Added "${input.text}" to ${formatDayText(dateKey)} (node id: ${plan.nodeId}, daily note id: ${dayId}).`
+        });
+        yield* commitText(
+          store,
+          plan.ops,
+          index,
+          afterTextWrite,
+          scaffold.weekStart,
+        );
+        return mcpReceipt(
+          `Added "${input.text}" to ${formatDayText(dateKey)} (node id: ${plan.nodeId}, daily note id: ${scaffold.dayId}).`,
+        );
       }),
   },
   {
-    name: 'mirror_node',
+    name: "mirror_node",
+    title: "Mirror node",
     description:
-      'Mirror a node (a live synced instance, like a Notion synced block) into another parent — the node appears in both places and edits sync. Omit parentId to mirror to the top level.',
+      "Mirror a node (a live synced instance, like a Notion synced block) into another parent — the node appears in both places and edits sync. Omit parentId to mirror to the top level.",
     input: MirrorNodeInput,
     readOnly: false,
+    destructive: false,
     handle: (input: typeof MirrorNodeInput.Type, store, origin) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store)
-        const timestamp = yield* clock
+        const index = yield* loadIndex(store);
+        const timestamp = yield* Clock.currentTimeMillis;
         const plan = yield* unwrap(
           planMirrorNode(index, {
             sourceId: input.nodeId,
@@ -620,40 +1290,243 @@ export const tools: ReadonlyArray<ToolDef> = [
             origin,
             timestamp,
           }),
-        )
-        yield* commit(store, plan.ops)
+        );
+        yield* commit(store, plan.ops);
         const where = input.parentId
           ? `under "${index.byId.get(trueSourceOf(index, input.parentId))?.text ?? input.parentId}"`
-          : 'at the top level'
-        return `Mirrored node ${plan.sourceId} ${where} (mirror id: ${plan.nodeId}).`
+          : "at the top level";
+        return mcpReceipt(
+          `Mirrored node ${plan.sourceId} ${where} (mirror id: ${plan.nodeId}).`,
+        );
       }),
   },
   {
-    name: 'mirror_to_today',
+    name: "mirror_to_today",
+    title: "Mirror to daily note",
     description:
       "Mirror an existing node onto the user's daily note — it stays where it is AND appears under today, fully synced. Creates today's note if needed.",
     input: MirrorToTodayInput,
     readOnly: false,
+    destructive: false,
     handle: (input: typeof MirrorToTodayInput.Type, store, origin) =>
       Effect.gen(function* () {
-        const dateKey = yield* resolveDateKey(input.date)
-        const containerId = yield* claimDailyId(store, CONTAINER_KEY, createId())
-        const dayId = yield* claimDailyId(store, dateKey, createId())
-        const index = yield* loadIndex(store)
-        const timestamp = yield* clock
+        const now = yield* Clock.currentTimeMillis;
+        const dateKey = yield* resolveDateKey(input.date, input.timeZone, now);
+        const scaffold = yield* claimDailyScaffold(store, dateKey);
+        // Reuse the index claimDailyScaffold already built -- only kv claims ran
+        // since, so a reload would rebuild the identical tree (finding 6).
+        const index = scaffold.index;
+        const timestamp = now;
         const plan = yield* unwrap(
           planMirrorToDaily(index, {
             dateKey,
-            containerId,
-            dayId,
+            ...scaffold,
             sourceId: input.nodeId,
             mirrorId: createId(),
             origin,
             timestamp,
           }),
-        )
-        yield* commit(store, plan.ops)
-        return `Mirrored node ${plan.sourceId} onto ${formatDayText(dateKey)} (mirror id: ${plan.nodeId}, daily note id: ${dayId}).`
+        );
+        yield* commit(store, plan.ops, scaffold.weekStart);
+        return `Mirrored node ${plan.sourceId} onto ${formatDayText(dateKey)} (mirror id: ${plan.nodeId}, daily note id: ${scaffold.dayId}).`;
       }),
   },
-]
+  {
+    name: "import_opml",
+    title: "Import OPML",
+    description:
+      "Import an OPML document (e.g. a Workflowy export) as new bullets — under a parent (parentId), onto the user's daily note (date), or at the top level. Lands as ONE atomic batch and returns a compact receipt (root ids, counts, any fidelity degradations), never the echoed outline. Ceiling: 5,000 nodes — a full Workflowy migration belongs in the app's own OPML import. Pass dryRun to preview the receipt without writing.",
+    input: ImportOpmlInput,
+    readOnly: false,
+    destructive: false,
+    handle: (input: typeof ImportOpmlInput.Type, store, origin) =>
+      Effect.gen(function* () {
+        if (input.parentId != null && input.date != null) {
+          return yield* Effect.fail(
+            new ToolError({ reason: "pass either parentId or date, not both" }),
+          );
+        }
+        const dryRun = input.dryRun ?? false;
+        // The shared core (src/data/opml-import.ts) owns parse + mapping +
+        // degradation counting — this handler is a thin shell over it, so the
+        // MCP surface can't drift from the app importer (ADR 0037).
+        const { forest, report } = yield* parseOpml(input.opml).pipe(
+          Effect.mapError((e) => new ToolError({ reason: e.message })),
+        );
+        // Ceiling + emptiness BEFORE any kv claim or plan (the add_subtree
+        // guard-before-claim rule, ADR 0028) — counted post-split by the shared
+        // core, so the two surfaces can't disagree on what "too big" means.
+        if (report.nodesPost === 0) {
+          return yield* Effect.fail(
+            new ToolError({
+              reason: "the OPML document contains no outline nodes",
+            }),
+          );
+        }
+        if (report.nodesPost > OPML_MCP_MAX_NODES) {
+          return yield* Effect.fail(
+            new ToolError({
+              reason: `too many nodes to import: ${report.nodesPost} exceeds the ${OPML_MCP_MAX_NODES}-node ceiling for import_opml — for a large or full migration, use the app's own OPML import instead`,
+            }),
+          );
+        }
+        const timestamp = yield* Clock.currentTimeMillis;
+        const rootTexts = forest.map((n) => n.text);
+
+        // Daily path (mirrors add_subtree's date targeting: always appends).
+        if (input.date != null) {
+          const dateKey = yield* resolveDateKey(
+            input.date,
+            input.timeZone,
+            timestamp,
+          );
+          if (dryRun) {
+            // A dry run must not claim daily-index ids (a kv claim IS a write);
+            // plan against a detached parent purely for the receipt's counts.
+            const plan = yield* unwrap(
+              planOpmlImport(forest, {
+                parentId: null,
+                firstPrev: null,
+                origin,
+                timestamp,
+                newId: createId,
+                maxNodes: OPML_MCP_MAX_NODES,
+              }),
+            );
+            return mcpReceipt(
+              renderImportReceipt({
+                report,
+                rootIds: plan.rootIds,
+                rootTexts,
+                landing: `onto ${formatDayText(dateKey)}`,
+                dryRun: true,
+              }),
+            );
+          }
+          const scaffold = yield* claimDailyScaffold(store, dateKey);
+          // Reuse the index claimDailyScaffold already built -- only kv claims ran
+          // since, so a reload would rebuild the identical tree (finding 6).
+          const index = scaffold.index;
+          const ensure = planEnsureDaily(index, {
+            dateKey,
+            ...scaffold,
+            timestamp,
+          });
+          const siblings = index.byId.has(scaffold.dayId)
+            ? childrenOf(index, scaffold.dayId)
+            : [];
+          const firstPrev = siblings.length
+            ? siblings[siblings.length - 1]!.id
+            : null;
+          const plan = yield* unwrap(
+            planOpmlImport(forest, {
+              parentId: scaffold.dayId,
+              firstPrev,
+              origin,
+              timestamp,
+              newId: createId,
+              maxNodes: OPML_MCP_MAX_NODES,
+            }),
+          );
+          yield* commit(
+            store,
+            [...ensure.ops, ...plan.ops],
+            scaffold.weekStart,
+          );
+          return mcpReceipt(
+            renderImportReceipt({
+              report,
+              rootIds: plan.rootIds,
+              rootTexts,
+              landing: `onto ${formatDayText(dateKey)} (daily note id: ${scaffold.dayId})`,
+              dryRun: false,
+            }),
+          );
+        }
+
+        // Parent (or top-level) path. No synthetic wrapper container — the
+        // fresh-container rule is app-UI presentation, not data semantics.
+        const index = yield* loadIndex(store);
+        let parentId: string | null = null;
+        if (input.parentId != null) {
+          if (!index.byId.has(input.parentId)) {
+            return yield* Effect.fail(
+              new ToolError({ reason: `node not found: ${input.parentId}` }),
+            );
+          }
+          parentId = trueSourceOf(index, input.parentId);
+        }
+        const siblings = childrenOf(index, parentId);
+        const firstPrev = siblings.length
+          ? siblings[siblings.length - 1]!.id
+          : null;
+        const plan = yield* unwrap(
+          planOpmlImport(forest, {
+            parentId,
+            firstPrev,
+            origin,
+            timestamp,
+            newId: createId,
+            maxNodes: OPML_MCP_MAX_NODES,
+          }),
+        );
+        if (!dryRun) yield* commit(store, plan.ops);
+        const landing = parentId
+          ? `under "${index.byId.get(parentId)?.text ?? parentId}" (id: ${parentId})`
+          : "at the top level";
+        return mcpReceipt(
+          renderImportReceipt({
+            report,
+            rootIds: plan.rootIds,
+            rootTexts,
+            landing,
+            dryRun,
+          }),
+        );
+      }),
+  },
+  {
+    name: "export_opml",
+    title: "Export OPML",
+    description:
+      "Export the outline (or one node and its whole subtree via nodeId) as an OPML 2.0 document in the Workflowy dialect. Returns the raw OPML string with no preamble. Ceiling: 5,000 nodes — pass nodeId to scope a large outline.",
+    input: ExportOpmlInput,
+    readOnly: true,
+    destructive: false,
+    handle: (input: typeof ExportOpmlInput.Type, store) =>
+      Effect.gen(function* () {
+        const index = yield* loadIndex(store);
+        const rootId = input.nodeId ?? null;
+        if (rootId !== null && !index.byId.has(rootId)) {
+          return yield* Effect.fail(
+            new ToolError({ reason: `node not found: ${rootId}` }),
+          );
+        }
+        // The same walk the serializer performs (mirror windows included, cycle
+        // caps identical) sizes the scope; over the ceiling the WHOLE call is
+        // refused — truncated OPML that still parses is silent loss (ADR 0037).
+        const flat = yield* unwrap(
+          flattenSubtree(index, rootId, {
+            maxDepth: Number.POSITIVE_INFINITY,
+            maxNodes: Number.POSITIVE_INFINITY,
+          }),
+        );
+        if (flat.lines.length > OPML_MCP_MAX_NODES) {
+          return yield* Effect.fail(
+            new ToolError({
+              reason: `the export scope holds ${flat.lines.length} nodes, over the ${OPML_MCP_MAX_NODES}-node ceiling for export_opml — pass a nodeId to export a smaller subtree, or use the app's own OPML export for the whole outline`,
+            }),
+          );
+        }
+        const rootNode =
+          rootId !== null ? index.byId.get(trueSourceOf(index, rootId)) : null;
+        // MCP egress: redact spoilers before serializing (ADR 0043). Redact the
+        // title too -- a spoiler-bearing root node's text becomes the <title>.
+        // The shared exportOpml walk stays verbatim; it's fed a redacted index.
+        const title = rootNode?.text.trim()
+          ? redactSpoilers(rootNode.text)
+          : "dotflowy";
+        return exportOpml(redactSpoilerIndex(index), rootId, { title });
+      }),
+  },
+];

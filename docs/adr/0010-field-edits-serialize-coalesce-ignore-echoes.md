@@ -8,18 +8,20 @@ PATCH), one transaction PER KEYSTROKE, and the bullet is a manually-managed `con
 store-sync effect repaints the DOM whenever `node.text` differs from what it last wrote. The
 per-keystroke text path is correct in isolation but exposed to the same two races `runStructural`
 closes for structural writes (see [ADR 0009: Atomic structural writes](./0009-atomic-structural-writes.md)) — only here they land on the DOM you're actively typing into:
+
 - **Out-of-order persistence (the field-edit twin of P3).** Each keystroke fires its own PATCH, and
   separate fetches have no ordering guarantee (HTTP/2 muxing, Worker dispatch). `PATCH("ab")` can
-  reach the DO *after* `PATCH("abc")`; last-writer-wins persists the stale `"ab"` and broadcasts it
+  reach the DO _after_ `PATCH("abc")`; last-writer-wins persists the stale `"ab"` and broadcasts it
   as the newest `seq`. The echo overwrites the live row with older text and the `"c"` is lost — and
   it survives refresh. This is genuine data loss, not just a flicker.
 - **The overlay/echo gap (the field-edit twin of P2).** A direct `collection.update` overlay drops
-  on the PATCH's HTTP ack, which is a *separate* channel from the WS echo that carries the same text.
+  on the PATCH's HTTP ack, which is a _separate_ channel from the WS echo that carries the same text.
   If the ack lands first, the readable value momentarily falls back to the synced base (an older
   echo), the sync effect repaints the focused bullet to that stale text and re-clamps the caret, then
   the echo arrives and it snaps forward. That round trip is the visible scramble.
 
 **The cure — two independent halves, both shipped:**
+
 - **Serialize + coalesce the field PATCH (`api.ts`, `updateNodes`).** Mirrors `persistBatch`'s
   `batchTail`, plus coalescing: while a PATCH is in flight, every later field change MERGES into a
   pending map (field-wise last-write-wins — correct because a PATCH carries only changed columns),
@@ -40,7 +42,7 @@ closes for structural writes (see [ADR 0009: Atomic structural writes](./0009-at
 **This does NOT walk back "field edits must not await an echo."** The overlay still drops on the
 PATCH ack (snappy typing, no `waitForSeq`); the focused-bullet guard is what makes the surviving
 ack/echo gap harmless, instead of holding the transaction open per keystroke. Field edits stay
-*direct* (they never join `runStructural`) — they are now serialized and coalesced, not made atomic
+_direct_ (they never join `runStructural`) — they are now serialized and coalesced, not made atomic
 or echo-held.
 
 **Don't:** send one PATCH per keystroke again ("each field edit is already one frame") — true

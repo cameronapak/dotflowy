@@ -1,10 +1,11 @@
-import { createActor, setup } from "xstate";
 import { useSelector } from "@xstate/react";
 import { Schema } from "effect";
-import { nodesCollection } from "./collection";
+import { createActor, setup } from "xstate";
+
+import { getLiveNodes } from "./live-nodes";
+import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from "./tree";
 import { getTreeIndex } from "./tree-store";
 import { getViewIsHidden, getViewRootId } from "./view-state";
-import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from "./tree";
 
 /**
  * Node multi-selection state (ADR 0018), modelled as an XState v6 machine whose
@@ -23,12 +24,11 @@ import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from "./tree";
  * Shape: the actor is a MODULE SINGLETON (`createActor(...).start()`), NOT a
  * `useMachine` -- it's mirrored like {@link view-state} and the tree store. The
  * stable command/keyboard closures read it live at event time (`getSnapshot`),
- * and each row subscribes to its OWN slice via {@link useSelectionEdge} (now
- * `@xstate/react`'s `useSelector` with an edge-equality compare), so a selection
- * change re-renders only the rows entering or leaving it -- preserving ADR 0014's
- * per-node-render budget. Selection is NEVER threaded as a prop. The public API
- * of this module is unchanged from the pre-XState version; only the internals
- * moved into the machine, so a rollback is "restore the old file + drop two deps".
+ * and each row subscribes to its OWN slice via {@link "./selection-fill"}'s
+ * `useSelectionFill` (a `useSyncExternalStore` keyed by row, fed by
+ * {@link subscribeSelection}), so a selection change re-renders only the rows
+ * entering or leaving it -- preserving ADR 0014's per-node-render budget.
+ * Selection is NEVER threaded as a prop.
  *
  * Model: a selection is a **contiguous run of siblings under one parent**
  * (`rootIds`), and selecting a node implies its whole subtree (you select roots;
@@ -139,7 +139,8 @@ function computeExtend(
   if (direction === "up") {
     // Climb to the parent. Stop at the zoom root (parentId === the view root, or
     // null at the top level) -- the view root isn't a selectable node.
-    if (data.parentId === null || data.parentId === getViewRootId()) return data;
+    if (data.parentId === null || data.parentId === getViewRootId())
+      return data;
     return computeRange(data.parentId, data.parentId, index) ?? data;
   }
   // Dive into the first visible child. Collapsed nodes render no children.
@@ -159,37 +160,6 @@ function computeAllInView(): SelectionData | null {
   return computeRange(sibs[0]!.id, sibs[sibs.length - 1]!.id, index);
 }
 
-/** id -> edge map for one selection, built once and reused for every row. Keyed
- *  on the `SelectionData` reference (stable per selection -- a no-op transition
- *  preserves it), so it rebuilds only when the selection actually changes, and a
- *  replaced `SelectionData` is GC'd with its map. This keeps `edgeOf` O(1) per
- *  row instead of an O(rootIds) `indexOf` on every subscribed row per snapshot
- *  (the pre-XState `recomputeEdges` behavior). */
-const edgeMaps = new WeakMap<SelectionData, Map<string, SelectionEdge>>();
-function edgeMapFor(data: SelectionData): Map<string, SelectionEdge> {
-  let m = edgeMaps.get(data);
-  if (m) return m;
-  m = new Map();
-  const ids = data.rootIds;
-  if (ids.length === 1) {
-    m.set(ids[0]!, "single");
-  } else {
-    m.set(ids[0]!, "top");
-    m.set(ids[ids.length - 1]!, "bottom");
-    for (let i = 1; i < ids.length - 1; i++) m.set(ids[i]!, "middle");
-  }
-  edgeMaps.set(data, m);
-  return m;
-}
-
-/** The slab edge for a node id given the current selection, or null when it
- *  isn't a selected root. O(1): consults the memoized {@link edgeMapFor} map, so
- *  the `useSelector` selector stays cheap across every subscribed row. */
-function edgeOf(id: string, data: SelectionData | null): SelectionEdge | null {
-  if (!data) return null;
-  return edgeMapFor(data).get(id) ?? null;
-}
-
 // --- the machine ------------------------------------------------------------
 
 const selectionMachine = setup({
@@ -197,7 +167,10 @@ const selectionMachine = setup({
     context: Schema.toStandardSchemaV1(ContextSchema),
     events: {
       "select.single": Schema.toStandardSchemaV1(
-        Schema.Struct({ nodeId: Schema.String }),
+        Schema.Struct({
+          nodeId: Schema.String,
+          focusId: Schema.optional(Schema.String),
+        }),
       ),
       "select.all": Schema.toStandardSchemaV1(Schema.Struct({})),
       extend: Schema.toStandardSchemaV1(
@@ -216,7 +189,7 @@ const selectionMachine = setup({
     idle: {
       on: {
         "select.single": ({ event }) => {
-          const d = computeRange(event.nodeId, event.nodeId);
+          const d = computeRange(event.nodeId, event.focusId ?? event.nodeId);
           return d ? { target: "selecting", context: { data: d } } : undefined;
         },
         "select.all": () => {
@@ -229,7 +202,7 @@ const selectionMachine = setup({
     selecting: {
       on: {
         "select.single": ({ event }) => {
-          const d = computeRange(event.nodeId, event.nodeId);
+          const d = computeRange(event.nodeId, event.focusId ?? event.nodeId);
           return d
             ? { context: { data: d } }
             : { target: "idle", context: { data: null } };
@@ -241,20 +214,23 @@ const selectionMachine = setup({
         },
         extend: ({ context, event }) => {
           if (!context.data) return undefined;
-          return { context: { data: computeExtend(context.data, event.direction) } };
+          return {
+            context: { data: computeExtend(context.data, event.direction) },
+          };
         },
         // Re-derive (parentId + rootIds) from the LIVE collection, same
         // anchor/focus, after a structural mutation relocates the run
-        // (indent/outdent). Reads `nodesCollection` directly so it's correct
+        // (indent/outdent). Reads the live store directly so it's correct
         // synchronously inside the same `runStructural` batch, before the tree
-        // store's subscription has rebuilt. ids + order are unchanged by an
+        // store's subscription has rebuilt (classic `nodesCollection` or Lunora
+        // `wholeOutline` — `getLiveNodes`). ids + order are unchanged by an
         // indent/outdent, so only `parentId` shifts.
         refresh: ({ context }) => {
           if (!context.data) return undefined;
           const d = computeRange(
             context.data.anchorId,
             context.data.focusId,
-            buildTreeIndex(nodesCollection.toArray),
+            buildTreeIndex(getLiveNodes()),
           );
           return d
             ? { context: { data: d } }
@@ -283,6 +259,7 @@ export function getSelectionRootIds(): string[] {
   const d = snapshot().context.data;
   // Variance-only cast: callers read but never mutate (the schema types it
   // readonly); preserving the `string[]` public signature avoids a ripple.
+  // SAFETY: the schema stores rootIds as an array of strings; this is a readonly-to-mutable variance cast only.
   return d ? (d.rootIds as string[]) : EMPTY_ROOTS;
 }
 
@@ -291,13 +268,11 @@ export function getSelectionState(): SelectionData | null {
   return snapshot().context.data;
 }
 
-/** Select exactly `nodeId` and its subtree -- the fresh single-root selection
- *  used by BOTH entry paths: Cmd+A rung 2, and the first Shift+arrow press from a
- *  focused bullet. Entering deliberately selects just the node under the caret
- *  (never extends to a sibling or climbs to the parent); extension/depth-walk is
- *  for subsequent presses via {@link extendSelection}. */
-export function selectSingle(nodeId: string) {
-  selectionActor.send({ type: "select.single", nodeId });
+/** Select `nodeId` and its subtree for Cmd+A rung 2 and the first Shift+arrow.
+ *  An optional focus end restores a previously selected range after undo.
+ *  Interactive extension/depth-walk uses {@link extendSelection}. */
+export function selectSingle(nodeId: string, focusId: string = nodeId) {
+  selectionActor.send({ type: "select.single", nodeId, focusId });
 }
 
 /** Move the focus end one visible sibling in `direction` (Shift+arrow), once a
@@ -345,29 +320,15 @@ export function clearSelection() {
   selectionActor.send({ type: "clear" });
 }
 
-/**
- * Per-node subscription to this node's slab edge: a row re-renders only when ITS
- * edge changes (entering/leaving the selection or shifting top<->middle<->bottom),
- * never on an unrelated selection change. `useSelector` runs the selector on every
- * snapshot but only re-renders when the returned edge value differs (`Object.is`),
- * which is what keeps multi-selection inside ADR 0014's per-node-render budget.
- * Returns null when the node isn't a selected root.
- */
-export function useSelectionEdge(id: string): SelectionEdge | null {
-  return useSelector(
-    selectionActor,
-    (snap) => edgeOf(id, snap.context.data),
-    Object.is,
-  );
-}
-
 /** Reactive `rootIds` for the actions menu. `useSelector` re-renders only when the
  *  array value changes (`Object.is`); the context `rootIds` reference is stable
  *  across no-op transitions, so this never churns on an unrelated event. */
 export function useSelectionRootIds(): string[] {
   return useSelector(
     selectionActor,
-    (snap) => (snap.context.data?.rootIds as string[] | undefined) ?? EMPTY_ROOTS,
+    // SAFETY: the schema stores rootIds as an array of strings; this is a readonly-to-mutable variance cast only.
+    (snap) =>
+      (snap.context.data?.rootIds as string[] | undefined) ?? EMPTY_ROOTS,
     Object.is,
   );
 }
@@ -382,9 +343,9 @@ export function useIsSelectionActive(): boolean {
  *  {@link "./selection-fill"}'s module-singleton mirror (ADR 0019's windowed
  *  list has no DOM nesting for a root's tint to paint behind its descendants,
  *  so the fill map needs its own walk -- this is how it learns a selection
- *  changed without itself being a React subscriber). Not part of the frozen
- *  consumer-facing API (selectSingle/extendSelection/useSelectionEdge/...) --
- *  an internal seam for the one other module in this slice. */
+ *  changed without itself being a React subscriber). Not part of the
+ *  consumer-facing API (selectSingle/extendSelection/...) -- an internal seam
+ *  for the one other module in this slice. */
 export function subscribeSelection(cb: () => void): () => void {
   const sub = selectionActor.subscribe(cb);
   return () => sub.unsubscribe();

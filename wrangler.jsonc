@@ -9,6 +9,9 @@
   // Better Auth (worker/auth.ts) imports node:crypto; nodejs_compat polyfills
   // Node built-ins on the Workers runtime.
   "compatibility_flags": ["nodejs_compat"],
+  // Upload Worker source maps to Cloudflare so stack traces in Workers Logs
+  // (and Sentry, #227) point at original source, not the minified bundle.
+  "upload_source_maps": true,
   // Custom domain declared in code so it survives a fresh deploy instead of
   // living only in the Cloudflare dashboard. Declaring `routes` without
   // `workers_dev: true` disables the *.workers.dev URL, so app.dotflowy.com is
@@ -31,12 +34,50 @@
     // routing path and lets the asset/SPA fallback flow through env.ASSETS.
     "run_worker_first": true,
   },
-  // Non-secret config. ADMIN_EMAILS gates the admin surfaces (the waitlist
-  // view at /admin/waitlist); knowing the email grants nothing — admin still
-  // requires signing IN as that account. Unset = no admins (fail-closed).
+  // Non-secret config. Admin surfaces (the waitlist view /admin/waitlist, the
+  // restore + invite endpoints) are gated by isAdminSession (worker/identity.ts):
+  // knowing the value grants nothing — admin still requires signing IN as that
+  // account. Fail-closed: neither var set = no admins.
+  //
+  // ADMIN_USER_IDS (the pinned identity, #232) takes precedence: set it to the
+  // admin's Better Auth `user.id` (from the D1 `user` table) to CLOSE the
+  // register-the-admin-email-first path — when set, ADMIN_EMAILS is ignored.
+  // Left unset for now so ADMIN_EMAILS keeps working; flip it on once the id is
+  // confirmed (a wrong id locks admin until this line is fixed).
+  //   "ADMIN_USER_IDS": "<owner user.id>",
   "vars": {
     "ADMIN_EMAILS": "cameronandrewpak@gmail.com",
+    // Open-signup switch (#293). UNSET on purpose — signup stays invite-only on
+    // deploy. Flipping self-serve signup on is a deliberate runbook step: set
+    // this to the literal "true" (only that value opens it; fail-closed) once
+    // Turnstile is configured below. The Turnstile SECRET is a `wrangler secret
+    // put TURNSTILE_SECRET_KEY`, not a var.
+    "SIGNUP_OPEN": "true",
+    // Cloudflare Turnstile SITE key (#293) — PUBLIC (ships to the browser), so a
+    // var, not a secret. Surfaced to the SPA via GET /api/auth-config. Set it to
+    // the widget's site key from the Cloudflare dashboard (Turnstile → your
+    // widget). Unset = no widget renders; pair it with the secret so the server
+    // actually enforces the token.
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAD4rYWTMLNQ7oDNU",
+    // Public Sentry DSN (#227) — errors-only monitoring for the Worker + DO.
+    // Public-by-design (it also ships in the client bundle), so a var, not a
+    // secret. Unset in a fork => Sentry stays dormant. See worker/sentry.ts.
+    "SENTRY_DSN": "https://b2613a2ced209c174bc083a22b926b5f@o4506518599434240.ingest.us.sentry.io/4511720305917952",
   },
+  // Transactional email (password reset today; invites later) via Cloudflare
+  // Email Service. A binding, not an API key — nothing to leak or rotate. The
+  // sender allowlist pins the From address at the platform layer (worker/
+  // email.ts pins it again in code). Requires the domain onboarded once:
+  // `npx wrangler email sending enable dotflowy.com` (Workers Paid plan).
+  // Local `wrangler dev` SIMULATES the binding (miniflare logs the message,
+  // reset URL included, instead of sending — zero-config dev); flip
+  // `"remote": true` here temporarily to test real sends through dev.
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["no-reply@dotflowy.com"],
+    },
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -47,11 +88,36 @@
   // One Durable Object per user: USER_OUTLINE holds the user's whole outline +
   // side-collections in colocated SQLite. The Worker routes each /api request to
   // the caller's DO. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
+  //
+  // SHARD retains the experimental data and internal retirement/export RPCs
+  // through ADR 0061's observation period. Browser and MCP use USER_OUTLINE.
   "durable_objects": {
-    "bindings": [{ "name": "USER_OUTLINE", "class_name": "UserOutlineDO" }],
+    "bindings": [
+      { "name": "USER_OUTLINE", "class_name": "UserOutlineDO" },
+      { "name": "SHARD", "class_name": "ShardDO" },
+    ],
   },
   // SQLite-backed DO storage requires `new_sqlite_classes` (not new_classes).
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserOutlineDO"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["UserOutlineDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["ShardDO"] },
+  ],
+  // Off-site outline backups (#221): the daily cron sweep exports every user
+  // DO's snapshot into this bucket (`backups/<doName>/<YYYY-MM-DD>.json`).
+  // Create the bucket + its lifecycle expiry once before the first deploy —
+  // see docs/runbooks/offsite-backup-r2.md. Local dev simulates R2 on disk.
+  "r2_buckets": [
+    {
+      "binding": "BACKUPS",
+      "bucket_name": "dotflowy-backups",
+    },
+  ],
+  // Daily backup sweep (09:00 UTC ≈ overnight US). The scheduled handler in
+  // worker/index.ts runs runBackupSweep; test locally with
+  // `wrangler dev --test-scheduled` + GET /__scheduled.
+  "triggers": {
+    "crons": ["0 9 * * *"],
+  },
   // Per-user rate limit for the link-title unfurl endpoint (ADR 0016). The
   // endpoint fetches user-supplied URLs server-side; keyed on user.id, it caps
   // the scanner-abuse vector the auth gate alone leaves open. period must be
@@ -67,6 +133,11 @@
       "name": "WAITLIST_LIMIT",
       "namespace_id": "1002",
       "simple": { "limit": 10, "period": 60 },
+    },
+    {
+      "name": "CAPTURE_LIMIT",
+      "namespace_id": "1003",
+      "simple": { "limit": 60, "period": 60 },
     },
   ],
   "observability": {

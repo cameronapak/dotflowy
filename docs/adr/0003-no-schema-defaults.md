@@ -4,7 +4,7 @@
 `makeNode()` in `tree.ts`.
 
 **Why it's not in the code:** the schema looks incomplete without defaults, so the obvious tidy-up
-is to add them. But a default makes that field optional in the schema's *encoded (input)* type,
+is to add them. But a default makes that field optional in the schema's _encoded (input)_ type,
 diverging from the fully-required `Node` the collection decodes to — and TanStack DB's schema-typed
 collection overload trips over that optionality at the insert/update boundary, producing type errors
 (or silently looser types) where it expects fully-formed `Node`s.
@@ -14,5 +14,5 @@ collection overload trips over that optionality at the insert/update boundary, p
 The constraint predates and outlives the schema library: `src/data/schema.ts` is **Effect `Schema`**
 since zod was removed (Effect Schema is now the one schema language across client and Worker — see
 [ADR 0014](./0014-validate-the-worker-do-trust-boundary.md)), but the trap is identical. zod's
-`.default()` made the *inferred input* optional; Effect's `Schema.optionalWith(…, { default })`
-does the same to the *Encoded* type. Same divergence, same rule: no defaults.
+`.default()` made the _inferred input_ optional; Effect's `Schema.optionalWith(…, { default })`
+does the same to the _Encoded_ type. Same divergence, same rule: no defaults.

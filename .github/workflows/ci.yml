@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  # Main is checked through deploy.yml's exact-commit workflow_call. A second
+  # push trigger would duplicate the entire browser regression on each merge.
+  pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit selected for deployment
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          # `changeset status --since` diffs against the base branch, so the
+          # shallow default clone isn't enough.
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --frozen-lockfile
+      - name: Format check
+        run: bun run fmt:check
+      - name: Lint
+        run: bun run lint
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Typecheck worker
+        run: bun run typecheck:worker
+      - name: Typecheck tests
+        run: bun run typecheck:test
+      - name: Typecheck app e2e
+        run: bun run typecheck:e2e
+      - name: Unit tests
+        run: bun run test
+      - name: Release automation tests
+        run: |
+          bunx --no-install oxlint scripts/release.ts scripts/release.test.ts scripts/shortcut.ts scripts/shortcut.test.ts scripts/heavy-lane.ts scripts/heavy-lane.test.ts scripts/cf-dev.ts
+          bun test scripts/release.test.ts
+          bun test scripts/shortcut.test.ts
+          bun test scripts/heavy-lane.test.ts
+      # AGENTS.md states gotchas inline and points at docs/ + docs/adr/ for the
+      # rest. That trade is only safe while every pointer resolves: an agent
+      # reads a miss, shrugs, and proceeds without the constraint it was meant
+      # to load. Enforced here rather than remembered.
+      - name: Doc pointers
+        run: bun run check:docs
+      # Every PR discloses what it changed, or says out loud that it changed
+      # nothing worth telling anyone (`bunx changeset --empty`). A version bump
+      # nobody trusts is worse than no version at all -- ADR 0046.
+      - name: Changeset present
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "$GITHUB_BASE_REF"
+          bun run check:changeset
+      - name: Real Worker regression
+        run: bun run test:e2e:retirement --workers=1 --retries=0 --max-failures=1
+      - name: Upload Worker failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-worker-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  app:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # Finish other shards so one failure does not hide independent failures.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --frozen-lockfile
+      - name: Install test browsers
+        run: bunx playwright install --with-deps chromium webkit
+      - name: App browser regression
+        run: bun run test:e2e:app --shard=${{ matrix.shard }}/4 --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
+      - name: Upload browser timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-test-timings-${{ matrix.shard }}
+          path: test-results/results.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-traces-${{ matrix.shard }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Preserve the existing required check name. A skipped or failed prerequisite
+  # must fail this gate, including when deployment calls the workflow.
+  quality:
+    if: always()
+    needs: [checks, app]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every check and browser shard
+        run: |
+          test "${{ needs.checks.result }}" = success
+          test "${{ needs.app.result }}" = success

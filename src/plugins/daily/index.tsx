@@ -3,16 +3,23 @@
 // two new ones this feature introduced:
 //
 //   - Seam F (header): the "Today" button (ADR 0002) -- node-less chrome.
+//   - Seam F (subheader): the week calendar strip (ADR 0054) -- day-to-day
+//     navigation, shown only when zoomed on a day note.
 //   - Protected nodes: the "Daily" container can't be deleted (ADR 0015).
 //   - Seam F (row): the date badge on each day note.
+//   - Seam A + B (ADR 0038): the `[[YYYY-MM-DD]]` date token -- a chip whose
+//     click travels to that day's note (lazy get-or-create; a chip render
+//     never touches the index). Grammar/parse live in src/data/date-links.ts.
 //
 // Identity lives in a side-collection (`daily-index.ts`), never on the `Node`
-// schema or in text. Node creation is composed from the existing low-level
-// `mutations.ts` primitives -- the same ones `appendChild` documents itself for
-// ("seed code owns the wiring") -- NOT routed through `NodeCommands`, whose
-// capture/pending-focus semantics are editor-edit concerns a get-or-create that
-// navigates away doesn't want.
+// schema or in text. The get-or-create engine (claims, cascade, migration) lives
+// in `get-or-create.ts` so the week-calendar strip can reuse `goToDate` without
+// an import cycle; it composes the low-level `mutations.ts` primitives directly
+// -- NOT routed through `NodeCommands`, whose capture/pending-focus semantics are
+// editor-edit concerns a get-or-create that navigates away doesn't want.
 
+import { useNavigate } from "@tanstack/react-router";
+import { Effect } from "effect";
 import {
   CalendarArrowDownIcon,
   CalendarDaysIcon,
@@ -21,173 +28,179 @@ import {
   SunIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+
+import { cn } from "@/lib/utils";
 import { Badge, Button } from "@/plugins/kit";
-import { definePlugin, type PluginContext } from "../types";
-import { capture, drop } from "../../data/history";
-import { isMirrorsEnabled } from "../../data/flags";
+
+import type { WidgetEl } from "../types";
+
 import {
-  appendChild,
-  insertChildAtStart,
+  DATE_LINK_PATTERN,
+  PROTECTED_SCAFFOLD_KINDS,
+  formatDateFull,
+  monthLabel,
+  parseDateLink,
+  scaffoldKeyKind,
+  weekLabel,
+  weekdaySearchStems,
+  yearLabel,
+} from "../../data/date-links";
+import {
+  getEditorFeatures,
+  useEditorFeatures,
+} from "../../data/editor-features";
+import { isMirrorsEnabled } from "../../data/flags";
+import { capture, drop } from "../../data/history";
+import { getLiveNodes } from "../../data/live-nodes";
+import {
   mirrorManyNodes,
   mirrorNode,
   moveManyNodes,
-  moveNode,
-  setText,
 } from "../../data/mutations";
+import { isNodesLimitError } from "../../data/nodes-client-effect";
+import { parseGoToDateTargets } from "../../data/parse-go-to-date";
+import { clearSelection } from "../../data/selection-state";
 import { runStructural } from "../../data/structural";
+import { buildTreeIndex, childrenOf } from "../../data/tree";
+import { getViewIsHidden } from "../../data/view-state";
+import { scrollStreamTo } from "../../data/view-stream";
 import {
-  nodesCollection,
-  resyncNodes,
-  waitForNode,
-} from "../../data/collection";
+  definePlugin,
+  type NodeProtection,
+  type PluginContext,
+} from "../types";
+import { dailyGlobalActions } from "./actions";
 import {
-  buildTreeIndex,
-  childrenOf,
-  createId,
-  type TreeIndex,
-} from "../../data/tree";
-import {
-  CONTAINER_KEY,
   DAILY_CONTAINER_TEXT,
-  claimMapping,
   formatDayBadge,
   formatDayRelative,
-  formatDayText,
-  getContainerId,
-  getDayId,
-  getDayKey,
-  isContainerNode,
+  getKeyForNode,
+  getMappedId,
   localDateKey,
   preloadDailyIndex,
-  setMapping,
   subscribeDailyIndex,
-  useDailyDate,
+  useScaffoldKey,
 } from "./daily-index";
-import { useDailyNavigationPending, withDailyNavigation } from "./pending";
-import { cn } from "@/lib/utils";
+import { DateLinkChip } from "./date-chip";
+import { dayStreamFor } from "./day-stream";
+import {
+  getOrCreateDay,
+  getOrCreateDayResult,
+  getOrCreateScaffold,
+  goToDate,
+} from "./get-or-create";
+import { useDailyNavigationPending } from "./pending";
+import { formatWeekRange, formatWeekRelative } from "./scaffold";
+import { WeekCalendar } from "./week-calendar";
 
-// --- get-or-create ----------------------------------------------------------
+// `getOrCreateDay` is re-exported for the `/today` route (routes/today.tsx),
+// which resolves the day without navigating through a PluginContext.
+export { getOrCreateDay };
 
-// Both get-or-creates are CLAIM-FIRST: when the local replica shows the
-// container/day absent, mint a candidate id and run it through the atomic
-// `claimMapping`. The claim winner id is authoritative; if the node row is
-// still missing after a resync/wait (orphaned kv mapping), materialize it
-// locally under that id. The fast path (already in the local replica) stays
-// synchronous-quick with no network round-trip. See daily-index.ts.
+// --- scaffold protection (issue #271) ---------------------------------------
+//
+// The get-or-create engine (get-or-create.ts, ADR 0054 extraction) mints the
+// Daily > Y > M > W > D scaffold; this file keeps only the protection descriptor
+// its `protects` seam reads.
 
-function hasNode(id: string): boolean {
-  return nodesCollection.toArray.some((n) => n.id === id);
+/** The protection descriptor for a year / month / week scaffold node (issue
+ *  #271, decision 6): the same four rules as the container, with the canonical
+ *  name restored on blank. `noun` reads into the toast copy ("This week ..."). */
+function scaffoldProtection(
+  noun: "year" | "month" | "week",
+  name: string,
+): NodeProtection {
+  return {
+    indicator: {
+      icon: CalendarDaysIcon,
+      label: "Protected Daily scaffold",
+    },
+    reason: `This ${noun} groups your daily notes and can't be deleted.`,
+    blankReason: `This daily ${noun} needs its name.`,
+    taskReason: `A daily ${noun} can't be a to-do.`,
+    completeReason: `A daily ${noun} can't be completed.`,
+    canonicalText: name,
+  };
 }
 
-/** Wait for a remote replica when we lost the claim; otherwise materialize now. */
-async function ensureNodeExists(
-  nodeId: string,
-  materialize: () => void,
-  awaitRemote: boolean,
-): Promise<boolean> {
-  if (hasNode(nodeId)) return true;
-  if (awaitRemote) {
-    resyncNodes();
-    await waitForNode(nodeId, 1500).catch(() => {});
-    if (hasNode(nodeId)) return true;
-  }
-  materialize();
-  return hasNode(nodeId);
-}
+// --- undo capture for the daily commands ------------------------------------
 
 /**
- * The single "Daily" container, created lazily at the end of the top level.
- * Atomic-claim guarded so two devices first-using daily can't each mint one.
+ * Record an undo point from the live store, focused on
+ * `focusId`.
+ *
+ * Every daily command captures through this helper so it sees optimistic
+ * changes synchronously rather than waiting for the tree-store notification.
  */
-async function ensureContainer(index: TreeIndex): Promise<string | null> {
-  const existing = getContainerId();
-  if (existing && index.byId.has(existing)) return existing;
-  const candidate = createId();
-  const { winner, won } = await claimMapping(CONTAINER_KEY, candidate);
-  const tops = childrenOf(index, null);
-  const after = tops.length ? tops[tops.length - 1]!.id : null;
-  const ok = await ensureNodeExists(
-    winner,
-    () =>
-      runStructural(() =>
-        appendChild(null, after, DAILY_CONTAINER_TEXT, winner),
-      ),
-    !won,
-  );
-  setMapping(CONTAINER_KEY, winner);
-  return ok ? winner : null;
+function captureLive(focusId: string): void {
+  capture(buildTreeIndex(getLiveNodes()), focusId);
 }
 
-/**
- * The note for `key`, created as the FIRST child of the container (newest day
- * on top) if missing. Text seeds to the full date; the badge shows the relative
- * label. The atomic claim makes "create today" idempotent across devices: a
- * loser reuses the winner's node instead of minting a duplicate. v1 caveat:
- * creating an out-of-order past day (via a future picker) still lands on top --
- * acceptable until the picker ships its own ordering.
- */
-async function ensureDay(
+/** Move an external drag's ordered structural roots to the end of one Daily
+ * note. The day is resolved before capture, so undo restores only the move and
+ * deliberately leaves a newly-created empty day in place (ADR 0054). */
+async function moveNodesToDay(
   key: string,
-  containerId: string,
-  index: TreeIndex,
-): Promise<string | null> {
-  const existing = getDayId(key);
-  if (existing && index.byId.has(existing)) {
-    if (!index.byId.get(existing)!.text.trim()) {
-      setText(existing, formatDayText(key));
-    }
-    return existing;
+  nodeIds: readonly string[],
+  ctx: PluginContext,
+): Promise<void> {
+  const dayId = await getOrCreateDay(key, {
+    failureToast: "Couldn't move to that daily note",
+  });
+  if (!dayId) return;
+
+  // A day cannot be moved under itself. This also makes dropping a selection
+  // containing the destination day behave like the existing Move workflow.
+  const targets = nodeIds.filter((id) => id !== dayId);
+  if (targets.length === 0) return;
+
+  // Avoid feeding moveManyNodes an already-final run whose last member is also
+  // its initial append predecessor. Product-wise this is the settled silent
+  // same-day no-op; structurally it keeps the sibling chain untouched.
+  const siblings = childrenOf(buildTreeIndex(getLiveNodes()), dayId);
+  const tail = siblings.slice(-targets.length);
+  if (
+    tail.length === targets.length &&
+    tail.every((node, index) => node.id === targets[index])
+  )
+    return;
+
+  const moved = runStructural(() => {
+    captureLive(targets[0]!);
+    return moveManyNodes(dayId, [...targets]);
+  });
+  if (!moved) {
+    drop();
+    return;
   }
-  const candidate = createId();
-  const { winner, won } = await claimMapping(key, candidate);
-  const ok = await ensureNodeExists(
-    winner,
-    () =>
-      runStructural(() =>
-        insertChildAtStart(
-          index,
-          containerId,
-          false,
-          formatDayText(key),
-          winner,
-        ),
-      ),
-    !won,
-  );
-  setMapping(key, winner);
-  return ok ? winner : null;
-}
 
-/** Ensure the container + the day exist and return the day's node id (no nav).
- *  Takes just the tree index (not a `PluginContext`) so the Today button, the
- *  `/` command, AND the Cmd+K virtual action (Seam J -- which has no
- *  `PluginContext`) all reuse the exact same get-or-create (ADR 0001).
- *  Async: it may round-trip the atomic claim before the node id is settled. */
-async function getOrCreateDay(
-  key: string,
-  index: TreeIndex,
-): Promise<string | null> {
-  return withDailyNavigation(async () => {
-    const containerId = await ensureContainer(index);
-    if (!containerId) return null;
-    return ensureDay(key, containerId, index);
+  clearSelection();
+  const count = moved === 1 ? "" : `${moved} nodes `;
+  toast.success(`Moved ${count}to ${formatDateFull(key)}`, {
+    action: { label: "Go", onClick: () => ctx.nav.open(dayId) },
   });
 }
 
-/** get-or-create the day, then zoom to it (the Today button + future picker). */
-async function goToDate(key: string, ctx: PluginContext): Promise<void> {
-  const dayId = await getOrCreateDay(key, ctx.tree);
-  if (!dayId) {
-    toast.error("Couldn't open today's daily note");
-    return;
-  }
-  ctx.nav.zoom(dayId);
+// --- Seam A + B: the `[[YYYY-MM-DD]]` date token (ADR 0038) ------------------
+
+// The atom: `source` is the verbatim token (what the caret math counts and
+// copy reads back); `data-date-link` carries the day KEY (interior's first 10
+// chars) for the Seam-B click handler. The core adds `data-src`/
+// `contenteditable`. An atom but NOT folding: no caret reveal, backspace
+// deletes the whole token.
+function dateWidget(tok: string, key: string): WidgetEl {
+  return {
+    kind: "widget",
+    source: tok,
+    attrs: { "data-date-link": key },
+  };
 }
 
 // --- header slot: the "Today" button ----------------------------------------
 
 function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
   const pending = useDailyNavigationPending();
+  const navigate = useNavigate();
   return (
     <Button
       variant="ghost"
@@ -195,7 +208,35 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
       disabled={pending}
       aria-busy={pending}
       data-daily-nav-pending={pending ? "" : undefined}
-      onClick={() => void goToDate(localDateKey(), getCtx())}
+      onClick={() => {
+        const ctx = getCtx();
+        // The Today button is a write-intent surface (ADR 0041): seed an entry
+        // line and route to the day with focus=last so the caret lands on it.
+        // Unlike a date chip (which zooms via goToDate), this navigates the
+        // route -- the on-load focus mechanism needs a pivotless navigation.
+        ctx.run(
+          Effect.promise(async () => {
+            const dayId = await getOrCreateDay(localDateKey(), {
+              seedEntryLine: true,
+            });
+            if (!dayId) return; // getOrCreateDay owns the generic toast now (F3)
+            // Inside the Day stream, Today is a section: scroll to it and land
+            // the caret on its last line instead of navigating (ADR 0070).
+            const isHidden = getViewIsHidden();
+            const kids = childrenOf(
+              buildTreeIndex(getLiveNodes()),
+              dayId,
+            ).filter((node) => !isHidden(node));
+            const last = kids[kids.length - 1];
+            if (scrollStreamTo(localDateKey(), last?.id)) return;
+            navigate({
+              to: "/$nodeId",
+              params: { nodeId: dayId },
+              search: { focus: "last" },
+            });
+          }),
+        );
+      }}
     >
       {pending ? (
         <Loader2Icon className="animate-spin" />
@@ -215,16 +256,37 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
 // `mt-1` to land on the text baseline, while `.zoomed-title` is flex-centered
 // so it needs none. Same size in both: a small pill reads as a label beside the
 // big title, consistent with the row.
-function DailyBadge({
+// One reactive read of the node's scaffold key, dispatched by kind (issue #271):
+// a DAY renders the relative pill, a WEEK renders the date-range badge, and a
+// year/month renders nothing (their node text -- "2026" / "July" -- is the
+// label). Reading the key once here keeps the per-row hook count at one.
+function ScaffoldBadge({
   nodeId,
   placement,
 }: {
   nodeId: string;
   placement: "row" | "title";
 }) {
-  const key = useDailyDate(nodeId);
+  const key = useScaffoldKey(nodeId);
   if (!key) return null;
-  const isToday = key === localDateKey();
+  switch (scaffoldKeyKind(key)) {
+    case "day":
+      return <DailyBadge dayKey={key} placement={placement} />;
+    case "week":
+      return <WeekBadge weekKey={key} placement={placement} />;
+    default:
+      return null;
+  }
+}
+
+function DailyBadge({
+  dayKey,
+  placement,
+}: {
+  dayKey: string;
+  placement: "row" | "title";
+}) {
+  const isToday = dayKey === localDateKey();
   return (
     <Badge
       variant={isToday ? "default" : "secondary"}
@@ -235,17 +297,91 @@ function DailyBadge({
         placement === "title" && "mt-2",
         isToday ? "border-transparent" : "border-border",
       ])}
-      data-daily-date={key}
+      data-daily-date={dayKey}
       data-daily-today={isToday ? "" : undefined}
     >
       {isToday && <SunIcon className="shrink-0" />}
-      {formatDayBadge(key)}
+      {formatDayBadge(dayKey)}
+    </Badge>
+  );
+}
+
+// The week node's badge (Seam F, issue #271): the date range ("Jul 13 – 19")
+// with a "This week" / "Last week" relative prefix. "Now" derives from
+// localDateKey (local midnight), so it agrees with the day pill. Shares the day
+// badge's `[data-daily-date]` optical-alignment rule via `data-daily-week`.
+function WeekBadge({
+  weekKey,
+  placement,
+}: {
+  weekKey: string;
+  placement: "row" | "title";
+}) {
+  const { weekStart } = useEditorFeatures();
+  const relative = formatWeekRelative(weekKey, localDateKey(), weekStart);
+  const thisWeek = relative === "This week";
+  const label = relative
+    ? `${relative} · ${formatWeekRange(weekKey)}`
+    : formatWeekRange(weekKey);
+  return (
+    <Badge
+      variant={thisWeek ? "default" : "secondary"}
+      className={cn([
+        "shrink-0 border!",
+        placement === "title" && "mt-2",
+        thisWeek ? "border-transparent" : "border-border",
+      ])}
+      data-daily-week={weekKey}
+      data-daily-this-week={thisWeek ? "" : undefined}
+    >
+      {label}
     </Badge>
   );
 }
 
 export default definePlugin({
   id: "daily",
+  globalActions: dailyGlobalActions,
+
+  // Seam A: the `[[YYYY-MM-DD]]` date token (ADR 0038), rendered as a
+  // badge-language chip (a BibleChip-class TSX atom -- ADR 0006).
+  tokens: [
+    {
+      id: "date-link",
+      pattern: DATE_LINK_PATTERN,
+      // After node-links (5): both start `[[`, but the interiors are disjoint
+      // by construction (date-shaped vs id-shaped), so the slot only needs to
+      // be distinct. Before code (10) so a date pasted into a bullet wins over
+      // a stray backtick span. NOT folding -- the chip never reveals raw
+      // source on caret proximity; backspace deletes the whole token.
+      precedence: 6,
+      component: DateLinkChip,
+      render: (tok) => {
+        const parsed = parseDateLink(tok);
+        // Regex proposes shape, the calendar disposes: `[[2026-13-45]]` falls
+        // through to plain text, never a chip (the route-bible discipline).
+        return parsed ? dateWidget(tok, parsed.key) : tok;
+      },
+    },
+  ],
+
+  // Seam B: a date chip travels to that day's note -- the Today-button
+  // semantics (lazy get-or-create + zoom). This click is the ONLY place a
+  // chip touches the daily index; rendering never mints (ADR 0038). Mousedown
+  // blocks the editing caret (the chip lives inside the contentEditable).
+  interactions: [
+    {
+      selector: "[data-date-link]",
+      blockCaretOnMouseDown: true,
+      onClick: (el, ctx, e) => {
+        const key = el.dataset.dateLink;
+        if (!key) return;
+        e.preventDefault();
+        e.stopPropagation();
+        ctx.run(Effect.promise(() => goToDate(key, ctx)));
+      },
+    },
+  ],
 
   // Seam F (header): jump to today, creating it on first use. Reads ctx lazily.
   headerSlots: [
@@ -255,18 +391,47 @@ export default definePlugin({
     },
   ],
 
-  // Seam F (row): the relative date pill, between the bullet dot and the text.
-  // Renders only on a day note (useDailyDate returns null otherwise).
+  // Seam F (subheader): the week calendar strip (ADR 0054). Renders ONLY when
+  // the zoom root reverse-maps to a `YYYY-MM-DD` day key; null everywhere else,
+  // so the subheader band collapses on non-day pages. The strip resolves the
+  // route reactively itself -- `getCtx` is used only at event time (the pill's
+  // seed-free `goToDate`).
+  subheaderSlots: [
+    {
+      id: "daily-week-calendar",
+      render: (getCtx) => <WeekCalendar getCtx={getCtx} />,
+    },
+  ],
+
+  // Seam M: each of the seven currently-rendered day pills accepts the same
+  // structural roots an ordinary bullet drag carries. Core owns hit testing and
+  // active-target stamping; Daily owns day creation and the move semantics.
+  externalDropTargets: [
+    {
+      id: "daily-week-calendar-day",
+      selector: "[data-week-calendar] [data-day-key]",
+      onDrop: (element, nodeIds, ctx) => {
+        const key = element.dataset.dayKey;
+        if (!key) return;
+        ctx.run(Effect.promise(() => moveNodesToDay(key, nodeIds, ctx)));
+      },
+    },
+  ],
+
+  // Seam F (row + title): the scaffold badge, between the bullet dot and the
+  // text. A day note gets the relative pill, a week node the date range; a
+  // year/month renders nothing (ScaffoldBadge returns null). Registered in BOTH
+  // render paths so it shows on the list bullet AND the zoomed page title.
   slots: [
     {
-      id: "daily-date-badge",
+      id: "daily-scaffold-badge",
       position: "row:before-text",
-      render: (node) => <DailyBadge nodeId={node.id} placement="row" />,
+      render: (node) => <ScaffoldBadge nodeId={node.id} placement="row" />,
     },
     {
-      id: "daily-date-badge-title",
+      id: "daily-scaffold-badge-title",
       position: "title:before-text",
-      render: (node) => <DailyBadge nodeId={node.id} placement="title" />,
+      render: (node) => <ScaffoldBadge nodeId={node.id} placement="title" />,
     },
   ],
 
@@ -285,17 +450,16 @@ export default definePlugin({
       keywords: ["today", "daily", "journal"],
       available: () => true,
       run: async (nodeId, ctx) => {
-        const todayId = await getOrCreateDay(localDateKey(), ctx.tree);
-        if (!todayId) {
-          toast.error("Couldn't open today's daily note");
-          return;
-        }
+        const todayId = await getOrCreateDay(localDateKey());
+        if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
         if (todayId === nodeId) return; // can't move today's note under itself
-        const kids = childrenOf(ctx.tree, todayId);
-        const after = kids.length ? kids[kids.length - 1]!.id : null;
+        // Reuse moveManyNodes (F5): it rebuilds the index per move and appends
+        // as today's last child -- identical to the old hand-rolled block and the
+        // runMany twin below. Capture the FRESH index (today may have just been
+        // created), so undo restores the move without deleting the new day note.
         const moved = runStructural(() => {
-          capture(ctx.tree, nodeId);
-          return moveNode(ctx.tree, nodeId, todayId, after);
+          captureLive(nodeId);
+          return moveManyNodes(todayId, [nodeId]);
         });
         // No-op move (already last child of today) still captured an undo
         // point; drop it so Cmd+Z isn't a dead step and redo history survives.
@@ -315,15 +479,12 @@ export default definePlugin({
       // day may have just been created -- so undo restores the moves without
       // deleting the new day note.
       runMany: async (ids, ctx) => {
-        const todayId = await getOrCreateDay(localDateKey(), ctx.tree);
-        if (!todayId) {
-          toast.error("Couldn't open today's daily note");
-          return;
-        }
+        const todayId = await getOrCreateDay(localDateKey());
+        if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
         const targets = ids.filter((id) => id !== todayId);
         if (targets.length === 0) return;
         const moved = runStructural(() => {
-          capture(buildTreeIndex(nodesCollection.toArray), targets[0]!);
+          captureLive(targets[0]!);
           return moveManyNodes(todayId, targets);
         });
         if (!moved) {
@@ -348,15 +509,16 @@ export default definePlugin({
       keywords: ["today", "daily", "mirror", "synced"],
       available: () => isMirrorsEnabled(),
       run: async (nodeId, ctx) => {
-        const todayId = await getOrCreateDay(localDateKey(), ctx.tree);
-        if (!todayId) {
-          toast.error("Couldn't open today's daily note");
-          return;
-        }
+        const todayId = await getOrCreateDay(localDateKey());
+        if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
         // Rebuild fresh: today may have just been created, so ctx.tree is stale
         // (no `after`, no cycle context). Capture AFTER, so undo removes the
         // mirror but keeps the new day note (mirrors the runMany path below).
-        const index = buildTreeIndex(nodesCollection.toArray);
+        // Explicit build (not captureLive): `mirrorNode` consumes this index,
+        // and it must come from the LIVE store -- an index built from the
+        // ready-and-empty `nodesCollection` fails `mirrorNode`'s first guard on
+        // the Lunora path, so every mirror-to-today toasted an error.
+        const index = buildTreeIndex(getLiveNodes());
         const newId = runStructural(() => {
           capture(index, nodeId);
           return mirrorNode(index, nodeId, todayId);
@@ -374,13 +536,10 @@ export default definePlugin({
       // in ONE batch. Captured against the LIVE tree AFTER the day exists, so
       // undo removes the mirrors without deleting the freshly created day note.
       runMany: async (ids, ctx) => {
-        const todayId = await getOrCreateDay(localDateKey(), ctx.tree);
-        if (!todayId) {
-          toast.error("Couldn't open today's daily note");
-          return;
-        }
+        const todayId = await getOrCreateDay(localDateKey());
+        if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
         const made = runStructural(() => {
-          capture(buildTreeIndex(nodesCollection.toArray), ids[0]!);
+          captureLive(ids[0]!);
           return mirrorManyNodes(todayId, ids);
         });
         if (!made) {
@@ -395,27 +554,55 @@ export default definePlugin({
     },
   ],
 
-  // Protected nodes: the container can't be deleted -- it guards every day note
-  // and everything written under them (removeNode cascades the subtree). The
-  // descriptor carries the rejected-delete toast copy and the name to restore if
-  // the row is blanked (it can't be left nameless).
-  protects: (nodeId) =>
-    isContainerNode(nodeId)
-      ? {
+  // Protected nodes: the container AND every scaffold node (year / month / week)
+  // can't be deleted -- removeNode cascades, so an unprotected week delete would
+  // take its days (and everything written under them) with it (issue #271,
+  // decision 6). Day notes stay deletable (they hold the user's own content).
+  // Each descriptor carries the rejected-action toast copy and the canonical
+  // name to restore if the row is blanked (a scaffold node can't be nameless).
+  protects: (nodeId) => {
+    const key = getKeyForNode(nodeId);
+    if (!key) return false;
+    const kind = scaffoldKeyKind(key);
+    // Which kinds are protected is the shared source of truth (finding 10b): the
+    // container + every calendar level, but never a day. The per-kind copy stays
+    // here; the set decides protected-vs-not so the client and Worker can't drift.
+    if (!kind || !PROTECTED_SCAFFOLD_KINDS.has(kind)) return false;
+    switch (kind) {
+      case "container":
+        return {
+          indicator: {
+            icon: CalendarDaysIcon,
+            label: "Protected Daily scaffold",
+          },
           reason:
             "The Daily list can't be deleted. It holds all your daily notes.",
           blankReason: "The Daily list needs a name.",
           taskReason: "The Daily list can't be a to-do.",
           completeReason: "The Daily list can't be completed.",
           canonicalText: DAILY_CONTAINER_TEXT,
-        }
-      : false,
+        };
+      case "year":
+        return scaffoldProtection("year", yearLabel(key));
+      case "month":
+        return scaffoldProtection("month", monthLabel(key));
+      case "week":
+        return scaffoldProtection("week", weekLabel(key));
+      default:
+        return false; // day notes + non-scaffold nodes stay editable/deletable
+    }
+  },
 
-  // `isContainerNode` reads the daily index, which loads async -- so the
-  // container's lock must re-render when the `container -> nodeId` mapping
-  // resolves. Without this the core's `useIsProtected` only re-evaluates on an
-  // unrelated re-render (e.g. zoom), so the lock appears late.
+  // `getKeyForNode` reads the daily index, which loads async -- so a scaffold
+  // node's lock must re-render when its `key -> nodeId` mapping resolves. Without
+  // this the core's `useIsProtected` only re-evaluates on an unrelated re-render
+  // (e.g. zoom), so the lock appears late.
   protectsChanged: subscribeDailyIndex,
+
+  // Seam N (ADR 0070): a zoomed day note reads as the Day stream. A day gaining
+  // its node is a daily-index change, not only a tree change.
+  viewStream: dayStreamFor,
+  viewStreamChanged: subscribeDailyIndex,
 
   // Start the daily-index kv fetch at editor mount, so the date badges and the
   // container lock are (usually) resolvable by the time the outline snapshot
@@ -424,44 +611,125 @@ export default definePlugin({
   preload: preloadDailyIndex,
 
   // Seam J: make day notes findable by their RELATIVE label in the Cmd+K
-  // switcher and the /move picker, even though the node's text is the full date.
-  // Matched (a second Fuse key) but never highlighted -- the row still shows the
-  // date text. "Today"/"Yesterday"/"Tomorrow"/"Jun 23" from the id->date mapping.
+  // switcher and the /move picker, even though the node's text is the full date
+  // ("Today"/"Yesterday"/"Tomorrow"/"Jun 23" from the id->date mapping) -- and
+  // WEEK nodes by "This week"/"Last week" (+ their date-range label), so Cmd+K
+  // jumps to the current week (issue #271, decision 7). Matched (a second Fuse
+  // key) but never highlighted -- the row still shows the node text.
   searchAliases: (node) => {
-    const key = getDayKey(node.id);
-    return key ? [formatDayBadge(key)] : [];
+    const key = getKeyForNode(node.id);
+    if (!key) return [];
+    switch (scaffoldKeyKind(key)) {
+      case "day":
+        // ISO key so Cmd+K "2031-08-12" finds an existing day after go-to-date
+        // suppress (ADR 0055) — Fuse alone won't match the full weekday title.
+        // Weekday stems (`thu`…`thursday`) so virtual go-to stays suppressed
+        // when the mapped day exists (ADR 0057).
+        return [formatDayBadge(key), key, ...weekdaySearchStems(key)];
+      case "week": {
+        const relative = formatWeekRelative(
+          key,
+          localDateKey(),
+          getEditorFeatures().weekStart,
+        );
+        return relative ? [relative, weekLabel(key)] : [weekLabel(key)];
+      }
+      default:
+        return [];
+    }
   },
 
   // Seam J: a parenthetical suffix on the picker row so a day note reads
-  // "Tuesday, June 23, 2026 (Today)" -- relative labels only (a date would just
-  // echo the text). Display-only; the alias above is what actually matches.
+  // "Tuesday, June 23, 2026 (Today)" and a week node "Jun 22–28 (This week)" --
+  // relative labels only (a date/range would just echo the text/badge).
+  // Display-only; the aliases above are what actually match.
   searchAnnotation: (node) => {
-    const key = getDayKey(node.id);
-    return key ? formatDayRelative(key) : null;
+    const key = getKeyForNode(node.id);
+    if (!key) return null;
+    switch (scaffoldKeyKind(key)) {
+      case "day":
+        return formatDayRelative(key);
+      case "week":
+        return formatWeekRelative(
+          key,
+          localDateKey(),
+          getEditorFeatures().weekStart,
+        );
+      default:
+        return null;
+    }
   },
 
-  // Seam J: a VIRTUAL switcher row that appears only when today's note does NOT
-  // exist yet (when it does, the alias above surfaces the real node -- no dup).
-  // Picking it creates the note + container, then navigates. This is the "search
-  // today even if it isn't there" half (ADR 0001).
+  // Seam (ADR 0049): quick-add captures default to today's note. LAZY -- the
+  // label is known up front (the chip reads "Today" the instant the overlay
+  // opens), but `resolve` -- which get-or-creates the day SEED-FREE (like Send
+  // to Today, ADR 0041) -- runs only at born-on-first-keystroke, so an abandoned
+  // open never mints today's note. Core resolves this without importing daily.
+  captureDestination: () => ({
+    label: "Today",
+    // REJECT on a failed create rather than returning null (F2): null is the
+    // Seam-L value for "top level", so a swallowed failure would silently misfile
+    // the capture at the outline root. Consumes the RAW result (no daily toast --
+    // quick-add's startBorn owns the failure toast + keeps the draft, ADR 0049)
+    // and rethrows the REAL NodesLimitError on a cap hit, so quick-add can skip
+    // its generic toast (the upgrade one already fired) via the shared
+    // data-layer `isNodesLimitError` -- no core-imports-daily leak.
+    resolve: async () => {
+      const result = await getOrCreateDayResult(localDateKey(), {
+        trackNavigation: false,
+      });
+      if (result.id !== null) return result.id;
+      if (isNodesLimitError(result.cause)) throw result.cause;
+      throw new Error("daily: couldn't open today's note for quick-add");
+    },
+  }),
+
+  // Seam J: VIRTUAL go-to-date row(s) when the queried day/scaffold does NOT
+  // exist yet (when it does, Fuse + searchAliases surface the real node -- no
+  // dup). NL via chrono + owned weekdays + period catalog (ADR 0055 / 0057);
+  // today stays write-intent seed (ADR 0041). Period phrases navigate the ISO
+  // scaffold (scaffold-only mint — no forced day child).
   searchActions: (query, ctx) => {
-    const q = query.trim().toLowerCase();
-    if (q.length < 2 || !"today".startsWith(q)) return [];
-    const key = localDateKey();
-    const existing = getDayId(key);
-    if (existing && ctx.index.byId.has(existing)) return [];
-    return [
-      {
-        key: "daily-go-today",
-        label: "Go to Today",
-        hint: "Creates today's daily note",
-        icon: CalendarDaysIcon,
-        run: () =>
-          void getOrCreateDay(key, ctx.index).then((id) => {
-            if (id) ctx.goTo(id);
-            else toast.error("Couldn't open today's daily note");
-          }),
-      },
-    ];
+    const hits = parseGoToDateTargets(
+      query,
+      new Date(),
+      getEditorFeatures().weekStart,
+    );
+    if (hits.length === 0) return [];
+    return hits.flatMap((hit) => {
+      const existing = getMappedId(hit.key);
+      if (existing && ctx.index.byId.has(existing)) return [];
+      const isScaffold = hit.kind !== "day";
+      const isToday = !isScaffold && hit.key === localDateKey();
+      return [
+        {
+          key: `daily-go-date-${hit.key}`,
+          label: hit.label,
+          hint: isScaffold
+            ? "Creates this calendar page"
+            : isToday
+              ? "Creates today's daily note"
+              : "Creates this daily note",
+          icon: CalendarDaysIcon,
+          run: () => {
+            if (isScaffold) {
+              void getOrCreateScaffold(hit.key, {
+                failureToast: "Couldn't open that calendar page",
+              })
+                .then((id) => {
+                  if (id) ctx.goTo(id);
+                })
+                .catch(() => toast.error("Couldn't open that calendar page"));
+              return;
+            }
+            void getOrCreateDay(hit.key, { seedEntryLine: isToday })
+              .then((id) => {
+                if (id) ctx.goTo(id, isToday ? { focus: "last" } : undefined);
+              })
+              .catch(() => toast.error("Couldn't open that daily note"));
+          },
+        },
+      ];
+    });
   },
 });

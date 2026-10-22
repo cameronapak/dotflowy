@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect } from "effect";
 
 /**
  * Run an Effect program and convert its typed error into a thrown `Error`, so a
@@ -15,5 +15,5 @@ export function runPromise<T, E>(effect: Effect.Effect<T, E>): Promise<T> {
     effect.pipe(
       Effect.mapError((e) => (e instanceof Error ? e : new Error(String(e)))),
     ),
-  )
+  );
 }

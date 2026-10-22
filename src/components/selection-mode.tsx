@@ -1,12 +1,4 @@
 import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useState,
-  type RefObject,
-} from "react";
-import { createPortal } from "react-dom";
-import {
   autoUpdate,
   flip,
   offset,
@@ -19,18 +11,31 @@ import {
   CornerUpRightIcon,
   Trash2Icon,
 } from "lucide-react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type RefObject,
+} from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { getTreeIndex } from "../data/tree-store";
-import { getViewIsHidden, getViewRootId } from "../data/view-state";
-import { findVisibleNeighbor, lastVisibleDescendant } from "../data/visible-order";
+
+import type { CommandSpec, PluginContext } from "../plugins/types";
+
+import {
+  lockCommand,
+  paragraphCommand,
+  unlockCommand,
+} from "../data/core-commands";
+import { isMirrorsEnabled } from "../data/flags";
+import { capture, drop } from "../data/history";
+import { outlineToMarkdown } from "../data/markdown";
 import {
   indentManyNodes,
   outdentManyNodes,
   removeManyNodes,
 } from "../data/mutations";
-import { runStructural } from "../data/structural";
-import { capture, drop } from "../data/history";
-import { outlineToMarkdown } from "../data/markdown";
 import {
   clearSelection,
   extendSelection,
@@ -42,12 +47,29 @@ import {
   useIsSelectionActive,
   useSelectionRootIds,
 } from "../data/selection-state";
-import { isProtected, selectionCommandSpecs } from "../plugins/registry";
-import { orphanedMirrorsBy } from "../data/tree";
-import { isMirrorsEnabled } from "../data/flags";
-import type { PluginContext } from "../plugins/types";
-import { rejectRow } from "./flash-node";
+import { runStructural } from "../data/structural";
+import {
+  countSubtreeNodes,
+  orphanedMirrorsBy,
+  subtreeContainsLocked,
+} from "../data/tree";
+import { getTreeIndex } from "../data/tree-store";
+import {
+  getViewFilter,
+  getViewIsHidden,
+  getViewRootId,
+} from "../data/view-state";
+import {
+  findVisibleNeighbor,
+  lastVisibleDescendant,
+} from "../data/visible-order";
+import { isProtected, usePluginChrome } from "../plugins/registry";
 import { placeCaretAtEnd } from "./caret-place";
+import {
+  DELETE_CONFIRM_THRESHOLD,
+  openDeleteConfirm,
+} from "./delete-confirm-opener";
+import { rejectRow } from "./flash-node";
 import { openMoveDialog } from "./move-dialog-opener";
 import { SlashMenuList, type MenuListItem } from "./slash-menu-list";
 
@@ -119,6 +141,13 @@ function makeSelectionOps({
     const ids = getSelectionRootIds();
     if (ids.length === 0) return;
     const index = getTreeIndex();
+    if (subtreeContainsLocked(index, ids)) {
+      for (const id of ids) rejectRow(rowOf(id));
+      toast.error("Unlock the protected subtree before deleting it.", {
+        id: "node-locked-delete",
+      });
+      return;
+    }
     const protectedIds = ids.filter((id) => isProtected(id));
     const deletable = ids.filter((id) => !isProtected(id));
     if (protectedIds.length > 0) {
@@ -143,8 +172,23 @@ function makeSelectionOps({
       );
       return;
     }
+    // Big-subtree gate: a threshold-plus selection asks first, then runs as
+    // the dialog's sliced progress flow (capture + plan + one sliced batch
+    // happen there). The dialog owns the ids now, so leave selection mode —
+    // the Move/Mirror precedent.
+    const count = countSubtreeNodes(index, deletable);
+    if (count >= DELETE_CONFIRM_THRESHOLD) {
+      openDeleteConfirm({
+        rootIds: [...deletable],
+        count,
+        captureKey: deletable[0]!,
+      });
+      clearSelection();
+      return;
+    }
     const isHidden = getViewIsHidden();
     const rootId = getViewRootId();
+    const filter = getViewFilter();
     // Focus relative to the rows actually being DELETED, not the full selection:
     // a surviving protected node at the top/bottom edge must not be jumped over.
     // `above` = the row above the first deleted node (often that surviving
@@ -158,19 +202,21 @@ function makeSelectionOps({
       firstDel,
       "up",
       isHidden,
+      filter,
       mirrorsOn,
     );
-    const bottom = lastVisibleDescendant(index, lastDel, isHidden);
+    const bottom = lastVisibleDescendant(index, lastDel, isHidden, filter);
     const below = findVisibleNeighbor(
       index,
       rootId,
       bottom,
       "down",
       isHidden,
+      filter,
       mirrorsOn,
     );
     runStructural(() => {
-      capture(getTreeIndex(), deletable[0]!);
+      capture(getTreeIndex(), deletable[0]!, null, { label: "delete" });
       removeManyNodes(deletable);
     });
     pendingFocus.current = above ?? below ?? rootId;
@@ -205,8 +251,8 @@ function makeSelectionOps({
     const ids = getSelectionRootIds();
     if (ids.length === 0) return;
     runStructural(() => {
-      capture(getTreeIndex(), ids[0]!);
-      if (indentManyNodes(ids)) refreshSelection();
+      capture(getTreeIndex(), ids[0]!, null, { label: "indent" });
+      if (indentManyNodes(ids, isMirrorsEnabled())) refreshSelection();
       else drop();
     });
   };
@@ -221,7 +267,7 @@ function makeSelectionOps({
     if (!state || state.parentId === null || state.parentId === getViewRootId())
       return;
     runStructural(() => {
-      capture(getTreeIndex(), ids[0]!);
+      capture(getTreeIndex(), ids[0]!, null, { label: "outdent" });
       if (outdentManyNodes(ids)) refreshSelection();
       else drop();
     });
@@ -241,6 +287,7 @@ function makeSelectionOps({
         top,
         "up",
         getViewIsHidden(),
+        getViewFilter(),
         isMirrorsEnabled(),
       ) ?? top;
     clearSelection();
@@ -254,8 +301,9 @@ function makeSelectionOps({
     if (!state) return;
     const index = getTreeIndex();
     const isHidden = getViewIsHidden();
+    const filter = getViewFilter();
     const lastRoot = state.rootIds[state.rootIds.length - 1]!;
-    const bottom = lastVisibleDescendant(index, lastRoot, isHidden);
+    const bottom = lastVisibleDescendant(index, lastRoot, isHidden, filter);
     const target =
       findVisibleNeighbor(
         index,
@@ -263,6 +311,7 @@ function makeSelectionOps({
         bottom,
         "down",
         isHidden,
+        filter,
         isMirrorsEnabled(),
       ) ?? bottom;
     clearSelection();
@@ -278,7 +327,17 @@ function makeSelectionOps({
     focusNode(id);
   };
 
-  return { copy, remove, move, mirror, indent, outdent, caretAbove, caretBelow, exitToCaret };
+  return {
+    copy,
+    remove,
+    move,
+    mirror,
+    indent,
+    outdent,
+    caretAbove,
+    caretBelow,
+    exitToCaret,
+  };
 }
 
 /**
@@ -287,13 +346,7 @@ function makeSelectionOps({
  * state, so the only effect dep is `active` (toggles the listeners) plus the
  * stable `ops`.
  */
-export function useSelectionMode({
-  refs,
-  pendingFocus,
-}: SelectionModeArgs): {
-  active: boolean;
-  ops: SelectionOps;
-} {
+export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
   // refs is a stable useState Map and pendingFocus a stable ref -- so ops keeps
   // its identity and the listener effect below only re-subscribes when `active`
   // flips, never per render. (getCtx is only for the menu's plugin commands.)
@@ -376,8 +429,14 @@ export function useSelectionMode({
     // (whose buttons run a command). A bullet click also focuses it, which
     // clears via onFocus; this covers clicks on empty space too.
     const onDown = (e: MouseEvent) => {
+      // SAFETY: a window mousedown target is a DOM element
       const target = e.target as HTMLElement | null;
       if (target?.closest('[role="listbox"]')) return;
+      // Keep the selected slab alive while its bullet arms pointer drag. A
+      // successful external drop clears it; pointer cancel and failed drops do
+      // not. A plain dot click zooms and the new editor mount clears it.
+      if (target?.closest<HTMLElement>(".bullet")?.closest("li[data-selected]"))
+        return;
       clearSelection();
     };
     window.addEventListener("keydown", onKey, true);
@@ -421,6 +480,7 @@ export function SelectionActionsMenu({
   ops: SelectionOps;
   getCtx: () => PluginContext;
 }) {
+  const { selectionCommandSpecs } = usePluginChrome();
   const active = useIsSelectionActive();
   const rootIds = useSelectionRootIds();
   const [hover, setHover] = useState(0);
@@ -433,7 +493,9 @@ export function SelectionActionsMenu({
   const state = active ? getSelectionState() : null;
   const focusId = state?.focusId;
   const side =
-    focusId && focusId === rootIds[rootIds.length - 1] ? "bottom-start" : "top-start";
+    focusId && focusId === rootIds[rootIds.length - 1]
+      ? "bottom-start"
+      : "top-start";
 
   const { refs, floatingStyles, update } = useFloating({
     placement: side,
@@ -470,7 +532,10 @@ export function SelectionActionsMenu({
     setHover(0);
   }, [active, focusId, rootIds, refs, update]);
 
-  const items = active && rootIds.length ? buildItems(rootIds, ops, getCtx) : null;
+  const items =
+    active && rootIds.length
+      ? buildItems(rootIds, ops, getCtx, selectionCommandSpecs)
+      : null;
   if (!active || !focusId || !items) return null;
 
   const onSelect = (i: number) => {
@@ -499,6 +564,7 @@ function buildItems(
   rootIds: string[],
   ops: SelectionOps,
   getCtx: () => PluginContext,
+  selectionCommandSpecs: CommandSpec[],
 ): SelItem[] {
   const index = getTreeIndex();
   const core: SelItem[] = [
@@ -528,13 +594,19 @@ function buildItems(
       run: ops.mirror,
     });
   }
-  // Plugin commands that opted in (To-do, Send to Today), kept only when they
-  // apply to at least one selected node (To-do hides when all are already tasks).
-  const pluginItems: SelItem[] = selectionCommandSpecs
+  // Commands that opted in via `runMany` -- the plugins' (To-do, Send to Today)
+  // plus core's `/paragraph` (ADR 0045) -- kept only when they apply to at least
+  // one selected node (To-do hides when all are already tasks).
+  const pluginItems: SelItem[] = [
+    ...selectionCommandSpecs,
+    paragraphCommand,
+    lockCommand,
+    unlockCommand,
+  ]
     .filter((c) =>
       rootIds.some((id) => {
         const n = index.byId.get(id);
-        return !!n && c.available(n);
+        return !!n && c.available(n, getCtx());
       }),
     )
     .map((c) => ({

@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+
+import type { VisibleRow } from "./visible-order";
+
+import { hasWindow } from "../env";
 import {
   getSelectionState,
   subscribeSelection,
   type SelectionData,
   type SelectionEdge,
 } from "./selection-state";
-import type { VisibleRow } from "./visible-order";
 
 /**
- * Per-row selection FILL for the windowed list (2e-2, ADR 0019/0022). The
- * recursive path's `useSelectionEdge` only marks a selected ROOT, because its
- * descendants are DOM-nested inside the root's `<li>` and inherit the tint for
- * free. The flat list has no such nesting -- every row is its own absolutely
- * positioned sibling -- so a selected root's descendants need their OWN
- * `data-selected` value or they render untinted (the windowed-subtree-tint bug;
- * affects any node, not just mirrors).
+ * Per-row selection FILL for the windowed list (2e-2, ADR 0019/0022). The old
+ * recursive render only marked a selected ROOT, because its descendants were
+ * DOM-nested inside the root's `<li>` and inherited the tint for free. The flat
+ * list has no such nesting -- every row is its own absolutely positioned
+ * sibling -- so a selected root's descendants need their OWN `data-selected`
+ * value or they render untinted (the windowed-subtree-tint bug; affects any
+ * node, not just mirrors).
  *
  * `SelectionFill` reuses {@link SelectionEdge}'s vocabulary (same four values,
  * same CSS) -- only what counts as "covered" changes: every visible row inside
@@ -44,6 +47,7 @@ function computeFillMap(
   data: SelectionData | null,
 ): Map<string, SelectionFill> {
   const map = new Map<string, SelectionFill>();
+  // SAFETY: the selection schema stores rootIds as an array of strings; this is a readonly-to-mutable variance cast only.
   const rootIds = data?.rootIds as readonly string[] | undefined;
   if (!rootIds || rootIds.length === 0) return map;
   const rootSet = new Set(rootIds);
@@ -83,7 +87,7 @@ function recompute() {
 }
 
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   subscribeSelection(recompute);
 }
@@ -110,12 +114,31 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
+/** Event-time snapshot for pointer drag. A grabbed row anywhere inside the
+ * selected slab carries the selected ROOT ids, while `rowKeys` names every
+ * rendered row that should dim during the gesture. Null means the grabbed row
+ * is outside the active selection and remains an ordinary single-node drag. */
+export function getSelectionDragSet(
+  grabbedKey: string,
+): { rootIds: string[]; rowKeys: string[] } | null {
+  ensureStarted();
+  if (!fillMap.has(grabbedKey)) return null;
+  const rootIds = getSelectionState()?.rootIds;
+  if (!rootIds || rootIds.length === 0) return null;
+  // SAFETY: SelectionData's schema-owned readonly array is copied before it
+  // crosses into mutable drag state.
+  return {
+    rootIds: [...rootIds],
+    rowKeys: [...fillMap.keys()],
+  };
+}
+
 /**
  * Per-row subscription to this row's fill: a row re-renders only when ITS OWN
- * value changes (ADR 0014), exactly `useSelectionEdge`'s contract -- the
- * windowed-list counterpart, keyed by `row.key` (not the bare node id, so a
- * windowed mirror descendant and its source's canonical row -- different keys,
- * same id -- are independent reads). Returns null when this row isn't covered.
+ * value changes (ADR 0014, the `useIsProtected` shape), keyed by `row.key` (not
+ * the bare node id, so a windowed mirror descendant and its source's canonical
+ * row -- different keys, same id -- are independent reads). Returns null when
+ * this row isn't covered.
  */
 export function useSelectionFill(key: string): SelectionFill | null {
   const getSnapshot = useCallback(() => fillMap.get(key) ?? null, [key]);

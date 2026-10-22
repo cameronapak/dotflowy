@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useParams } from "@tanstack/react-router";
 import {
   ALargeSmallIcon,
@@ -7,31 +6,50 @@ import {
   ChevronsUpDownIcon,
   CircleCheckIcon,
   ClipboardCopyIcon,
+  DownloadIcon,
   ExternalLinkIcon,
+  FileUpIcon,
+  FilterIcon,
   FocusIcon,
   LogOutIcon,
+  MessageSquareWarningIcon,
   MonitorIcon,
   MoonIcon,
   PlugZapIcon,
+  PlusIcon,
+  Undo2Icon,
+  Redo2Icon,
+  SparklesIcon,
   SunIcon,
 } from "lucide-react";
+import { useMemo } from "react";
+
 import type { CommandCenterAction } from "../data/command-center";
-import { useTree } from "../data/useTree";
+
+import { useEditorFeatures } from "../data/editor-features";
+import { openFeedbackReport } from "../data/feedback";
 import { toggleBookmark } from "../data/mutations";
-import { capture } from "../data/history";
-import { signOut } from "../lib/auth-client";
-import { useShowCompleted } from "./show-completed-provider";
-import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
-import { useTheme } from "./theme-provider";
-import { useTextSize, type TextSize } from "./text-size-provider";
+import { useTree } from "../data/useTree";
+import { signOutAndReload } from "../lib/auth-client";
+import { usePluginChrome } from "../plugins/registry";
+import { openChangelog } from "./changelog-opener";
 import {
   copyOutlineAsMarkdown,
+  exportOutlineAsOpml,
   setViewCollapsed,
 } from "./header-more-menu";
+import { restoreHistory, useHistoryState } from "./history-restore";
+import { openOpmlImport } from "./opml-import-opener";
+import { openFilterInput } from "./query-filter-nav";
+import { openQuickAdd } from "./quick-add-opener";
+import { useShowCompleted } from "./show-completed-provider";
+import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
+import { useTextSize, type TextSize } from "./text-size-provider";
+import { useTheme } from "./theme-provider";
 
 /**
  * The GLOBAL-scope half of the Cmd+K command center (ADR 0034): the header +
- * More-menu actions re-expressed as flat `CommandCenterAction` rows. A hook, not
+ * View and App menu actions re-expressed as flat `CommandCenterAction` rows. A hook, not
  * a module singleton, because it lives INSIDE the provider tree (the switcher is
  * mounted in `__root`, under ThemeProvider et al.) and reads those contexts
  * directly -- no bridge needed for globals.
@@ -40,13 +58,15 @@ import {
  * (ADR 0034: an action may live in several surfaces); the two NON-trivial ones
  * (Copy as Markdown, Collapse/Expand all) are reused from that module so their
  * logic isn't forked. Stateful multi-value settings (theme, text size) FLATTEN
- * into discrete rows here (keyboard-discoverable) while the More menu keeps its
- * radio submenus. Bookmark view is contextual -- present only when zoomed.
+ * into discrete rows here (keyboard-discoverable), alongside their controls in
+ * Settings. Bookmark view is contextual -- present only when zoomed.
  */
 export function useGlobalActions(opts: {
   openConnect: () => void;
 }): CommandCenterAction[] {
   const { openConnect } = opts;
+  const { globalActions } = usePluginChrome();
+  const { daily } = useEditorFeatures();
   const { theme, setTheme } = useTheme();
   const { textSize, setTextSize } = useTextSize();
   const { showCompleted, setShowCompleted } = useShowCompleted();
@@ -54,9 +74,51 @@ export function useGlobalActions(opts: {
   const { index } = useTree();
   const rootId = useParams({ strict: false }).nodeId ?? null;
   const rootNode = rootId ? (index.byId.get(rootId) ?? null) : null;
+  const history = useHistoryState();
 
   return useMemo(() => {
     const a: CommandCenterAction[] = [
+      {
+        id: "g:undo",
+        label: history.undoLabel,
+        description: "Undo your last outline edit",
+        icon: Undo2Icon,
+        scope: "global",
+        keywords: ["undo", "history"],
+        hotkey: ["⌘", "Z"],
+        disabled: !history.canUndo,
+        run: () => restoreHistory("undo"),
+      },
+      {
+        id: "g:redo",
+        label: history.redoLabel,
+        description: "Redo your last undone edit",
+        icon: Redo2Icon,
+        scope: "global",
+        keywords: ["redo", "history"],
+        hotkey: ["⌘", "⇧", "Z"],
+        disabled: !history.canRedo,
+        run: () => restoreHistory("redo"),
+      },
+      {
+        id: "g:quick-add",
+        label: "Quick add",
+        description: daily
+          ? "Capture a thought to Today without leaving where you are"
+          : "Capture a thought to the top level without leaving where you are",
+        icon: PlusIcon,
+        scope: "global",
+        keywords: [
+          "quick",
+          "add",
+          "capture",
+          "new",
+          "inbox",
+          "note",
+          ...(daily ? ["today"] : []),
+        ],
+        run: () => openQuickAdd(),
+      },
       {
         id: "g:copy-md",
         label: "Copy as Markdown",
@@ -67,6 +129,24 @@ export function useGlobalActions(opts: {
         run: () => {
           void copyOutlineAsMarkdown();
         },
+      },
+      {
+        id: "g:import-opml",
+        label: "Import OPML…",
+        description: "Import a Workflowy OPML export",
+        icon: FileUpIcon,
+        scope: "global",
+        keywords: ["import", "opml", "workflowy", "migrate", "file"],
+        run: () => openOpmlImport(),
+      },
+      {
+        id: "g:export-opml",
+        label: "Export OPML",
+        description: "Download the current view as an OPML file",
+        icon: DownloadIcon,
+        scope: "global",
+        keywords: ["export", "opml", "download", "file", "workflowy", "backup"],
+        run: exportOutlineAsOpml,
       },
       {
         id: "g:collapse-all",
@@ -104,6 +184,17 @@ export function useGlobalActions(opts: {
         keywords: ["spotlight", "focus", "dim", "zen"],
         run: () => setSpotlightEnabled(!spotlight),
       },
+      {
+        id: "g:filter",
+        label: "Filter this view",
+        description: "Filter by #tag, is:todo, has:link, text, and more",
+        icon: FilterIcon,
+        scope: "global",
+        keywords: ["filter", "search", "query", "find", "tag", "todo"],
+        // The switcher closes first (runAction), releasing focus; the opener
+        // defers focus a frame so the input wins the focus race (ADR 0047 §6).
+        run: () => openFilterInput(),
+      },
     ];
 
     if (rootNode) {
@@ -116,13 +207,16 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["bookmark", "save", "pin", "star"],
         run: () => {
-          capture(index, null);
           toggleBookmark(rootNode.id, !isBookmarked);
         },
       });
     }
 
-    const themes: { value: "light" | "dark" | "system"; label: string; icon: typeof SunIcon }[] = [
+    const themes: {
+      value: "light" | "dark" | "system";
+      label: string;
+      icon: typeof SunIcon;
+    }[] = [
       { value: "light", label: "Light", icon: SunIcon },
       { value: "dark", label: "Dark", icon: MoonIcon },
       { value: "system", label: "System", icon: MonitorIcon },
@@ -132,10 +226,18 @@ export function useGlobalActions(opts: {
         id: `g:theme-${t.value}`,
         label: `Theme: ${t.label}`,
         description:
-          theme === t.value ? "Current theme" : `Switch to the ${t.label.toLowerCase()} theme`,
+          theme === t.value
+            ? "Current theme"
+            : `Switch to the ${t.label.toLowerCase()} theme`,
         icon: t.icon,
         scope: "global",
-        keywords: ["theme", "appearance", "dark", "light", t.label.toLowerCase()],
+        keywords: [
+          "theme",
+          "appearance",
+          "dark",
+          "light",
+          t.label.toLowerCase(),
+        ],
         run: () => setTheme(t.value),
       });
     }
@@ -147,7 +249,9 @@ export function useGlobalActions(opts: {
         id: `g:text-${s}`,
         label: `Text size: ${label}`,
         description:
-          textSize === s ? "Current text size" : `Use ${label.toLowerCase()} text`,
+          textSize === s
+            ? "Current text size"
+            : `Use ${label.toLowerCase()} text`,
         icon: ALargeSmallIcon,
         scope: "global",
         keywords: ["text", "size", "font", "zoom", s],
@@ -166,6 +270,24 @@ export function useGlobalActions(opts: {
         run: openConnect,
       },
       {
+        id: "g:changelog",
+        label: "What's new",
+        description: "Every change to Dotflowy, newest first",
+        icon: SparklesIcon,
+        scope: "global",
+        keywords: ["changelog", "release", "version", "news", "updates"],
+        run: () => openChangelog(),
+      },
+      {
+        id: "g:feedback",
+        label: "Report a bug",
+        description: "Open a pre-filled GitHub issue",
+        icon: MessageSquareWarningIcon,
+        scope: "global",
+        keywords: ["feedback", "bug", "report", "issue", "problem", "github"],
+        run: () => openFeedbackReport(),
+      },
+      {
         id: "g:github",
         label: "GitHub",
         description: "Open the dotflowy repository",
@@ -173,7 +295,11 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["github", "source", "code", "repo"],
         run: () =>
-          window.open("https://git.new/dotflowy", "_blank", "noopener,noreferrer"),
+          window.open(
+            "https://git.new/dotflowy",
+            "_blank",
+            "noopener,noreferrer",
+          ),
       },
       {
         id: "g:signout",
@@ -183,13 +309,21 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["sign out", "logout", "log out", "exit"],
         run: () => {
-          void signOut();
+          signOutAndReload();
         },
       },
     );
 
-    return a;
+    return [
+      ...a,
+      ...globalActions.map((action) => ({
+        ...action,
+        scope: "global" as const,
+      })),
+    ];
   }, [
+    globalActions,
+    history,
     theme,
     setTheme,
     textSize,
@@ -198,7 +332,7 @@ export function useGlobalActions(opts: {
     setShowCompleted,
     spotlight,
     rootNode,
-    index,
     openConnect,
+    daily,
   ]);
 }

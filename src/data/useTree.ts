@@ -1,5 +1,4 @@
-import { useTreeIndex } from './tree-store'
-import type { TreeIndex } from './tree'
+import { useTreeIndex } from "./tree-store";
 
 /**
  * Subscribe to the whole derived TreeIndex.
@@ -11,6 +10,6 @@ import type { TreeIndex } from './tree'
  * the narrow `useNode` / `useVisibleChildIds` slices instead, so a keystroke
  * re-renders only the bullet that changed. See ADR 0014.
  */
-export function useTree(): { index: TreeIndex } {
-  return { index: useTreeIndex() }
+export function useTree() {
+  return { index: useTreeIndex() };
 }

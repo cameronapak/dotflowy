@@ -12,105 +12,141 @@
  * realtime.test.ts; this file only exercises the schema.)
  */
 
-import { describe, expect, it } from 'bun:test'
-import { Exit, Schema } from 'effect'
-import { makeNode } from './tree'
-import { ChangeOpSchema, NodeSchema, ServerMessageSchema } from './wire-schema'
+import { expect, test } from "bun:test";
+import { Exit, Schema } from "effect";
 
-type AnySchema = Schema.Codec<unknown, unknown, never, never>
+import { createNode } from "./tree";
+import { ChangeOpSchema, NodeSchema, ServerMessageSchema } from "./wire-schema";
 
-const decodes = (schema: AnySchema, input: unknown) =>
-  Exit.isSuccess(Schema.decodeUnknownExit(schema)(input))
+type AnySchema = Schema.Codec<unknown, unknown, never, never>;
 
-const a = makeNode({ id: 'a', text: 'alpha' })
-const b = makeNode({ id: 'b', text: 'bravo' })
+/** Valid payloads plus the malformed shapes the reject-cases feed. */
+type DecodeInput =
+  | string
+  | number
+  | boolean
+  | null
+  | { readonly [key: string]: Schema.Json };
 
-describe('NodeSchema', () => {
-  it('accepts a complete node', () => {
-    expect(decodes(NodeSchema, a)).toBe(true)
-  })
+const decodes = (schema: AnySchema, input: DecodeInput) =>
+  Exit.isSuccess(Schema.decodeUnknownExit(schema)(input));
 
-  it('rejects a wrong field type', () => {
-    expect(decodes(NodeSchema, { ...a, isTask: 'yes' })).toBe(false)
-  })
+const a = createNode({ id: "a", text: "alpha" });
+const b = createNode({ id: "b", text: "bravo" });
 
-  it('rejects a missing required field (mirrorOf, ADR 0022)', () => {
-    const { mirrorOf: _omit, ...missing } = a
-    expect(decodes(NodeSchema, missing)).toBe(false)
-  })
-})
+const { mirrorOf: _omit, ...missingMirrorOf } = a;
 
-describe('ChangeOpSchema', () => {
-  it('accepts insert / update / delete ops', () => {
-    expect(decodes(ChangeOpSchema, { op: 'insert', value: a })).toBe(true)
-    expect(decodes(ChangeOpSchema, { op: 'update', value: b })).toBe(true)
-    expect(decodes(ChangeOpSchema, { op: 'delete', key: 'a' })).toBe(true)
-  })
+test.each<[string, AnySchema, DecodeInput]>([
+  ["a complete node", NodeSchema, a],
+  ["an insert op", ChangeOpSchema, { op: "insert", value: a }],
+  ["an update op", ChangeOpSchema, { op: "update", value: b }],
+  ["a delete op", ChangeOpSchema, { op: "delete", key: "a" }],
+  [
+    "a snapshot frame",
+    ServerMessageSchema,
+    { type: "snapshot", seq: 3, nodes: [a, b] },
+  ],
+  [
+    "an empty snapshot (fresh outline)",
+    ServerMessageSchema,
+    { type: "snapshot", seq: 0, nodes: [] },
+  ],
+  [
+    "a resume frame carrying change frames",
+    ServerMessageSchema,
+    {
+      type: "resume",
+      seq: 5,
+      changes: [{ seq: 5, ops: [{ op: "update", value: a }] }],
+    },
+  ],
+  [
+    "a live change frame",
+    ServerMessageSchema,
+    {
+      type: "change",
+      seq: 6,
+      ops: [
+        { op: "insert", value: b },
+        { op: "delete", key: "a" },
+      ],
+    },
+  ],
+  [
+    "a change frame with an atomic calendar state and index delta",
+    ServerMessageSchema,
+    {
+      type: "change",
+      seq: 7,
+      ops: [],
+      calendar: {
+        weekStart: "sunday",
+        upserts: [{ key: "week:2030-06-09", nodeId: "week" }],
+        deletes: ["week:2030-06-10"],
+      },
+    },
+  ],
+  [
+    "a snapshot frame with calendar state",
+    ServerMessageSchema,
+    { type: "snapshot", seq: 7, nodes: [], calendar: { weekStart: "sunday" } },
+  ],
+])("accepts %s", (_name, schema, input) => {
+  expect(decodes(schema, input)).toBe(true);
+});
 
-  it('rejects an insert op missing its value', () => {
-    expect(decodes(ChangeOpSchema, { op: 'insert' })).toBe(false)
-  })
+test.each<[string, AnySchema, DecodeInput]>([
+  ["a wrong node field type", NodeSchema, { ...a, isTask: "yes" }],
+  ["a node missing mirrorOf (ADR 0022)", NodeSchema, missingMirrorOf],
+  ["an insert op missing its value", ChangeOpSchema, { op: "insert" }],
+  ["a delete op missing its key", ChangeOpSchema, { op: "delete" }],
+  [
+    "an unknown op discriminant",
+    ChangeOpSchema,
+    { op: "frobnicate", value: a },
+  ],
+  ["an unknown frame type", ServerMessageSchema, { type: "bogus", seq: 1 }],
+  [
+    "a change frame with no seq",
+    ServerMessageSchema,
+    { type: "change", ops: [] },
+  ],
+  // The half-applied write the gate prevents.
+  [
+    "a change frame whose op is malformed",
+    ServerMessageSchema,
+    { type: "change", seq: 1, ops: [{ op: "insert" }] },
+  ],
+  [
+    "a snapshot whose nodes array holds a bad node",
+    ServerMessageSchema,
+    { type: "snapshot", seq: 1, nodes: [{ ...a, id: 5 }] },
+  ],
+  ["a string frame", ServerMessageSchema, "not a frame"],
+  ["a null frame", ServerMessageSchema, null],
+])("rejects %s", (_name, schema, input) => {
+  expect(decodes(schema, input)).toBe(false);
+});
 
-  it('rejects a delete op missing its key', () => {
-    expect(decodes(ChangeOpSchema, { op: 'delete' })).toBe(false)
-  })
-
-  it('rejects an unknown op discriminant', () => {
-    expect(decodes(ChangeOpSchema, { op: 'frobnicate', value: a })).toBe(false)
-  })
-})
-
-describe('ServerMessageSchema (DO → client frames)', () => {
-  it('accepts a snapshot frame', () => {
-    expect(decodes(ServerMessageSchema, { type: 'snapshot', seq: 3, nodes: [a, b] })).toBe(true)
-  })
-
-  it('accepts an empty snapshot (fresh outline)', () => {
-    expect(decodes(ServerMessageSchema, { type: 'snapshot', seq: 0, nodes: [] })).toBe(true)
-  })
-
-  it('accepts a resume frame carrying change frames', () => {
-    expect(
-      decodes(ServerMessageSchema, {
-        type: 'resume',
-        seq: 5,
-        changes: [{ seq: 5, ops: [{ op: 'update', value: a }] }],
-      }),
-    ).toBe(true)
-  })
-
-  it('accepts a live change frame', () => {
-    expect(
-      decodes(ServerMessageSchema, {
-        type: 'change',
+test("keeps clientId correlation on live and resumed change frames", () => {
+  const change = Schema.decodeUnknownSync(ServerMessageSchema)({
+    type: "change",
+    seq: 6,
+    ops: [{ op: "update", value: a }],
+    clientId: "page-1",
+  });
+  const resume = Schema.decodeUnknownSync(ServerMessageSchema)({
+    type: "resume",
+    seq: 6,
+    changes: [
+      {
         seq: 6,
-        ops: [{ op: 'insert', value: b }, { op: 'delete', key: 'a' }],
-      }),
-    ).toBe(true)
-  })
+        ops: [{ op: "update", value: a }],
+        clientId: "page-1",
+      },
+    ],
+  });
 
-  it('rejects an unknown frame type', () => {
-    expect(decodes(ServerMessageSchema, { type: 'bogus', seq: 1 })).toBe(false)
-  })
-
-  it('rejects a change frame with no seq', () => {
-    expect(decodes(ServerMessageSchema, { type: 'change', ops: [] })).toBe(false)
-  })
-
-  it('rejects a change frame whose op is malformed (the half-applied write the gate prevents)', () => {
-    expect(decodes(ServerMessageSchema, { type: 'change', seq: 1, ops: [{ op: 'insert' }] })).toBe(
-      false,
-    )
-  })
-
-  it('rejects a snapshot whose nodes array holds a bad node', () => {
-    expect(
-      decodes(ServerMessageSchema, { type: 'snapshot', seq: 1, nodes: [{ ...a, id: 5 }] }),
-    ).toBe(false)
-  })
-
-  it('rejects a non-object frame', () => {
-    expect(decodes(ServerMessageSchema, 'not a frame')).toBe(false)
-    expect(decodes(ServerMessageSchema, null)).toBe(false)
-  })
-})
+  expect(change).toHaveProperty("clientId", "page-1");
+  expect(resume).toHaveProperty("changes.0.clientId", "page-1");
+});

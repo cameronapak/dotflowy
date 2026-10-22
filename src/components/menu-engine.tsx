@@ -1,5 +1,7 @@
+import { AnimatePresence } from "motion/react";
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+
 import type { Node } from "../data/schema";
 import type {
   MenuEntry,
@@ -7,10 +9,14 @@ import type {
   MenuTrigger,
   PluginContext,
 } from "../plugins/types";
+
+import { useIsMobile } from "../hooks/use-mobile";
 import { menuSpecs } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { MenuList } from "./menu-list";
+import { TypingSuggestions } from "./typing-suggestions";
+import { useClampedMenuPosition } from "./use-menu-position";
 
 /**
  * The generic caret-menu engine (ADR 0001 Seam H). One per focused bullet --
@@ -21,7 +27,7 @@ import { MenuList } from "./menu-list";
  * links keep their url -- we work in readSource space, never textContent). The
  * per-menu behavior (which trigger, which entries) is a plugin `MenuSpec`.
  *
- * Mirrors the old useTagMenu/useSlashMenu shape so OutlineNode wires it in the
+ * Mirrors the old useTagMenu/useSlashMenu shape so OutlineRow wires it in the
  * same way; the `#` tag menu now lives in the tags plugin.
  */
 
@@ -62,6 +68,7 @@ export function useMenus({
   onTextChange: (text: string) => void;
 }) {
   const [open, setOpen] = useState<MenuOpen | null>(null);
+  const mobile = useIsMobile();
 
   const spec: MenuSpec | null = open
     ? (menuSpecs.find((s) => s.id === open.specId) ?? null)
@@ -75,6 +82,14 @@ export function useMenus({
   // "Open" only counts when there's something to show (or the spec opts into an
   // empty state), so a brand-new `#tag`'s Enter is never swallowed.
   const isOpen = open !== null && (entries.length > 0 || !!spec?.openWhenEmpty);
+
+  // Keep the menu on screen: clamp the caret coords to the viewport (shift left
+  // near the right edge, flip above near the bottom). Re-measures on entry count.
+  const menuPosition = useClampedMenuPosition(
+    open?.x ?? 0,
+    open?.y ?? 0,
+    entries.length,
+  );
 
   const close = () => setOpen(null);
 
@@ -138,13 +153,17 @@ export function useMenus({
       case "ArrowDown":
         e.preventDefault();
         setOpen((s) =>
-          s ? { ...s, activeIndex: wrap(s.activeIndex + 1, entries.length) } : s,
+          s
+            ? { ...s, activeIndex: wrap(s.activeIndex + 1, entries.length) }
+            : s,
         );
         return true;
       case "ArrowUp":
         e.preventDefault();
         setOpen((s) =>
-          s ? { ...s, activeIndex: wrap(s.activeIndex - 1, entries.length) } : s,
+          s
+            ? { ...s, activeIndex: wrap(s.activeIndex - 1, entries.length) }
+            : s,
         );
         return true;
       case "Enter":
@@ -154,6 +173,7 @@ export function useMenus({
         return true;
       case "Escape":
         e.preventDefault();
+        e.stopPropagation();
         setOpen(null);
         return true;
       default:
@@ -161,23 +181,35 @@ export function useMenus({
     }
   };
 
-  const menu =
-    isOpen && open
-      ? createPortal(
+  const menu = mobile ? (
+    <AnimatePresence>
+      {isOpen && open && (
+        <TypingSuggestions getEditor={getEl} onDismiss={close}>
           <MenuList
             entries={entries}
             activeIndex={open.activeIndex}
             emptyLabel={spec?.emptyLabel}
-            x={open.x}
-            y={open.y}
-            onHover={(i) =>
-              setOpen((s) => (s ? { ...s, activeIndex: i } : s))
-            }
+            inDock
+            onHover={(i) => setOpen((s) => (s ? { ...s, activeIndex: i } : s))}
             onSelect={pick}
-          />,
-          document.body,
-        )
-      : null;
+          />
+        </TypingSuggestions>
+      )}
+    </AnimatePresence>
+  ) : isOpen && open ? (
+    createPortal(
+      <MenuList
+        entries={entries}
+        activeIndex={open.activeIndex}
+        emptyLabel={spec?.emptyLabel}
+        ref={menuPosition.ref}
+        style={menuPosition.style}
+        onHover={(i) => setOpen((s) => (s ? { ...s, activeIndex: i } : s))}
+        onSelect={pick}
+      />,
+      document.body,
+    )
+  ) : null;
 
   return { handleInput, handleKeyDown, close, isOpen, menu };
 }

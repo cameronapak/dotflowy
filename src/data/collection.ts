@@ -1,14 +1,31 @@
-import { createCollection } from '@tanstack/react-db'
-import { type Cause, Duration, Effect, Fiber, Schema, Stream } from 'effect'
-import { nodeSchema } from './schema'
-import type { Node } from './schema'
-import { createNodes, deleteNodes, updateNodes } from './api'
-import { runPromise } from './nodes-client-effect'
-import { makeSyncStream } from './realtime'
-import type { ChangeOp, ServerMessage, SyncEvent } from './realtime'
-import { appRuntime } from './runtime'
-import { buildTreeIndex, now } from './tree'
-import { chainDisagreements } from './sibling-chain'
+import type { Socket } from "effect/socket";
+
+import { createCollection } from "@tanstack/react-db";
+import { Cause, Duration, Effect, Fiber, Schema, Stream } from "effect";
+import { toast } from "sonner";
+
+import type { ChangeOp, ServerMessage, SyncEvent } from "./realtime";
+import type { Node } from "./schema";
+
+import { hasWindow } from "../env";
+import { createNodes, deleteNodes, updateNodes } from "./api";
+import { noteServerVersion } from "./app-version";
+import { publishCalendarSync } from "./calendar-sync";
+import { isMirrorsEnabled } from "./flags";
+import { clearHistory, sameAuthoring } from "./history";
+import { runPromise } from "./nodes-client-effect";
+import { createSyncStream } from "./realtime";
+import { appRuntime } from "./runtime";
+import { persistOrNotify } from "./save-failure";
+import { nodeSchema } from "./schema";
+import { chainDisagreements } from "./sibling-chain";
+import {
+  decideSyncRecovery,
+  nextStreak,
+  notifySyncInterrupted,
+} from "./sync-supervision";
+import { buildTreeIndex, childrenOf, now } from "./tree";
+import { getWriteClientId } from "./write-origin";
 
 /**
  * Single source of truth for all outline nodes.
@@ -46,9 +63,9 @@ import { chainDisagreements } from './sibling-chain'
  *  from a genuinely empty new account. First-run bootstrap reads this to avoid
  *  seeding welcome bullets over a real-but-unreachable outline (see seed.ts).
  *  Cleared the moment a real snapshot arrives (a recovered socket). */
-let initialError: Error | null = null
+let initialError: Error | null = null;
 export function nodesLoadError(): Error | null {
-  return initialError
+  return initialError;
 }
 
 /**
@@ -61,29 +78,47 @@ export function nodesLoadError(): Error | null {
  * spinner until then. Session-lived on purpose: a mid-session reconnect keeps it true, so
  * we never flash the loading state again once the outline has been shown.
  */
-let syncReady = false
-const syncReadyListeners = new Set<() => void>()
+let syncReady = false;
+const syncReadyListeners = new Set<() => void>();
 export function isSyncReady(): boolean {
-  return syncReady
+  return syncReady;
 }
 export function subscribeSyncReady(listener: () => void): () => void {
-  syncReadyListeners.add(listener)
+  syncReadyListeners.add(listener);
   return () => {
-    syncReadyListeners.delete(listener)
-  }
+    syncReadyListeners.delete(listener);
+  };
 }
 function markSyncReady(): void {
-  if (syncReady) return
-  syncReady = true
-  for (const listener of syncReadyListeners) listener()
+  if (syncReady) return;
+  syncReady = true;
+  for (const listener of syncReadyListeners) listener();
+}
+
+/**
+ * Resolve once the classic outline is ready to read. The socket fires this on
+ * its first frame and on initial-load error, so callers never hang forever on
+ * an unreachable server.
+ *
+ * The single implementation of that rule. `seed.ts` and `routes/today.tsx` both
+ * call it; do not grow a private copy in a third place.
+ */
+export function whenNodesSyncReady(): Promise<void> {
+  if (syncReady || !hasWindow()) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const unsub = subscribeSyncReady(() => {
+      unsub();
+      resolve();
+    });
+  });
 }
 
 /** Force the outline to reconcile against server truth now (a fresh snapshot).
  *  Used by the daily plugin's claim loser-path; a no-op before the socket
  *  connects (or during the `/` prerender). */
-let resyncFn: (() => void) | null = null
+let resyncFn: (() => void) | null = null;
 export function resyncNodes(): void {
-  resyncFn?.()
+  resyncFn?.();
 }
 
 /**
@@ -91,9 +126,20 @@ export function resyncNodes(): void {
  * live change). A module-level mirror of the sync cursor so `waitForSeq` can be
  * awaited from outside the sync closure. Starts at 0 (nothing applied).
  */
-let appliedSeq = 0
-type SeqWaiter = { seq: number; resolve: () => void }
-const seqWaiters = new Set<SeqWaiter>()
+let appliedSeq = 0;
+export function getAppliedSeq(): number {
+  return appliedSeq;
+}
+
+function resetExternalHistory(): void {
+  if (clearHistory())
+    toast("History cleared", {
+      id: "history-cleared",
+      description: "Your outline changed in another tab, device, or app.",
+    });
+}
+type SeqWaiter = { seq: number; resolve: () => void };
+const seqWaiters = new Set<SeqWaiter>();
 
 /**
  * The last `text` value the SYNC channel applied for each node id (a live change
@@ -104,24 +150,24 @@ const seqWaiters = new Set<SeqWaiter>()
  * stale or out-of-order) keystrokes back -- repainting it mid-type is exactly
  * what scrambles characters and jumps the caret. A LOCAL change (undo/redo, a
  * slash insert) carries a value that does NOT match the latest echo, so it still
- * repaints. See OutlineNode's store-sync effect.
+ * repaints. See OutlineRow's store-sync effect.
  */
-const echoedText = new Map<string, string>()
+const echoedText = new Map<string, string>();
 export function echoedTextFor(id: string): string | undefined {
-  return echoedText.get(id)
+  return echoedText.get(id);
 }
 
 /** Advance the applied cursor and release any waiters it satisfies. Monotonic:
  *  a lower/equal seq (a redundant frame) is ignored. Called wherever a LIVE
  *  frame is applied (live change, resume). Snapshots use `resetAppliedSeq`. */
 function advanceAppliedSeq(seq: number): void {
-  if (seq <= appliedSeq) return
-  appliedSeq = seq
+  if (seq <= appliedSeq) return;
+  appliedSeq = seq;
   // Deleting the current entry mid-iteration is safe for a Set.
   for (const w of seqWaiters) {
     if (appliedSeq >= w.seq) {
-      seqWaiters.delete(w)
-      w.resolve()
+      seqWaiters.delete(w);
+      w.resolve();
     }
   }
 }
@@ -137,10 +183,10 @@ function advanceAppliedSeq(seq: number): void {
  *  structural tx trust the snapshot — the same fallback `waitForSeq`'s timeout
  *  already takes. */
 function resetAppliedSeq(seq: number): void {
-  appliedSeq = seq
+  appliedSeq = seq;
   for (const w of seqWaiters) {
-    seqWaiters.delete(w)
-    w.resolve()
+    seqWaiters.delete(w);
+    w.resolve();
   }
 }
 
@@ -158,23 +204,46 @@ function resetAppliedSeq(seq: number): void {
  * wedged; either way trust the synced snapshot rather than hang the transaction.
  * The interrupt finalizer drops the waiter, so a timed-out wait can't leak.
  */
-export function waitForSeqE(seq: number, timeoutMs = 8000): Effect.Effect<void> {
+export function waitForSeqE(
+  seq: number,
+  timeoutMs = 8000,
+): Effect.Effect<void> {
   return Effect.callback<void>((resume) => {
     if (appliedSeq >= seq) {
-      resume(Effect.void)
-      return
+      resume(Effect.void);
+      return;
     }
-    const waiter: SeqWaiter = { seq, resolve: () => resume(Effect.void) }
-    seqWaiters.add(waiter)
+    const waiter: SeqWaiter = { seq, resolve: () => resume(Effect.void) };
+    seqWaiters.add(waiter);
     return Effect.sync(() => {
-      seqWaiters.delete(waiter)
-    })
+      seqWaiters.delete(waiter);
+    });
   }).pipe(
     Effect.timeoutOrElse({
       duration: Duration.millis(timeoutMs),
       orElse: () => Effect.void,
     }),
-  )
+  );
+}
+
+/** Like waitForSeqE, but a missing echo is a failure. Calendar activation uses
+ * this stricter barrier because publishing a preference before its migrated node
+ * frame arrives would expose two calendar meanings in one tab. */
+export function waitForSeqStrictE(
+  seq: number,
+  timeoutMs = 8000,
+): Effect.Effect<void, Cause.TimeoutError> {
+  return Effect.callback<void>((resume) => {
+    if (appliedSeq >= seq) {
+      resume(Effect.void);
+      return;
+    }
+    const waiter: SeqWaiter = { seq, resolve: () => resume(Effect.void) };
+    seqWaiters.add(waiter);
+    return Effect.sync(() => {
+      seqWaiters.delete(waiter);
+    });
+  }).pipe(Effect.timeout(Duration.millis(timeoutMs)));
 }
 
 /**
@@ -188,10 +257,10 @@ export function waitForNodeE(
   timeoutMs = 8000,
 ): Effect.Effect<void, Cause.TimeoutError> {
   return Effect.callback<void>((resume) => {
-    const present = () => nodesCollection.toArray.some((n) => n.id === id)
+    const present = () => nodesCollection.toArray.some((n) => n.id === id);
     if (present()) {
-      resume(Effect.void)
-      return
+      resume(Effect.void);
+      return;
     }
     // `Effect.callback`'s returned finalizer runs ONLY on interruption (the
     // timeout path), NOT on a successful `resume` — so the success paths must
@@ -200,25 +269,25 @@ export function waitForNodeE(
     // idempotent, so a later finalizer call after success is harmless.
     const sub = nodesCollection.subscribeChanges(() => {
       if (present()) {
-        sub.unsubscribe()
-        resume(Effect.void)
+        sub.unsubscribe();
+        resume(Effect.void);
       }
-    })
+    });
     // Guard the registration gap (a delta applied between the check and subscribe).
     if (present()) {
-      sub.unsubscribe()
-      resume(Effect.void)
+      sub.unsubscribe();
+      resume(Effect.void);
     }
     return Effect.sync(() => {
-      sub.unsubscribe()
-    })
-  }).pipe(Effect.timeout(Duration.millis(timeoutMs)))
+      sub.unsubscribe();
+    });
+  }).pipe(Effect.timeout(Duration.millis(timeoutMs)));
 }
 
 /** Promise form of {@link waitForNodeE} for the daily claim loser-path (rejects
  *  on timeout; the caller `.catch`es it and materializes locally). */
 export function waitForNode(id: string, timeoutMs = 8000): Promise<void> {
-  return runPromise(waitForNodeE(id, timeoutMs))
+  return runPromise(waitForNodeE(id, timeoutMs));
 }
 
 /**
@@ -246,19 +315,19 @@ export function waitForNode(id: string, timeoutMs = 8000): Promise<void> {
 export function siblingChainRepairs(
   nodes: Node[],
 ): Array<{ id: string; prevSiblingId: string | null }> {
-  const index = buildTreeIndex(nodes)
-  const fixes: Array<{ id: string; prevSiblingId: string | null }> = []
+  const index = buildTreeIndex(nodes);
+  const fixes: Array<{ id: string; prevSiblingId: string | null }> = [];
   // childrenByParent holds ordered child *ids* now; map them back to the rows
   // chainDisagreements compares (the ids are canonical-order by construction).
   for (const ids of index.childrenByParent.values()) {
     const ordered = ids
       .map((id) => index.byId.get(id))
-      .filter((n): n is Node => n != null)
+      .filter((n): n is Node => n != null);
     for (const d of chainDisagreements(ordered)) {
-      fixes.push({ id: d.id, prevSiblingId: d.expectedPrev })
+      fixes.push({ id: d.id, prevSiblingId: d.expectedPrev });
     }
   }
-  return fixes
+  return fixes;
 }
 
 /** Apply sibling-chain repairs as one optimistic transaction (so the Worker
@@ -266,129 +335,269 @@ export function siblingChainRepairs(
  *  in a microtask, after the snapshot commit has settled, and never throws into
  *  the sync path. */
 function healSiblingChains(nodes: Node[]): void {
-  let fixes: ReturnType<typeof siblingChainRepairs>
+  let fixes: ReturnType<typeof siblingChainRepairs>;
   try {
-    fixes = siblingChainRepairs(nodes)
+    fixes = siblingChainRepairs(nodes);
   } catch {
-    return
+    return;
   }
-  if (fixes.length === 0) return
+  if (fixes.length === 0) return;
   queueMicrotask(() => {
     try {
       for (const fix of fixes) {
         nodesCollection.update(fix.id, (draft) => {
-          draft.prevSiblingId = fix.prevSiblingId
-          draft.updatedAt = now()
-        })
+          draft.prevSiblingId = fix.prevSiblingId;
+          draft.updatedAt = now();
+        });
       }
     } catch {
       // A node may have been deleted between snapshot and microtask; a failed
       // heal is harmless -- the next snapshot retries.
     }
-  })
+  });
+}
+
+/**
+ * Rescue nodes stranded UNDER a mirror instance (ADR 0022). A mirror windows its
+ * SOURCE's children, so a node whose `parentId` points at a mirror instance
+ * (`parent.mirrorOf != null`) is orphaned -- the render walk reads the source's
+ * children, never the instance's, so the node is invisible (the "disappears on
+ * Tab" bug, before keyboard indent learned to resolve the mirror boundary the
+ * drag path already did). Repoint each such node at the true source, appended
+ * after the source's current real children, so it reappears in every instance;
+ * runs alongside `healSiblingChains` at snapshot load and persists the same way.
+ *
+ * Gated on the mirrors flag ON PURPOSE: with mirrors OFF, a node carrying
+ * `mirrorOf` renders as a plain node with its OWN children, so a child parented
+ * to it is legitimately placed and must NOT be moved. Early-returns on any
+ * flag-off / mirror-free / orphan-free outline (the mirrorOf lookups all miss).
+ */
+function healMirrorOrphans(nodes: Node[]): void {
+  if (!isMirrorsEnabled()) return;
+  const byId = new Map<string, Node>();
+  for (const n of nodes) byId.set(n.id, n);
+
+  // Group orphans by their true source. `parent.mirrorOf` is already the true
+  // source (mirror-of-mirror is flattened at creation -- ADR 0022), so there's
+  // no chain to resolve here.
+  const orphansBySource = new Map<string, string[]>();
+  for (const n of nodes) {
+    if (n.parentId == null) continue;
+    const source = byId.get(n.parentId)?.mirrorOf;
+    // A broken mirror (source deleted) renders as a leaf, not a window -- repointing
+    // the child at a missing id would persist a dangling parentId AND stop the node
+    // matching this heal on the next snapshot. Leave it and heal once the source
+    // (if ever) returns.
+    if (!source || !byId.has(source)) continue;
+    const list = orphansBySource.get(source);
+    if (list) list.push(n.id);
+    else orphansBySource.set(source, [n.id]);
+  }
+  if (orphansBySource.size === 0) return;
+
+  // Thread each rescued run after the source's current LAST real child (its own
+  // children hang off the source id, so the orphans -- bucketed under the mirror
+  // instance id -- are excluded from this read). Keeps the orphans' snapshot
+  // order among themselves.
+  const index = buildTreeIndex(nodes);
+  const fixes: {
+    id: string;
+    parentId: string;
+    prevSiblingId: string | null;
+  }[] = [];
+  for (const [source, orphanIds] of orphansBySource) {
+    const existing = childrenOf(index, source);
+    let prev: string | null =
+      existing.length > 0 ? existing[existing.length - 1]!.id : null;
+    for (const id of orphanIds) {
+      fixes.push({ id, parentId: source, prevSiblingId: prev });
+      prev = id;
+    }
+  }
+
+  queueMicrotask(() => {
+    for (const fix of fixes) {
+      try {
+        nodesCollection.update(fix.id, (draft) => {
+          draft.parentId = fix.parentId;
+          draft.prevSiblingId = fix.prevSiblingId;
+          draft.updatedAt = now();
+        });
+      } catch {
+        // A node may have been deleted between snapshot and microtask; harmless --
+        // isolate per fix so one stale id doesn't abort the rest. Next snapshot retries.
+      }
+    }
+  });
 }
 
 /**
  * Backfill nullable-required fields added after some rows were persisted (ADR
- * 0022's `mirrorOf`, and node `origin`). The per-user DO adds each column with a
- * NULL default in its migrator, so a healthy DO always sends them; this guards
- * the brief pre-migration window and any mock/snapshot that predates the field
- * (e.g. the e2e Worker mock). Done inline rather than via the post-commit
- * sibling-chain heal because the value must be present BEFORE the schema-typed
- * collection write (both fields are required, no default — ADR 0003), and it
- * allocates a new object only when something is actually absent (the never-taken
- * branch once every DO has migrated). */
+ * 0022's `mirrorOf`, node `origin`, and ADR 0045's `kind`). The per-user DO adds
+ * each column with a NULL default in its migrator, so a healthy DO always sends
+ * them; this guards the brief pre-migration window and any mock/snapshot that
+ * predates the field (e.g. the e2e Worker mock). Done inline rather than via the
+ * post-commit sibling-chain heal because the value must be present BEFORE the
+ * schema-typed collection write (every one is required, no default — ADR 0003),
+ * and it allocates a new object only when something is actually absent (the
+ * never-taken branch once every DO has migrated). */
 function withNodeDefaults(n: Node): Node {
   // The wire/DO type says these are always present, so read them through a loose
   // cast: a row persisted before a field existed (or the e2e mock) may omit it
   // at runtime even though the type can't express that.
-  const loose = n as { mirrorOf?: unknown; origin?: unknown }
-  if (loose.mirrorOf !== undefined && loose.origin !== undefined) return n
+  // SAFETY: a row persisted before a field existed, or the e2e mock, may omit it at runtime even though the Node type cannot express that.
+  const loose = n as {
+    mirrorOf?: unknown;
+    origin?: unknown;
+    kind?: unknown;
+    locked?: unknown;
+  };
+  if (
+    loose.mirrorOf !== undefined &&
+    loose.origin !== undefined &&
+    loose.kind !== undefined &&
+    loose.locked !== undefined
+  ) {
+    return n;
+  }
   return {
     ...n,
     mirrorOf: loose.mirrorOf === undefined ? null : n.mirrorOf,
     origin: loose.origin === undefined ? null : n.origin,
-  }
+    kind: loose.kind === undefined ? null : n.kind,
+    locked: loose.locked === undefined ? false : n.locked,
+  };
 }
 
 export const nodesCollection = createCollection({
-  id: 'nodes',
+  id: "nodes",
   getKey: (node: Node) => node.id,
   schema: Schema.toStandardSchemaV1(nodeSchema),
   sync: {
     // Updates carry only changed fields (a PATCH) OR a full row (an upsert);
     // partial merges both correctly.
-    rowUpdateMode: 'partial',
+    rowUpdateMode: "partial",
     sync: ({ begin, write, commit, markReady, truncate, metadata }) => {
       // SPA / no-SSR: never open a socket during the `/` prerender. Mark ready so
       // any defensive server-side read resolves empty instead of hanging.
-      if (typeof window === 'undefined') {
-        markReady()
-        return () => {}
+      if (!hasWindow()) {
+        markReady();
+        return () => {};
       }
 
-      let ready = false
+      let ready = false;
       const ensureReady = () => {
-        if (ready) return
-        ready = true
-        markReady()
+        if (ready) return;
+        ready = true;
+        markReady();
         // Release the shell's loading spinner (module signal, see markSyncReady).
-        markSyncReady()
-      }
+        markSyncReady();
+      };
+      // SAFETY: this sync is the only writer of the cursor and always stores a number seq.
       const getCursor = (): number | null =>
-        (metadata?.collection.get('cursor') as number | undefined) ?? null
+        (metadata?.collection.get("cursor") as number | undefined) ?? null;
 
-      const applyOps = (ops: readonly ChangeOp[], seq: number): void => {
-        begin()
+      // Compare snapshots with acknowledged server state, not optimistic rows:
+      // an unchanged resync can arrive while a local write is still pending.
+      const syncedNodes = new Map<string, Node>();
+      const applyOps = (
+        ops: readonly ChangeOp[],
+        seq: number,
+        clientId?: string,
+      ): void => {
+        if (
+          clientId !== getWriteClientId() &&
+          ops.some((op) => {
+            if (op.op === "delete") return syncedNodes.has(op.key);
+            const previous = syncedNodes.get(op.value.id);
+            return (
+              !previous || !sameAuthoring(previous, withNodeDefaults(op.value))
+            );
+          })
+        )
+          resetExternalHistory();
+        begin();
         for (const op of ops) {
-          if (op.op === 'delete') {
-            write({ type: 'delete', key: op.key })
-            echoedText.delete(op.key)
+          if (op.op === "delete") {
+            write({ type: "delete", key: op.key });
+            echoedText.delete(op.key);
+            syncedNodes.delete(op.key);
           } else {
-            write({ type: op.op, value: withNodeDefaults(op.value) })
-            echoedText.set(op.value.id, op.value.text)
+            const value = withNodeDefaults(op.value);
+            write({ type: op.op, value });
+            syncedNodes.set(value.id, value);
+            echoedText.set(op.value.id, op.value.text);
           }
         }
-        metadata?.collection.set('cursor', seq)
-        commit()
+        metadata?.collection.set("cursor", seq);
+        commit();
         // Release any runStructural transaction awaiting its own echo (P2).
-        advanceAppliedSeq(seq)
-      }
+        advanceAppliedSeq(seq);
+      };
 
       // Apply one decoded server frame. Unchanged from the old onMessage body —
       // it just runs on the sync fiber now (driven by Stream.runForEach below).
       const applyMessage = (msg: ServerMessage): void => {
-        if (msg.type === 'snapshot') {
+        // Both handshake frames carry the Worker's version; a mismatch means this
+        // tab's bundle is stale and offers a reload (ADR 0046). Live `change`
+        // frames don't carry it -- a reconnect is when the deploy gap appears.
+        if (msg.type !== "change") noteServerVersion(msg.serverVersion);
+        // Calendar preference/index state is committed with the node frame.
+        // Publish it first so date semantics and mappings cross the boundary
+        // before migrated nodes become visible to render and event handlers.
+        if (msg.calendar) publishCalendarSync(msg.calendar);
+        if (msg.type === "snapshot") {
+          if (
+            !ready ||
+            msg.nodes.length !== syncedNodes.size ||
+            msg.nodes.some((node) => {
+              const previous = syncedNodes.get(node.id);
+              return (
+                !previous || !sameAuthoring(previous, withNodeDefaults(node))
+              );
+            })
+          )
+            resetExternalHistory();
           // Replace the whole collection: truncate, then write the full set.
           // Idempotent on first connect (empty) and on a resync past the
           // changelog window. The cursor survives truncate (separate store).
-          begin()
-          truncate()
-          for (const n of msg.nodes) write({ type: 'insert', value: withNodeDefaults(n) })
-          metadata?.collection.set('cursor', msg.seq)
-          commit()
+          begin();
+          truncate();
+          syncedNodes.clear();
+          for (const node of msg.nodes) {
+            const value = withNodeDefaults(node);
+            write({ type: "insert", value });
+            syncedNodes.set(value.id, value);
+          }
+          metadata?.collection.set("cursor", msg.seq);
+          commit();
           // A fresh snapshot supersedes every earlier seq (and may be the
           // resolution a runStructural transaction is waiting on after a
           // reconnect or a same-page account switch), so reset the cursor to
           // it — even if it's LOWER than what a prior outline left behind.
-          resetAppliedSeq(msg.seq)
-          initialError = null
-          ensureReady()
+          resetAppliedSeq(msg.seq);
+          initialError = null;
+          ensureReady();
           // Self-heal any persisted sibling-chain corruption now that the full
           // outline is in hand (deferred so it writes outside this commit).
           // Copy: msg.nodes is a readonly wire array; the heal path wants Node[].
-          healSiblingChains(msg.nodes.slice())
-        } else if (msg.type === 'resume') {
+          healSiblingChains(msg.nodes.slice());
+          // Rescue any node stranded under a mirror instance (ADR 0022 boundary
+          // gap). Queued AFTER the chain heal so its parentId+prevSiblingId write
+          // wins on the rescued node if both touch it.
+          healMirrorOrphans(msg.nodes.slice());
+        } else if (msg.type === "resume") {
           // The gap since our cursor. Empty = already current; the cursor is
           // unchanged so there's nothing to write.
-          for (const frame of msg.changes) applyOps(frame.ops, frame.seq)
-          initialError = null
-          ensureReady()
+          for (const frame of msg.changes)
+            applyOps(frame.ops, frame.seq, frame.clientId);
+          initialError = null;
+          ensureReady();
         } else {
           // A live change broadcast from this or another device.
-          applyOps(msg.ops, msg.seq)
+          applyOps(msg.ops, msg.seq, msg.clientId);
         }
-      }
+      };
 
       // Allocate the producer synchronously (state only, no services), so the
       // resync bridge is wired before sync() returns; then fork the consuming
@@ -396,46 +605,116 @@ export const nodesCollection = createCollection({
       // session; the cleanup interrupts it, which closes the WebSocket via the
       // socket's scope finalizer.
       const { events, resync } = Effect.runSync(
-        makeSyncStream(Effect.sync(getCursor)),
-      )
+        createSyncStream(Effect.sync(getCursor)),
+      );
       resyncFn = () => {
-        appRuntime.runFork(resync)
-      }
+        appRuntime.runFork(resync);
+      };
 
-      const fiber = appRuntime.runFork(
-        Stream.runForEach(events, (event: SyncEvent) =>
-          Effect.sync(() => {
-            if (event._tag === 'InitialError') {
-              initialError = event.error
-              ensureReady()
-            } else {
-              applyMessage(event.message)
+      // Drain the event stream once. A throw inside `applyMessage` (schema drift,
+      // a future wire change) surfaces here as a DIE — without supervision it
+      // kills the consumer permanently while the socket still looks connected
+      // (issue #234). `drainOnce` folding is otherwise unchanged from before.
+      const drainOnce = Stream.runForEach(events, (event: SyncEvent) =>
+        Effect.sync(() => {
+          if (event._tag === "InitialError") {
+            initialError = event.error;
+            ensureReady();
+          } else {
+            applyMessage(event.message);
+          }
+        }),
+      );
+
+      // Supervise the drain inside ONE outer fiber so cleanup's interrupt still
+      // tears everything down (the socket's scope finalizer closes the WS). On a
+      // genuine defect we log the cause and re-establish (a fresh snapshot heals a
+      // transient one-frame glitch) up to a bounded budget; when it exhausts we
+      // flip a visible "reload" notice instead of dying silently. The policy —
+      // and crucially the interrupt-vs-fault split, so an intentional teardown is
+      // NOT treated as a failure — lives in `decideSyncRecovery`. See ADR 0053.
+      //
+      // The budget is a STREAK, not a lifetime count: `lastFailureAt` lives here
+      // (the impure wiring layer; the policy stays clock-free) and `nextStreak`
+      // resets the count when a failure lands long after the previous one — a
+      // tab open for days must not flip the give-up toast on its 4th ever
+      // transient glitch when each recovery held.
+      let lastFailureAt: number | null = null;
+      const superviseDrain = (
+        recoveriesUsed: number,
+      ): Effect.Effect<void, never, Socket.WebSocketConstructor> =>
+        drainOnce.pipe(
+          Effect.catchCause((cause) => {
+            const failedAt = Date.now();
+            const streak = nextStreak(lastFailureAt, failedAt, recoveriesUsed);
+            lastFailureAt = failedAt;
+            const decision = decideSyncRecovery(cause, streak);
+            switch (decision._tag) {
+              case "Stop":
+                // Intentional interrupt (cleanup / account switch). Re-raise the
+                // cause so the fiber terminates as interrupted rather than
+                // swallowing it — no recovery, no toast.
+                return Effect.failCause(cause);
+              case "GiveUp":
+                console.error(
+                  "[sync] consumer fiber gave up after retries",
+                  Cause.pretty(cause),
+                );
+                return Effect.sync(notifySyncInterrupted);
+              case "Reestablish":
+                console.error(
+                  "[sync] consumer fiber failed; re-establishing",
+                  Cause.pretty(cause),
+                );
+                // Force the next connection to ignore the cursor (fresh snapshot),
+                // back off, then re-open the stream on the SAME fiber.
+                return resync.pipe(
+                  Effect.andThen(Effect.sleep(decision.delay)),
+                  Effect.andThen(
+                    Effect.suspend(() => superviseDrain(streak + 1)),
+                  ),
+                );
             }
           }),
-        ),
-      )
+        );
+
+      const fiber = appRuntime.runFork(superviseDrain(0));
 
       return () => {
-        resyncFn = null
-        appRuntime.runFork(Fiber.interrupt(fiber))
-      }
+        resyncFn = null;
+        appRuntime.runFork(Fiber.interrupt(fiber));
+      };
     },
   },
+  // Each handler THROWS on a failed write so TanStack DB rolls the optimistic
+  // edit back; `persistOrNotify` surfaces that rollback to the user (#230) and
+  // re-throws — the throw is load-bearing (swallowing it would drop the failure
+  // AND the rollback). A no-op toast for the node-limit case, already toasted
+  // upstream.
   onInsert: async ({ transaction }) => {
-    await createNodes(transaction.mutations.map((m) => m.modified as Node))
-    return { refetch: false }
+    // SAFETY: insert mutations on this collection always carry the full Node row that was inserted.
+    await persistOrNotify(
+      createNodes(transaction.mutations.map((m) => m.modified as Node)),
+    );
+    return { refetch: false };
   },
   onUpdate: async ({ transaction }) => {
-    await updateNodes(
-      transaction.mutations.map((m) => ({
-        id: m.key as string,
-        changes: m.changes as Partial<Node>,
-      })),
-    )
-    return { refetch: false }
+    // SAFETY: update mutations on this collection only change Node fields, and keys are node ids (getKey: node.id).
+    await persistOrNotify(
+      updateNodes(
+        transaction.mutations.map((m) => ({
+          id: m.key as string,
+          changes: m.changes as Partial<Node>,
+        })),
+      ),
+    );
+    return { refetch: false };
   },
   onDelete: async ({ transaction }) => {
-    await deleteNodes(transaction.mutations.map((m) => m.key as string))
-    return { refetch: false }
+    // SAFETY: delete mutation keys are node ids (getKey: node.id).
+    await persistOrNotify(
+      deleteNodes(transaction.mutations.map((m) => m.key as string)),
+    );
+    return { refetch: false };
   },
-})
+});

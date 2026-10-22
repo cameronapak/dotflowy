@@ -1,99 +1,59 @@
-import { describe, expect, test } from 'bun:test'
-import { buildTreeIndex, makeNode } from './tree'
-import { outlineToMarkdown } from './markdown'
+import { expect, test } from "bun:test";
 
-describe('outlineToMarkdown', () => {
-  test('nests children two spaces per level under the root bullet', () => {
-    // root
-    //   child
-    //     grandchild
-    const root = makeNode({ id: 'root', text: 'root' })
-    const child = makeNode({ id: 'child', parentId: 'root', text: 'child' })
-    const grandchild = makeNode({
-      id: 'gc',
-      parentId: 'child',
-      text: 'grandchild',
-    })
-    const index = buildTreeIndex([root, child, grandchild])
+import { outlineToMarkdown } from "./markdown";
+import { buildTreeIndex, createNode } from "./tree";
 
-    expect(outlineToMarkdown(index, ['root'])).toBe(
-      ['- root', '  - child', '    - grandchild'].join('\n'),
-    )
-  })
-
-  test('orders siblings by the prevSiblingId chain', () => {
-    const root = makeNode({ id: 'root', text: 'root' })
-    const a = makeNode({ id: 'a', parentId: 'root', prevSiblingId: null, text: 'a' })
-    const b = makeNode({ id: 'b', parentId: 'root', prevSiblingId: 'a', text: 'b' })
-    // fed out of order on purpose
-    const index = buildTreeIndex([b, root, a])
-
-    expect(outlineToMarkdown(index, ['root'])).toBe(
-      ['- root', '  - a', '  - b'].join('\n'),
-    )
-  })
-
-  test('renders tasks as GFM checkboxes by completion', () => {
-    const open = makeNode({ id: 'o', isTask: true, completed: false, text: 'open' })
-    const done = makeNode({ id: 'd', isTask: true, completed: true, text: 'done' })
-    const index = buildTreeIndex([open, done])
-
-    expect(outlineToMarkdown(index, ['o', 'd'])).toBe(
-      ['- [ ] open', '- [x] done'].join('\n'),
-    )
-  })
-
-  test('emits node.text verbatim (links, tags, code are already markdown)', () => {
-    const node = makeNode({
-      id: 'n',
-      text: 'see [docs](https://x.dev) #ref `code`',
-    })
-    const index = buildTreeIndex([node])
-
-    expect(outlineToMarkdown(index, ['n'])).toBe(
-      '- see [docs](https://x.dev) #ref `code`',
-    )
-  })
-
-  test('includes collapsed and completed nodes (full fidelity, ignores view)', () => {
-    const root = makeNode({ id: 'root', text: 'root', collapsed: true })
-    const hidden = makeNode({
-      id: 'h',
-      parentId: 'root',
-      text: 'still here',
+test("exports ordered nested roots with tasks, empty nodes, and verbatim inline source, regardless of view state", () => {
+  // Deliberately shuffled: the sibling chain, not insertion order, owns export.
+  const index = buildTreeIndex([
+    createNode({
+      id: "done",
+      parentId: "root",
+      prevSiblingId: "open",
+      text: "done",
       isTask: true,
       completed: true,
-    })
-    const index = buildTreeIndex([root, hidden])
+    }),
+    createNode({ id: "other", prevSiblingId: "root", text: "other" }),
+    createNode({ id: "root", text: "root", collapsed: true }),
+    createNode({ id: "empty", parentId: "open", text: "" }),
+    createNode({
+      id: "source",
+      parentId: "empty",
+      text: "see [docs](https://x.dev) #ref `code`",
+    }),
+    createNode({ id: "open", parentId: "root", text: "open", isTask: true }),
+  ]);
+  expect(outlineToMarkdown(index, ["root", "other"])).toBe(
+    [
+      "- root",
+      "  - [ ] open",
+      "    - ",
+      "      - see [docs](https://x.dev) #ref `code`",
+      "  - [x] done",
+      "- other",
+    ].join("\n"),
+  );
+});
 
-    expect(outlineToMarkdown(index, ['root'])).toBe(
-      ['- root', '  - [x] still here'].join('\n'),
-    )
-  })
+test.each([
+  [
+    "Read John 3:16 and Genesis 1",
+    "- Read [John 3:16](https://route.bible/jhn.3.16?src=dotflowy) and [Genesis 1](https://route.bible/gen.1?src=dotflowy)",
+  ],
+  [
+    "see [John 3:16](https://example.com) and `Romans 8:28`",
+    "- see [John 3:16](https://example.com) and `Romans 8:28`",
+  ],
+])(
+  "exports Bible references without relinking existing links or code: %p",
+  (text, expected) => {
+    const index = buildTreeIndex([createNode({ id: "n", text })]);
+    expect(outlineToMarkdown(index, ["n"])).toBe(expected);
+  },
+);
 
-  test('an empty node is a bare bullet', () => {
-    const root = makeNode({ id: 'root', text: '' })
-    const child = makeNode({ id: 'c', parentId: 'root', text: 'child' })
-    const index = buildTreeIndex([root, child])
-
-    expect(outlineToMarkdown(index, ['root'])).toBe(['- ', '  - child'].join('\n'))
-  })
-
-  test('multiple roots serialize as adjacent top-level bullets', () => {
-    const a = makeNode({ id: 'a', prevSiblingId: null, text: 'a' })
-    const b = makeNode({ id: 'b', prevSiblingId: 'a', text: 'b' })
-    const a1 = makeNode({ id: 'a1', parentId: 'a', text: 'a1' })
-    const index = buildTreeIndex([a, b, a1])
-
-    expect(outlineToMarkdown(index, ['a', 'b'])).toBe(
-      ['- a', '  - a1', '- b'].join('\n'),
-    )
-  })
-
-  test('unknown root id contributes nothing', () => {
-    const a = makeNode({ id: 'a', text: 'a' })
-    const index = buildTreeIndex([a])
-
-    expect(outlineToMarkdown(index, ['ghost'])).toBe('')
-  })
-})
+test("an unknown root id contributes nothing", () => {
+  const index = buildTreeIndex([createNode({ id: "a", text: "a" })]);
+  expect(outlineToMarkdown(index, ["ghost"])).toBe("");
+});

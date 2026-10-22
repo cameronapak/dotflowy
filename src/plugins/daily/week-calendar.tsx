@@ -1,0 +1,356 @@
+// Week calendar strip (ADR 0054): a subheader band shown ONLY when zoomed on a
+// daily day note, for one-click day-to-day navigation.
+//
+// Adapted from iconiqui's week-calendar
+// (https://iconiqui.com/display-and-content/week-calendar), MIT licensed. This is
+// a purpose-built rewrite, not a vendored copy: only the seven-pill week row, the
+// tween-animated selection pill, and chevron paging are kept -- the grabber
+// handle, the week->month morph/grid, drag/swipe gestures, and the blur dissolve
+// are deliberately cut (ADR 0054, decision 4). ADR 0055 adds a compact month
+// picker on the month label (popover), not an in-strip month morph. The chrome
+// stays STATIONARY across day switches: the pill (the sole mover) tweens with
+// the house curve, the week row has no entrance animation, and paging swaps
+// instantly. Styled with dotflowy theme tokens
+// (bg-muted / text-muted-foreground / primary / border), never the upstream
+// palette. Account Calendar-week truth stays in date-links.ts -- this file adds
+// no parallel week math.
+
+import { useParams } from "@tanstack/react-router";
+import { Effect } from "effect";
+import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { useReducedMotion } from "motion/react";
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+
+import { cn } from "@/lib/utils";
+
+import type { PluginContext } from "../types";
+
+import {
+  dayKeyToWeekKey,
+  formatDateFull,
+  localDateKey,
+  monthKeyToYearKey,
+  monthLabel,
+  scaffoldKeyKind,
+  shiftWeekKey,
+  weekKeyToDays,
+  weekKeyToMonthKey,
+  weekLabel,
+} from "../../data/date-links";
+import { useEditorFeatures } from "../../data/editor-features";
+import { scrollStreamTo, useStreamView } from "../../data/view-stream";
+import { useScaffoldKey } from "./daily-index";
+import { useDaysWithContent } from "./days-with-content";
+import { getOrCreateDay } from "./get-or-create";
+import { MonthPickerButton } from "./month-picker";
+
+const WEEKDAY_INITIALS = {
+  monday: ["M", "T", "W", "T", "F", "S", "S"],
+  sunday: ["S", "M", "T", "W", "T", "F", "S"],
+} as const;
+
+// The editor is keyed by route, so switching days remounts this component. Keep
+// only the click's horizontal delta across that boundary; shared-layout Motion
+// also projected the window's scroll restoration into y/scale, making the pill
+// dive out of the sticky calendar when the source day was scrolled.
+type SelectionHandoff = {
+  dayKey: string;
+  x: number;
+};
+
+let pendingSelectionHandoff: SelectionHandoff | null = null;
+let latestSelectionRequest = 0;
+
+export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
+  const { weekStart, weekStrip } = useEditorFeatures();
+  const params = useParams({ strict: false });
+  const rootId = params.nodeId ?? null;
+  // Reactive: the zoom root's scaffold key (null unless it maps to a scaffold
+  // node). The strip only shows for a DAY -- week/month/year/container pages and
+  // non-daily pages get nothing ("which day is selected?" has no answer there).
+  const scaffoldKey = useScaffoldKey(rootId ?? "");
+  const routeDay =
+    scaffoldKey && scaffoldKeyKind(scaffoldKey) === "day" ? scaffoldKey : null;
+  // In the Day stream the selected day follows the scroll (ADR 0070): the day
+  // in view, not the route's anchor day.
+  const streamView = useStreamView();
+  const inStream = routeDay !== null && streamView?.anchor === routeDay;
+  const dayKey = inStream ? streamView.inView : routeDay;
+
+  const reduceMotion = useReducedMotion();
+  // Ephemeral paging offset from the zoomed day's week (ADR 0054, decision 5):
+  // reset whenever the zoomed day changes so the strip re-centers on route change.
+  // Layout effect: the strip stays mounted across day switches, so the reset must
+  // land before paint or a paged offset flashes the wrong week on day switch.
+  const [offset, setOffset] = useState(0);
+  useLayoutEffect(() => {
+    setOffset(0);
+  }, [dayKey]);
+
+  const baseWeek = dayKey ? dayKeyToWeekKey(dayKey, weekStart) : null;
+  const visibleWeek = useMemo(() => {
+    if (!baseWeek) return null;
+    if (offset === 0) return baseWeek;
+    return shiftWeekKey(baseWeek, offset) ?? baseWeek;
+  }, [baseWeek, offset]);
+
+  const days = useMemo(
+    () => (visibleWeek ? (weekKeyToDays(visibleWeek) ?? []) : []),
+    [visibleWeek],
+  );
+  const withContent = useDaysWithContent(days);
+  const [selectionHandoff, setSelectionHandoff] =
+    useState<SelectionHandoff | null>(null);
+  useLayoutEffect(() => {
+    const pending = pendingSelectionHandoff;
+    if (reduceMotion) {
+      if (pending?.dayKey === dayKey && pendingSelectionHandoff === pending)
+        pendingSelectionHandoff = null;
+      setSelectionHandoff(null);
+      return;
+    }
+    if (dayKey === null || pending?.dayKey !== dayKey) return;
+    if (pendingSelectionHandoff === pending) pendingSelectionHandoff = null;
+    setSelectionHandoff(pending);
+  }, [dayKey, reduceMotion]);
+  const selectionInitialX = selectionHandoff?.x ?? 0;
+  const selectionRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const selection = selectionRef.current;
+    if (!selection || selectionInitialX === 0) return;
+    const clearCancelledHandoff = () => setSelectionHandoff(null);
+    selection.addEventListener("animationcancel", clearCancelledHandoff);
+    return () =>
+      selection.removeEventListener("animationcancel", clearCancelledHandoff);
+  }, [selectionInitialX]);
+  const selectionStyle:
+    | (CSSProperties & { "--week-calendar-selection-x": string })
+    | undefined =
+    selectionInitialX === 0
+      ? undefined
+      : { "--week-calendar-selection-x": `${selectionInitialX}px` };
+
+  // Guard AFTER every hook (rules of hooks): render nothing on a non-day page,
+  // or with the Week strip option off (ADR 0070), so the subheader band
+  // collapses.
+  if (!weekStrip || !dayKey || !visibleWeek || days.length !== 7) return null;
+
+  const today = localDateKey();
+  const monthKey = weekKeyToMonthKey(visibleWeek);
+  const monthYear = monthKey
+    ? `${monthLabel(monthKey)} ${monthKeyToYearKey(monthKey)}`
+    : "";
+  const weekRange = weekLabel(visibleWeek);
+  const paged = offset !== 0;
+
+  const iconBtn =
+    "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
+
+  return (
+    <nav
+      aria-label="Week calendar"
+      data-subheader-snap-open=""
+      data-week-calendar=""
+      data-week-key={visibleWeek}
+      className="flex w-full flex-col gap-1"
+    >
+      {/* Orientation row: paging chevrons flank a quiet month+year label and the
+          week range; a snap-back affordance appears while paged. */}
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          aria-label="Previous week"
+          className={iconBtn}
+          onClick={() => {
+            setSelectionHandoff(null);
+            setOffset((o) => o - 1);
+          }}
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+          {monthKey ? (
+            <MonthPickerButton
+              monthKey={monthKey}
+              selectedDayKey={dayKey}
+              weekStart={weekStart}
+              getCtx={getCtx}
+              onPicked={() => setOffset(0)}
+            />
+          ) : (
+            <span
+              data-testid="week-calendar-month"
+              className="truncate text-xs font-medium text-foreground"
+            >
+              {monthYear}
+            </span>
+          )}
+          <span
+            data-testid="week-calendar-week-range"
+            className="shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.65rem] leading-none text-muted-foreground"
+          >
+            {weekRange}
+          </span>
+          {paged ? (
+            <button
+              type="button"
+              aria-label="Back to the current week"
+              data-testid="week-calendar-snapback"
+              className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.65rem] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              onClick={() => {
+                setSelectionHandoff(null);
+                setOffset(0);
+              }}
+            >
+              <RotateCcw className="size-3" />
+              This week
+            </button>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          aria-label="Next week"
+          className={iconBtn}
+          onClick={() => {
+            setSelectionHandoff(null);
+            setOffset((o) => o + 1);
+          }}
+        >
+          <ChevronRight className="size-4" />
+        </button>
+      </div>
+
+      {/* The seven day pills. No entrance animation (ADR 0054, decision 4):
+          paging swaps the row instantly -- the month label and week range
+          carry the week change -- and a same-week day switch is silent chrome.
+          The ONLY thing that moves is the selection pill, which tweens
+          from the old day to the new one. */}
+      <ul className="grid grid-cols-7 gap-1">
+        {days.map((key, i) => {
+          const selected = key === dayKey;
+          const isToday = key === today;
+          const hasContent = withContent.has(key);
+          const dayOfMonth = Number(key.slice(8, 10));
+          return (
+            <li key={key}>
+              <button
+                type="button"
+                aria-label={formatDateFull(key)}
+                aria-pressed={selected}
+                data-day-key={key}
+                data-selected={selected ? "" : undefined}
+                data-today={isToday ? "" : undefined}
+                onClick={(event) => {
+                  // Clicking the already-selected day is a no-op (ADR 0054).
+                  if (key === dayKey) return;
+                  // In the Day stream a pill scrolls to its day; nothing is
+                  // created until you write there (ADR 0070).
+                  if (inStream && scrollStreamTo(key)) {
+                    setOffset(0);
+                    return;
+                  }
+                  const request = ++latestSelectionRequest;
+                  const calendar = event.currentTarget.closest("nav");
+                  const ctx = getCtx();
+                  // Seed-free get-or-create (the date-chip semantics, ADR
+                  // 0038/0041: no seeded entry line, no ?focus=last), but a
+                  // PLAIN navigation (`morph: false`) -- the selection pill IS
+                  // the transition, so a zoom morph would stack a redundant
+                  // title pop-in over it (ADR 0054).
+                  ctx.run(
+                    Effect.promise(async () => {
+                      const dayId = await getOrCreateDay(key, {
+                        failureToast: "Couldn't open that daily note",
+                      });
+                      // Latest click wins. Also drop a late continuation when
+                      // another navigation already detached this calendar.
+                      if (
+                        !dayId ||
+                        request !== latestSelectionRequest ||
+                        !calendar?.isConnected
+                      ) {
+                        return;
+                      }
+                      const paintedSelection =
+                        calendar.querySelector<HTMLElement>(
+                          "[data-week-calendar-selection]",
+                        );
+                      const destinationButton =
+                        calendar.querySelector<HTMLElement>(
+                          `[data-day-key="${key}"]`,
+                        );
+                      pendingSelectionHandoff =
+                        !reduceMotion && paintedSelection && destinationButton
+                          ? {
+                              dayKey: key,
+                              // Measure at commit time, after any resize or
+                              // in-flight prior tween, not at click time.
+                              x:
+                                paintedSelection.getBoundingClientRect().left -
+                                destinationButton.getBoundingClientRect().left,
+                            }
+                          : null;
+                      ctx.nav.open(dayId);
+                    }),
+                  );
+                }}
+                className={cn(
+                  "group relative flex w-full scale-100 flex-col items-center gap-0.5 rounded-md border-2 border-transparent px-1 py-1.5 text-xs transition-[color,background-color,border-color,transform] after:pointer-events-none after:absolute after:-inset-1 after:rounded-md after:border-[3px] after:border-transparent after:content-[''] data-[external-drop-active]:scale-[1.03] data-[external-drop-active]:border-primary data-[external-drop-active]:bg-muted! data-[external-drop-active]:text-foreground! data-[external-drop-active]:after:border-primary/20",
+                  selected
+                    ? "text-primary-foreground"
+                    : isToday
+                      ? "font-medium text-foreground hover:bg-muted"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                {/* The selection highlight: it slides by the captured x delta
+                    from the old day to the new one, and snaps under
+                    reduced motion. A tween on the house curve (the same
+                    cubic-bezier the zoom morph uses in styles.css), not a spring
+                    -- dotflowy doesn't use springs, and the underdamped spring
+                    overshot. This pill is the sole moving element in the strip. */}
+                {selected ? (
+                  <span
+                    ref={selectionRef}
+                    aria-hidden="true"
+                    data-week-calendar-selection=""
+                    style={selectionStyle}
+                    className={cn(
+                      "absolute inset-0 rounded-md bg-primary group-data-[external-drop-active]:hidden",
+                      !reduceMotion &&
+                        selectionInitialX !== 0 &&
+                        "week-calendar-selection-slide",
+                    )}
+                    onAnimationEnd={() => setSelectionHandoff(null)}
+                  />
+                ) : null}
+                <span className="relative text-[0.6rem] leading-none opacity-70 group-data-[external-drop-active]:text-foreground!">
+                  {WEEKDAY_INITIALS[weekStart][i]}
+                </span>
+                <span className="relative leading-none tabular-nums group-data-[external-drop-active]:text-foreground!">
+                  {dayOfMonth}
+                </span>
+                {/* Content dot: this day has a mapped node with children. Sits
+                    below the number; `bg-current` so it reads on any pill state. */}
+                <span
+                  aria-hidden="true"
+                  data-has-content={hasContent ? "" : undefined}
+                  className={cn(
+                    "relative size-1 rounded-full bg-current transition-opacity",
+                    hasContent ? "opacity-70" : "opacity-0",
+                  )}
+                />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}

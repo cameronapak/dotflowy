@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Dotflowy's local Cloudflare services are started on demand and need no
+# authentication or repair when an orb wakes.
+echo "[orb resume] No wake-time setup required."

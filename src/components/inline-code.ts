@@ -5,12 +5,12 @@
 // This file owns only the generic machinery -- the one decorate pass, escaping
 // + serialization, and the source-offset caret math -- with no per-token branch.
 //
-// Both the outline bullets (OutlineNode) and the zoomed page title
+// Both the outline bullets (OutlineRow) and the zoomed page title
 // (OutlineEditor's ZoomedTitle) render their stored markdown as live HTML:
 // the contentEditable always holds formatted output (mono chips, tag chips,
-// folded links), and each keystroke re-tokenizes the line and rebuilds its DOM.
-// The caret is saved as an absolute SOURCE-character offset before the rebuild
-// and restored after.
+// folded links), and each keystroke re-tokenizes the line, replacing only the
+// changed DOM range. The caret is saved as an absolute SOURCE-character offset
+// before the update and restored after.
 //
 // A #tag keeps its FULL source visible (the leading `#`), so its source string
 // and rendered text have identical length. FOLDING tokens (links, inline code,
@@ -23,13 +23,39 @@
 // it off `data-src` generically, so every consumer keeps speaking source
 // offsets -- with no per-token special-casing (the unlock in ADR 0001 D6).
 
+import { useEffect, type RefObject } from "react";
+
+import type { El, WidgetEl } from "../plugins/types";
+
+import { useEditorFeatures } from "../data/editor-features";
 import { hasFoldingToken, renderToken, tokenRegex } from "../plugins/registry";
 import { WIDGET_TAG } from "./plugin-widget";
-import type { El, WidgetEl } from "../plugins/types";
+
+/** Repaint optional tokens without replacing local text or moving the caret.
+ * Shared by rows, zoomed titles, and quick-add. IME completion uses the current
+ * registry in each editor's existing composition-end handler. */
+export function useEditorFeatureDecoration(
+  ref: RefObject<HTMLElement | null>,
+  composing: RefObject<boolean>,
+) {
+  const { bible, daily, ready } = useEditorFeatures();
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || composing.current) return;
+    const focused = document.activeElement === el;
+    decorate(el, readSource(el), focused ? getCaretOffset(el) : null, focused);
+  }, [bible, daily, ready, ref, composing]);
+}
 
 /** True for a widget descriptor (Seam A's React mode -- ADR 0006) vs an `El`. */
 function isWidgetEl(el: El | WidgetEl): el is WidgetEl {
+  // SAFETY: typeof "object" rules out the El string form, leaving WidgetEl
   return typeof el === "object" && (el as WidgetEl).kind === "widget";
+}
+
+/** True for the plain-text `El` form vs any descriptor. */
+function isStringEl(el: El | WidgetEl): el is string {
+  return typeof el === "string";
 }
 
 // Last HTML we wrote to each element, so decorate() can skip a rebuild (and the
@@ -50,10 +76,7 @@ const renderCache = new WeakMap<HTMLElement, string>();
 // you can arrow/click in from either edge); otherwise it FOLDS to a clean <a>.
 // At most one link reveals -- the one under the caret. Code and tags keep their
 // source visible in both states. See ADR 0005 (per-link reveal).
-function inlineMarkupHtml(
-  text: string,
-  revealOffset: number | null,
-): string {
+function inlineMarkupHtml(text: string, revealOffset: number | null): string {
   let html = "";
   let last = 0;
   for (const m of text.matchAll(tokenRegex)) {
@@ -76,7 +99,7 @@ function inlineMarkupHtml(
 // `false`/`undefined` drop the attribute. Insertion order is preserved so the
 // generated HTML stays stable (the render cache compares strings).
 function serializeEl(el: El | WidgetEl): string {
-  if (typeof el === "string") return escapeHtml(el);
+  if (isStringEl(el)) return escapeHtml(el);
   if (isWidgetEl(el)) return serializeWidget(el);
   let out = `<${el.tag}`;
   if (el.attrs) {
@@ -136,6 +159,7 @@ function escapeHtml(s: string): string {
 // tokens (ADR 0001 D6). Non-folding tokens (#tags), a revealed run's markers,
 // and revealed links carry no data-src, so they read back 1:1 as plain text.
 function isAtom(node: Node): node is HTMLElement {
+  // SAFETY: nodeType === 1 means the node is an Element, rendered here as HTMLElement
   return node.nodeType === 1 && (node as HTMLElement).hasAttribute("data-src");
 }
 
@@ -144,6 +168,22 @@ function foldedSrcLen(el: HTMLElement): number {
   return Number.isFinite(n) && n > 0
     ? n
     : (el.getAttribute("data-src") ?? "").length;
+}
+
+const SELECTED_ATOM_ATTR = "data-atom-selected";
+let atomSelectionListenerInstalled = false;
+// The single atom currently carrying SELECTED_ATOM_ATTR. Tracking it lets the
+// selectionchange handler clear the marker in O(1) instead of sweeping the whole
+// document on every caret move.
+let markedAtom: HTMLElement | null = null;
+
+/** A dimmed `.md-punct` span holding revealed syntax scaffolding (a fence or
+ *  marker) as REAL, walk-through text -- shared by every folding token that
+ *  reveals its markers (emphasis, highlight, the link reveal keys the same
+ *  class). Kept here, next to the reveal machinery, so the folding-token
+ *  plugins don't each re-declare the builder. */
+export function mdPunct(s: string): El {
+  return { tag: "span", attrs: { class: "md-punct" }, children: [s] };
 }
 
 // Reconstruct the markdown SOURCE from the live DOM. el.textContent is no longer
@@ -170,12 +210,22 @@ export function readSource(el: HTMLElement): string {
   return out;
 }
 
-// Re-render `el` as formatted HTML, optionally keeping the caret put. The DOM
-// rebuild invalidates any (node, offset) selection, so we capture the caret as
+// React owns a widget's children, not the serializer's raw-source fallback.
+// Compare its host contract only, so a mounted chip is not a false change.
+function sameDecoration(current: Node, next: Node): boolean {
+  if (current.nodeName === WIDGET_TAG.toUpperCase()) {
+    return current.cloneNode(false).isEqualNode(next.cloneNode(false));
+  }
+  return current.isEqualNode(next);
+}
+
+// Re-render `el` as formatted HTML, optionally keeping the caret put. A DOM
+// update can invalidate a (node, offset) selection, so we capture the caret as
 // an absolute SOURCE-character offset first and re-derive it against the new
-// tree after. We rebuild only when the generated HTML actually changed (the
-// render cache), avoiding needless rebuilds -- and the caret flicker they cause
-// -- when the text and the active (revealed) link are both unchanged.
+// tree after. The render cache skips unchanged HTML. When it changes, keep the
+// equal prefix/suffix connected: rebuilding unchanged tokens would reload their
+// images on every keystroke. Native edits often already match the desired DOM,
+// in which case this leaves every child in place.
 //
 // `revealOffset` decides which link, if any, shows raw; see inlineMarkupHtml.
 export function decorate(
@@ -187,7 +237,33 @@ export function decorate(
   const html = inlineMarkupHtml(text, revealOffset);
   if (renderCache.get(el) === html) return;
   const offset = preserveCaret ? getCaretOffset(el) : -1;
-  el.innerHTML = html;
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const next = template.content;
+  let start = el.firstChild;
+  while (start && next.firstChild && sameDecoration(start, next.firstChild)) {
+    start = start.nextSibling;
+    next.firstChild.remove();
+  }
+  let end: ChildNode | null = null;
+  let last = el.lastChild;
+  while (
+    start &&
+    last &&
+    last !== start.previousSibling &&
+    next.lastChild &&
+    sameDecoration(last, next.lastChild)
+  ) {
+    end = last;
+    last = last.previousSibling;
+    next.lastChild.remove();
+  }
+  while (start && start !== end) {
+    const following = start.nextSibling;
+    start.remove();
+    start = following;
+  }
+  el.insertBefore(next, end);
   renderCache.set(el, html);
   if (offset >= 0) setCaretOffset(el, offset);
 }
@@ -225,7 +301,7 @@ export function getSelectionRange(
 // folded-link source lengths, and stops once the point is reached. Handles both
 // a text-node caret (container is the text node) and an element caret (container
 // is an element, offset is a child index).
-function sourceOffsetUpTo(
+export function sourceOffsetUpTo(
   el: HTMLElement,
   container: Node,
   offset: number,
@@ -244,6 +320,7 @@ function sourceOffsetUpTo(
       return;
     }
     if (isAtom(node)) {
+      // SAFETY: isAtom is the HTMLElement type guard
       total += foldedSrcLen(node as HTMLElement);
       // Caret can't normally land inside an atomic widget; if it somehow did,
       // snap to just after it.
@@ -291,9 +368,14 @@ export function setCaretOffset(el: HTMLElement, offset: number): void {
       return;
     }
     if (isAtom(node)) {
+      // SAFETY: isAtom is the HTMLElement type guard
       const len = foldedSrcLen(node as HTMLElement);
       if (remaining <= len) {
-        placeAtWidget(node as HTMLElement, remaining === 0 ? "before" : "after");
+        // SAFETY: isAtom is the HTMLElement type guard
+        placeAtWidget(
+          node as HTMLElement,
+          remaining === 0 ? "before" : "after",
+        );
         placed = true;
       } else {
         remaining -= len;
@@ -312,6 +394,176 @@ export function setCaretOffset(el: HTMLElement, offset: number): void {
   }
 }
 
+/** Return the currently selected atomic token, if the DOM selection is exactly
+ *  one `data-src` atom inside `el`. */
+export function getSelectedAtom(el: HTMLElement): HTMLElement | null {
+  const child = selectedAtomFromSelection();
+  return child && el.contains(child) ? child : null;
+}
+
+function selectedAtomFromSelection(): HTMLElement | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount !== 1) return null;
+  const range = sel.getRangeAt(0);
+  if (range.collapsed) return null;
+  if (range.startContainer !== range.endContainer) return null;
+  const parent = range.startContainer;
+  const child = parent.childNodes.item(range.startOffset);
+  if (range.endOffset !== range.startOffset + 1 || !child || !isAtom(child)) {
+    return null;
+  }
+  return child;
+}
+
+/** Make Left/Right treat an adjacent atom as a selectable stop: first keypress
+ *  selects the chip, second keypress moves the caret past it. */
+export function selectAdjacentAtom(
+  el: HTMLElement,
+  direction: "left" | "right",
+): boolean {
+  const selected = getSelectedAtom(el);
+  if (selected) {
+    placeAtWidget(selected, direction === "left" ? "before" : "after");
+    return true;
+  }
+
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount !== 1) return false;
+  const range = sel.getRangeAt(0);
+  if (!range.collapsed || !el.contains(range.endContainer)) return false;
+
+  const caret = getCaretOffset(el);
+  const atom = atomAtSourceBoundary(el, caret, direction);
+  if (!atom) return false;
+  selectAtom(atom);
+  return true;
+}
+
+function isSelectableChip(atom: HTMLElement): boolean {
+  return atom.hasAttribute("data-bible-ref");
+}
+
+function atomAtSourceBoundary(
+  el: HTMLElement,
+  offset: number,
+  direction: "left" | "right",
+): HTMLElement | null {
+  let total = 0;
+  let found: HTMLElement | null = null;
+  const visit = (node: Node) => {
+    if (found) return;
+    if (node.nodeType === 3 /* text */) {
+      total += node.textContent?.length ?? 0;
+      return;
+    }
+    if (isAtom(node)) {
+      // SAFETY: isAtom is the HTMLElement type guard
+      const atom = node as HTMLElement;
+      const len = foldedSrcLen(atom);
+      // Only INTERACTIVE chips are arrow-selectable stops. A plain folding atom
+      // (bold/code/link/highlight) has no keyboard action and no selected-state
+      // affordance, so range-selecting it would just arm a silent deletion on
+      // the next keystroke. (Currently that's the Bible chip; generalize to a
+      // plugin opt-in when a second consumer appears.)
+      if (
+        isSelectableChip(atom) &&
+        ((direction === "left" && total + len === offset) ||
+          (direction === "right" && total === offset))
+      ) {
+        found = atom;
+        return;
+      }
+      total += len;
+      return;
+    }
+    node.childNodes.forEach(visit);
+  };
+  el.childNodes.forEach(visit);
+  return found;
+}
+
+function selectAtom(atom: HTMLElement): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  installAtomSelectionListener();
+  const range = document.createRange();
+  range.selectNode(atom);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  syncAtomSelectionMarkers(atom);
+}
+
+function installAtomSelectionListener(): void {
+  if (atomSelectionListenerInstalled) return;
+  atomSelectionListenerInstalled = true;
+  document.addEventListener("selectionchange", () => {
+    syncAtomSelectionMarkers(selectedAtomFromSelection());
+  });
+}
+
+function syncAtomSelectionMarkers(selected: HTMLElement | null): void {
+  if (markedAtom && markedAtom !== selected) {
+    markedAtom.removeAttribute(SELECTED_ATOM_ATTR);
+  }
+  markedAtom = selected;
+  selected?.setAttribute(SELECTED_ATOM_ATTR, "true");
+}
+
+// Resolve an absolute SOURCE offset to a live DOM point (the inverse of
+// sourceOffsetUpTo). Text nodes contribute their length; an atom contributes its
+// full source length and any point inside it snaps to the atom's edge in its
+// parent (the caret never enters an atom). Falls back to the end of `el`.
+function domPointAt(
+  el: HTMLElement,
+  offset: number,
+): { node: Node; offset: number } {
+  let remaining = offset;
+  let point: { node: Node; offset: number } | null = null;
+  const visit = (node: Node) => {
+    if (point) return;
+    if (node.nodeType === 3 /* text */) {
+      const len = node.textContent?.length ?? 0;
+      if (remaining <= len) point = { node, offset: remaining };
+      else remaining -= len;
+      return;
+    }
+    if (isAtom(node)) {
+      const len = foldedSrcLen(node);
+      if (remaining <= len) {
+        const parent = node.parentNode;
+        if (parent) {
+          const idx = Array.prototype.indexOf.call(parent.childNodes, node);
+          point = { node: parent, offset: remaining === 0 ? idx : idx + 1 };
+        }
+      } else remaining -= len;
+      return;
+    }
+    node.childNodes.forEach(visit);
+  };
+  el.childNodes.forEach(visit);
+  return point ?? { node: el, offset: el.childNodes.length };
+}
+
+// Select the SOURCE range `[start, end]` within `el` (start === end collapses to
+// a caret). The selection toolbar (ADR 0036) re-selects the just-wrapped
+// interior so a re-press toggles it back off and the button stays lit; unlike
+// setCaretOffset it addresses two points, one per edge.
+export function setSelectionOffsets(
+  el: HTMLElement,
+  start: number,
+  end: number,
+): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const a = domPointAt(el, start);
+  const b = domPointAt(el, end);
+  const range = document.createRange();
+  range.setStart(a.node, a.offset);
+  range.setEnd(b.node, b.offset);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 // Collapse the selection just before/after an atomic folded-link widget, by
 // addressing the position in its parent (the caret never goes inside it).
 function placeAtWidget(widget: HTMLElement, side: "before" | "after"): void {
@@ -324,6 +576,8 @@ function placeAtWidget(widget: HTMLElement, side: "before" | "after"): void {
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
+  widget.removeAttribute(SELECTED_ATOM_ATTR);
+  if (markedAtom === widget) markedAtom = null;
 }
 
 // Per-link reveal reflow. While a bullet is focused, watch the caret: as it

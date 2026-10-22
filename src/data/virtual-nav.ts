@@ -8,13 +8,16 @@
  * closure can capture. So the editor mirrors both here in an effect, exactly as
  * `view-state.ts` mirrors the zoom root, and the closures read them at call time.
  *
- * Inactive (returns false / no-op) on the recursive path, so callers can branch
- * on {@link isVirtualNavActive} and fall back to the direct `refs.get(id)` focus.
+ * Inactive (null-returning no-ops) while no editor is mounted; every helper
+ * guards internally, so callers never branch.
  */
 
 interface VirtualNav {
-  scrollToIndex: (index: number, opts?: { align?: "start" | "center" | "end" | "auto" }) => void
-  indexOf: (id: string) => number
+  scrollToIndex: (
+    index: number,
+    opts?: { align?: "start" | "center" | "end" | "auto" },
+  ) => void;
+  indexOf: (id: string) => number;
   /**
    * Measured (or estimated) start/size for a flat-list index. `start` is in
    * DOCUMENT space: the window virtualizer folds `scrollMargin` into every
@@ -22,18 +25,14 @@ interface VirtualNav {
    * is why the render subtracts it (`translateY(start - scrollMargin)`,
    * OutlineRow). Consumers must NOT add scrollMargin again.
    */
-  measurementAt: (index: number) => { start: number; size: number } | undefined
+  measurementAt: (index: number) => { start: number; size: number } | undefined;
 }
 
-let nav: VirtualNav | null = null
+let nav: VirtualNav | null = null;
 
 /** Editor wires this each render (cheap; the virtualizer instance is stable). */
 export function setVirtualNav(next: VirtualNav | null) {
-  nav = next
-}
-
-export function isVirtualNavActive(): boolean {
-  return nav !== null
+  nav = next;
 }
 
 /**
@@ -47,12 +46,12 @@ export function virtualRowRect(
   id: string,
   scrollY: number,
 ): { top: number; height: number } | null {
-  if (!nav) return null
-  const i = nav.indexOf(id)
-  if (i < 0) return null
-  const m = nav.measurementAt(i)
-  if (!m) return null
-  return { top: m.start - scrollY, height: m.size }
+  if (!nav) return null;
+  const i = nav.indexOf(id);
+  if (i < 0) return null;
+  const m = nav.measurementAt(i);
+  if (!m) return null;
+  return { top: m.start - scrollY, height: m.size };
 }
 
 /**
@@ -65,9 +64,9 @@ export function scrollRowIntoView(
   id: string,
   align: "start" | "center" | "end" | "auto" = "center",
 ): boolean {
-  if (!nav) return false
-  const i = nav.indexOf(id)
-  if (i < 0) return false
-  nav.scrollToIndex(i, { align })
-  return true
+  if (!nav) return false;
+  const i = nav.indexOf(id);
+  if (i < 0) return false;
+  nav.scrollToIndex(i, { align });
+  return true;
 }

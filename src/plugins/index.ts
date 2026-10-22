@@ -5,17 +5,22 @@
 // (D7). Dogfooded: code/links/tags are themselves entries, built on the same
 // public API, so the core can't grow feature-specific branches.
 
-import childCount from "./child-count";
+import type { EditorFeature } from "../data/editor-features";
+import type { PluginDef } from "./types";
+
 import code from "./code";
 import daily from "./daily";
+import embeds from "./embeds";
 import emphasis from "./emphasis";
+import highlight from "./highlight";
 import links from "./links";
 import nodeLinks from "./node-links";
 import provenance from "./provenance";
 import routeBible from "./route-bible";
+import scribble from "./scribble";
+import spoiler from "./spoiler";
 import tags from "./tags";
 import todos from "./todos";
-import type { PluginDef } from "./types";
 
 // `provenance` leads: it only contributes a Seam F slot, and
 // as the first entry its origin mark renders leftmost — right after the bullet
@@ -26,10 +31,21 @@ export const plugins: PluginDef[] = [
   provenance,
   code,
   links,
+  embeds,
   nodeLinks,
   routeBible,
   tags,
   emphasis,
+  highlight,
+  spoiler,
   daily,
-  childCount,
+  scribble,
 ];
+
+// Only these reviewed plugins have optional editor conveniences (ADR 0064).
+// The registry projects their seams generically; protection is never optional.
+export const editorFeaturePlugins = new Map<PluginDef, EditorFeature>([
+  [routeBible, "bible"],
+  [daily, "daily"],
+  [embeds, "embeds"],
+]);

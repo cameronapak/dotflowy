@@ -10,15 +10,22 @@
 // no logic with a node link (no fold/reveal, no unfurl, no bracket editing --
 // the chip is a BibleChip-class atom, backspace deletes it whole).
 
-import { Link2 } from "lucide-react";
+import { CalendarDaysIcon, Link2 } from "lucide-react";
+
+import type { Node } from "../../data/tree";
+
+import { getEditorFeatures } from "../../data/editor-features";
 import {
   linkTargetId,
   linkedNodeLabel,
   NODE_LINK_PATTERN,
 } from "../../data/node-links";
-import type { Node } from "../../data/tree";
-import { NodeLinkChip } from "./chip";
+import { pickerDateSuggestions } from "../../data/parse-go-to-date";
+// Bounded exemption (ADR 0038/0057): suppress the mapped day uuid row when a
+// date suggestion wins. Identity lookup only — not get-or-create; not a seam.
+import { getMappedId } from "../daily/daily-index";
 import { definePlugin, type MenuTrigger, type WidgetEl } from "../types";
+import { NodeLinkChip } from "./chip";
 
 // The atom: `source` is the verbatim `[[id]]` token (what the caret math counts
 // and copy reads back); `data-node-link` carries the target id for the Seam-B
@@ -103,18 +110,52 @@ export default definePlugin({
       trigger: "[",
       match: linkMenuMatch,
       entries: (trigger, node, ctx) => {
-        const q = trigger.query.slice(1).trim().toLowerCase();
+        const raw = trigger.query.slice(1).trim();
+        const q = raw.toLowerCase();
+        // Date entries fold INTO this picker (ADR 0038) -- the menu engine's
+        // dispatch is first-match-wins on the trigger, so a second `[[` menu
+        // would shadow. Relatives + ISO + gated NL chrono live in
+        // `pickerDateSuggestions` (client-only; date-links stays Worker-safe).
+        // Inserts `[[YYYY-MM-DD]]` tokens — never uuid links, never navigate.
+        const features = getEditorFeatures();
+        const dateHits =
+          features.ready && features.daily
+            ? pickerDateSuggestions(raw, new Date(), features.weekStart)
+            : [];
+        const dates = dateHits.map((s) => ({
+          key: `date:${s.key}`,
+          render: () => (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <CalendarDaysIcon
+                className="size-3.5 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <span className="truncate">{s.label}</span>
+              <span className="shrink-0 text-muted-foreground">{s.key}</span>
+            </span>
+          ),
+          // Trailing space so the caret lands past the atom (same as below).
+          replacement: `[[${s.key}]] `,
+        }));
+        // When a date row resolves, hide the mapped day node's uuid row
+        // (daily-index identity — not title match). Other node matches stay.
+        const suppressIds = new Set<string>();
+        for (const s of dateHits) {
+          const mapped = getMappedId(s.key);
+          if (mapped) suppressIds.add(mapped);
+        }
         const matches: Node[] = [];
         for (const n of ctx.tree.byId.values()) {
           if (n.id === node.id) continue;
           if (n.mirrorOf != null) continue;
+          if (suppressIds.has(n.id)) continue;
           const label = linkedNodeLabel(n.text).trim();
           if (!label) continue;
           if (q && !label.toLowerCase().includes(q)) continue;
           matches.push(n);
         }
         matches.sort((a, b) => b.updatedAt - a.updatedAt);
-        return matches.slice(0, PICKER_LIMIT).map((n) => ({
+        const nodeEntries = matches.slice(0, PICKER_LIMIT).map((n) => ({
           key: n.id,
           render: () => (
             <span className="flex min-w-0 items-center gap-1.5">
@@ -129,6 +170,7 @@ export default definePlugin({
           // continues naturally (the tags-menu convention).
           replacement: `[[${n.id}]] `,
         }));
+        return [...dates, ...nodeEntries];
       },
     },
   ],

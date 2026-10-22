@@ -1,8 +1,20 @@
+import babel from "@rolldown/plugin-babel";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact, { reactCompilerPreset } from "@vitejs/plugin-react";
-import babel from "@rolldown/plugin-babel";
+import { defineConfig } from "vite";
+
+import pkg from "./package.json";
+import { changelogPlugin } from "./scripts/vite-plugin-changelog";
+
+// Upload client source maps to Sentry (#227), build-time only. Gated on the
+// build secret so a normal `bun run build` (no token — local, CI, a fork) stays
+// clean: no map emission, no upload. `filesToDeleteAfterUpload` is REQUIRED for
+// the plugin to delete the maps post-upload — without it (we enable
+// build.sourcemap ourselves, so the plugin won't infer it) the .map files ship
+// to the public CDN and expose original source.
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
 
 // SPA mode: no SSR. This sidesteps localStorage-on-server entirely,
 // which matters because TanStack DB's localStorage collection reads
@@ -11,17 +23,35 @@ import babel from "@rolldown/plugin-babel";
 //
 // It also keeps deployment trivial: any static CDN works.
 export default defineConfig({
+  // Emit source maps only when we're going to upload + delete them (below), so
+  // they never ship to the CDN on a tokenless build.
+  build: sentryAuthToken ? { sourcemap: true } : {},
   server: {
     port: 3000,
+    // Amp orb portals proxy the dev server through *.onamp.dev.
+    allowedHosts: [".onamp.dev"],
     // Dev only: proxy the data API to a locally-running Worker + D1
     // (`bun run dev:api` -> wrangler dev on :8787). This keeps Vite HMR for the
     // UI while the real /api/nodes path is served by the Worker against a local
     // D1. In production the same Worker serves both. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
+    // `ws: true` is required — Vite's string shorthand only sets
+    // `{ target, changeOrigin }` and skips the upgrade listener, so
+    // `/api/sync` never reaches wrangler (outline stuck on "Loading outline").
     proxy: {
-      "/api": "http://localhost:8787",
+      "/api": {
+        target: "http://localhost:8787",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   plugins: [
+    // Fails the build when `changelog/<package.json version>/` is missing, and
+    // serves the validated release array as `virtual:dotflowy-changelog`.
+    changelogPlugin({
+      dir: new URL("./changelog", import.meta.url).pathname,
+      packageVersion: pkg.version,
+    }),
     tanstackStart({
       spa: { enabled: true },
     }),
@@ -38,6 +68,20 @@ export default defineConfig({
     // reactCompilerPreset helper rather than a viteReact `babel` option.
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
+    // Last: after the bundle + maps exist. No-op without SENTRY_AUTH_TOKEN.
+    ...(sentryAuthToken
+      ? [
+          sentryVitePlugin({
+            org: "cameron-pak-sole-trader",
+            project: "dotflowy",
+            authToken: sentryAuthToken,
+            // Delete the emitted maps after upload so they never reach the CDN.
+            sourcemaps: {
+              filesToDeleteAfterUpload: ["./dist/client/**/*.map"],
+            },
+          }),
+        ]
+      : []),
   ],
   resolve: {
     alias: {

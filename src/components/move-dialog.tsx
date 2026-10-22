@@ -1,3 +1,6 @@
+import { useNavigate } from "@tanstack/react-router";
+import Fuse, { type FuseResultMatch } from "fuse.js";
+import { BookmarkIcon, HomeIcon } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -5,25 +8,28 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
-import { BookmarkIcon, HomeIcon } from "lucide-react";
 import { toast } from "sonner";
-import { useTree } from "../data/useTree";
+
+import { cn } from "@/lib/utils";
+
+import { capture, drop } from "../data/history";
+import { mirrorManyNodes, moveManyNodes } from "../data/mutations";
+import { runStructural } from "../data/structural";
 import {
   buildTrail,
-  childrenOf,
   trueSourceOf,
   type Node,
   type TreeIndex,
 } from "../data/tree";
-import { mirrorManyNodes, moveManyNodes } from "../data/mutations";
-import { runStructural } from "../data/structural";
-import { searchAliases, searchAnnotation } from "../plugins/registry";
+import { useTree } from "../data/useTree";
+import { searchAnnotation, usePluginChrome } from "../plugins/registry";
 import { requestFlashAfterNav } from "./flash-node";
-import { capture, drop } from "../data/history";
-import { cn } from "@/lib/utils";
 import { setMoveDialogOpener, type MoveMode } from "./move-dialog-opener";
+import {
+  buildTargetCandidates,
+  subtreeIds,
+  targetSearchOptions,
+} from "./node-target-search";
 import {
   Command,
   CommandDialog,
@@ -52,18 +58,6 @@ import {
  * (with a "Go" action to jump there on demand) -- moving a node shouldn't yank
  * you away from where you were working.
  */
-
-const FUSE_OPTIONS: IFuseOptions<Node> = {
-  // Plus plugin-contributed aliases (Seam J) so `/move` -> "today" finds the
-  // daily note despite its full-date text. Matched, never highlighted
-  // (textMatchIndices keeps only the "text" key). See ADR 0001.
-  keys: ["text", { name: "aliases", getFn: (n) => searchAliases(n) }],
-  includeMatches: true,
-  // Match late in the string too, so "notes" finds "Weekly team notes" (ADR 0012).
-  ignoreLocation: true,
-  threshold: 0.3,
-  minMatchCharLength: 2,
-};
 
 /** A destination row: a node, plus its Fuse match ranges when searched. */
 interface Hit {
@@ -140,6 +134,7 @@ function MoveDialogInner({
   setQuery: (q: string) => void;
 }) {
   const { index } = useTree();
+  const { aliasProviders } = usePluginChrome();
   const navigate = useNavigate();
   const open = nodeIds !== null && nodeIds.length > 0;
 
@@ -164,14 +159,18 @@ function MoveDialogInner({
       const rootId = mode === "mirror" ? trueSourceOf(index, id) : id;
       for (const sub of subtreeIds(index, rootId)) excluded.add(sub);
     }
-    return Array.from(index.byId.values()).filter(
-      (n) => !excluded.has(n.id) && n.text.trim() !== "",
-    );
+    return buildTargetCandidates(index, excluded);
   }, [index, nodeIds, mode]);
 
   const fuse = useMemo(
-    () => (open ? new Fuse(candidates, FUSE_OPTIONS) : null),
-    [open, candidates],
+    () =>
+      open
+        ? new Fuse(candidates, {
+            ...targetSearchOptions(aliasProviders),
+            includeMatches: true,
+          })
+        : null,
+    [open, candidates, aliasProviders],
   );
 
   const q = query.trim();
@@ -219,7 +218,7 @@ function MoveDialogInner({
     const ids = nodeIds;
     onOpenChange(false);
     const made = runStructural(() => {
-      capture(index, ids[0]!);
+      capture(index, ids[0]!, null, { label: "mirror" });
       return mirrorManyNodes(targetId, ids);
     });
     // Nothing created => every source would have cycled (or vanished); the
@@ -243,7 +242,7 @@ function MoveDialogInner({
     // for Home), in ONE atomic batch (moveManyNodes keeps their relative order
     // and rebuilds the index per move so the sibling chain stays intact).
     const moved = runStructural(() => {
-      capture(index, ids[0]!);
+      capture(index, ids[0]!, null, { label: "move" });
       return moveManyNodes(targetId, ids);
     });
     // A no-op move (already at the exact destination) still captured an undo
@@ -432,20 +431,4 @@ function highlight(
   });
   if (last < text.length) parts.push(text.slice(last));
   return parts;
-}
-
-/** The node plus every descendant -- the set you can't move it into. */
-function subtreeIds(index: TreeIndex, rootId: string): Set<string> {
-  const ids = new Set<string>([rootId]);
-  const stack = [rootId];
-  while (stack.length) {
-    const id = stack.pop()!;
-    for (const child of childrenOf(index, id)) {
-      if (!ids.has(child.id)) {
-        ids.add(child.id);
-        stack.push(child.id);
-      }
-    }
-  }
-  return ids;
 }

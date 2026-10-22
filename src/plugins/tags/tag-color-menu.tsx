@@ -1,8 +1,11 @@
-import { useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
 import { Ban } from "lucide-react";
-import { Button } from "@/plugins/kit";
+import { useRef } from "react";
+import { createPortal } from "react-dom";
+
 import { cn } from "@/lib/utils";
+import { Button } from "@/plugins/kit";
+
+import { useDismissable } from "../../components/use-dismissable";
 import {
   TAG_COLORS,
   clearTagColor,
@@ -31,7 +34,7 @@ export function TagColorStyles() {
 
 /**
  * The tag color picker: a "clear" (Auto) swatch then the named palette. Opened
- * by right-clicking a tag chip or filter pill (the tags plugin's Seam-B
+ * by right-clicking an inline tag chip (the tags plugin's Seam-B
  * interaction routes it through ctx.openOverlay); picking applies to every
  * instance of the tag. Anchored at the pointer, dismissed on outside click or
  * Escape. See docs/adr/0007-custom-tag-colors.md.
@@ -49,25 +52,7 @@ export function TagColorMenu({
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const current = useTagColor(tag);
-
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    // Defer so the opening (contextmenu) event doesn't immediately close it.
-    const id = window.setTimeout(() => {
-      window.addEventListener("pointerdown", onPointerDown);
-      window.addEventListener("keydown", onKey);
-    }, 0);
-    return () => {
-      window.clearTimeout(id);
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
+  useDismissable(ref, onClose);
 
   // Keep the popover on screen (it's ~248px wide, ~44px tall).
   const left = Math.min(x, window.innerWidth - 256);
@@ -78,7 +63,7 @@ export function TagColorMenu({
       ref={ref}
       role="menu"
       aria-label={`Color for #${tag}`}
-      className="bg-popover fixed z-50 flex items-center gap-1 rounded-lg border p-1.5 shadow-md"
+      className="fixed z-50 flex items-center gap-1 rounded-lg border bg-popover p-1.5 shadow-md"
       style={{ left: Math.max(8, left), top: Math.max(8, top) }}
     >
       <Button

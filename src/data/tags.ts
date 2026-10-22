@@ -1,4 +1,5 @@
-import { childrenOf, type Node, type TreeIndex } from './tree'
+import { isValidDateKey } from "./date-links";
+import { type TreeIndex } from "./tree";
 
 /**
  * Tags are parsed out of `node.text` at read time -- never a stored field.
@@ -12,50 +13,35 @@ import { childrenOf, type Node, type TreeIndex } from './tree'
  * punctuation. So `#work-q3` and `#важно` match; `foo#bar` and a bare `#` do
  * not. `@`-mentions are deferred (v1 is `#` only).
  */
-export const TAG_PATTERN = '(?<=^|\\s)#[\\p{L}\\p{N}_-]+'
+export const TAG_PATTERN = "(?<=^|\\s)#[\\p{L}\\p{N}_-]+";
 
-const TAG_RE = new RegExp(TAG_PATTERN, 'gu')
+const TAG_RE = new RegExp(TAG_PATTERN, "gu");
 
-/** The distinct tags in a string, with their leading `#`, in first-seen order. */
-function parseTags(text: string): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const m of text.matchAll(TAG_RE)) {
-    if (!seen.has(m[0])) {
-      seen.add(m[0])
-      out.push(m[0])
-    }
-  }
-  return out
-}
+const EMPTY_TAGS: string[] = [];
 
 /**
- * The active tags carried in the `q` search param: a space-separated list of
- * `#tag` tokens. Distinct, in order, only well-formed `#...` tokens kept (v1 is
- * tags-only -- any free text in `q` is ignored).
+ * The distinct tags in a string, with their leading `#`, in first-seen order.
+ * Bails before any regex work when `text` can't contain a `#` (the tree-store's
+ * incremental corpus maintenance runs this on every text-changing keystroke, not
+ * just tag-bearing ones -- same early-out discipline as `parseNodeLinks`).
  */
-export function parseQuery(q: string | undefined): string[] {
-  if (!q) return []
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const tok of q.trim().split(/\s+/)) {
-    if (tok.length > 1 && tok.startsWith('#') && !seen.has(tok)) {
-      seen.add(tok)
-      out.push(tok)
+export function parseTags(text: string): string[] {
+  if (!text.includes("#")) return EMPTY_TAGS;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const m of text.matchAll(TAG_RE)) {
+    if (!seen.has(m[0])) {
+      seen.add(m[0]);
+      out.push(m[0]);
     }
   }
-  return out
-}
-
-/** Serialize active tags back into the `q` param value. */
-export function serializeQuery(tags: string[]): string {
-  return tags.join(' ')
+  return out;
 }
 
 /** The bare tag name (no leading `#`, lowercased) -- the key tag colors and
  *  case-folded comparisons use. See [[tag-colors]] (src/data/tag-colors.ts). */
 export function normalizeTag(tag: string): string {
-  return tag.replace(/^#/, '').toLowerCase()
+  return tag.replace(/^#/, "").toLowerCase();
 }
 
 /** Every distinct tag used anywhere in the outline, sorted -- the autocomplete
@@ -67,82 +53,67 @@ export function normalizeTag(tag: string): string {
  * already in the live tree). Without this the menu would match a tag to itself.
  */
 export function collectAllTags(index: TreeIndex, excludeId?: string): string[] {
-  const seen = new Map<string, string>()
+  const seen = new Map<string, string>();
   for (const node of index.byId.values()) {
-    if (node.id === excludeId) continue
+    if (node.id === excludeId) continue;
     for (const tag of parseTags(node.text)) {
-      const key = tag.toLowerCase()
-      if (!seen.has(key)) seen.set(key, tag)
+      const key = tag.toLowerCase();
+      if (!seen.has(key)) seen.set(key, tag);
     }
   }
-  return [...seen.values()].sort((a, b) => a.localeCompare(b))
-}
-
-/** True iff `text` carries every one of `activeTags` (per-node AND). */
-function matchesAllTags(text: string, activeTags: string[]): boolean {
-  if (activeTags.length === 0) return false
-  const tags = new Set(parseTags(text))
-  return activeTags.every((t) => tags.has(t))
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
 /**
- * The visible set for a tag filter, computed at render time from the tree --
- * never mutating any node (in particular `collapsed` is untouched, so clearing
- * the filter restores the exact prior view). See ADR 0015.
- *
- * - `matchIds`: nodes whose own text carries all active tags.
- * - `visibleIds`: every match plus all of its ancestors up to (but not
- *   including) `rootId` -- the dimmed context that shows *where* a match lives.
- *
- * A node renders while filtered iff it is in `visibleIds`; it renders as a match
- * (normal styling) iff it is in `matchIds`, otherwise as dimmed context. Nodes
- * the view otherwise hides (e.g. completed subtrees when show-completed is off)
- * are skipped via the `isHidden` predicate -- this layer no longer knows about
- * `completed`; the composed Seam-G predicate carries that (ADR 0001 D9).
+ * One entry in `TreeIndex.tagCorpus` (tree.ts): `tag` is the display casing
+ * (first registered, same first-seen-wins rule `collectAllTags` uses within a
+ * single build), `count` is how many nodes currently carry it -- so removing a
+ * node's occurrence is a decrement, not a rescan. Built once in `buildTreeIndex`
+ * and maintained incrementally in tree-store.ts's `applyChanges`, so the `#`
+ * picker's `entries` call is O(distinct tags) instead of O(all nodes) per
+ * keystroke while the menu is open.
  */
-export interface TagFilter {
-  visibleIds: Set<string>
-  matchIds: Set<string>
+export interface TagEntry {
+  tag: string;
+  count: number;
 }
 
-export function buildTagFilter(
-  index: TreeIndex,
-  rootId: string | null,
-  activeTags: string[],
-  isHidden: (node: Node) => boolean,
-): TagFilter {
-  const visibleIds = new Set<string>()
-  const matchIds = new Set<string>()
-
-  const walk = (parentId: string | null) => {
-    for (const child of childrenOf(index, parentId)) {
-      // A hidden node takes its whole subtree with it, same as the normal
-      // render (useVisibleChildIds applies the same composed predicate).
-      if (isHidden(child)) continue
-      if (matchesAllTags(child.text, activeTags)) {
-        matchIds.add(child.id)
-        let cur: Node | undefined = child
-        while (cur && cur.id !== rootId) {
-          visibleIds.add(cur.id)
-          cur = cur.parentId ? index.byId.get(cur.parentId) : undefined
-        }
-      }
-      walk(child.id)
-    }
-  }
-  walk(rootId)
-
-  return { visibleIds, matchIds }
+/** The maintained corpus's sorted distinct tag list -- the `#` picker's
+ *  autocomplete source. O(distinct tags), never O(all nodes). */
+export function collectTagCorpus(corpus: Map<string, TagEntry>): string[] {
+  const out: string[] = [];
+  for (const entry of corpus.values()) out.push(entry.tag);
+  return out.sort((a, b) => a.localeCompare(b));
 }
 
-/** Typed `q` search param, shared by the home and zoom routes. */
+/** Typed search params, shared by the home and zoom routes. `focus=last` lands
+ *  the caret on the last visible child on load (the daily `/today` redirect). */
 export interface OutlineSearch {
-  q?: string
+  q?: string;
+  focus?: "last";
+  /** The day stream's in-view day (ADR 0070), so a reload or shared link
+   *  returns to it. Written with a replace while scrolling; never navigates. */
+  day?: string;
 }
 
-export function validateOutlineSearch(
-  search: Record<string, unknown>,
-): OutlineSearch {
-  const q = typeof search.q === 'string' ? search.q.trim() : ''
-  return q ? { q } : {}
+/** Search params as the router hands them over: unvalidated query-string values. */
+interface RawSearch {
+  q?: unknown;
+  focus?: unknown;
+  day?: unknown;
+}
+
+/** Type-guard predicate: search params carry unknown values. */
+const isString = (v: RawSearch["q"]): v is string => typeof v === "string";
+
+export function validateOutlineSearch(search: RawSearch): OutlineSearch {
+  const q = isString(search.q) ? search.q.trim() : "";
+  const out: OutlineSearch = {};
+  if (q) out.q = q;
+  // Pass `focus=last` through: the router validates the DESTINATION route's
+  // search, so any key not returned here is dropped before it reaches the
+  // editor (which is why the redirect's ?focus=last was silently a no-op).
+  if (search.focus === "last") out.focus = "last";
+  if (isString(search.day) && isValidDateKey(search.day)) out.day = search.day;
+  return out;
 }

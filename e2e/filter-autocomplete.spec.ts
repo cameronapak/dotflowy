@@ -1,0 +1,109 @@
+import { expect, test, type Page } from "@playwright/test";
+
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
+
+// Registry-driven autocomplete for the summoned `?q=` filter input (ADR 0047
+// §7): empty focus shows the operator cheat sheet, `key:` shows that key's
+// registered values, `#` shows the tag corpus. Selection only ever inserts text
+// into the plain input; the existing debounced `?q=` write does the filtering.
+
+const TREE: SeedNode[] = [
+  {
+    id: "milk",
+    parentId: null,
+    prevSiblingId: null,
+    text: "Buy milk #work",
+    isTask: true,
+  },
+  { id: "mom", parentId: null, prevSiblingId: "milk", text: "Call mom" },
+  { id: "ship", parentId: null, prevSiblingId: "mom", text: "Ship it #work" },
+  { id: "home", parentId: null, prevSiblingId: "ship", text: "Tidy #home" },
+];
+
+const row = (page: Page, id: string) =>
+  page.locator(`li[data-node-id="${id}"]`);
+const input = (page: Page) =>
+  page.getByRole("combobox", { name: "Filter query" });
+const listbox = (page: Page) => page.locator("[data-filter-suggestions]");
+const option = (page: Page, name: string | RegExp) =>
+  listbox(page).getByRole("option", { name });
+
+async function load(page: Page) {
+  await seedOutline(page, TREE);
+  await openSeededOutline(page, { anchorId: "milk" });
+}
+
+async function summon(page: Page) {
+  await page.keyboard.press("ControlOrMeta+f");
+  await expect(input(page)).toBeFocused();
+}
+
+test("typing `is:` lists its values incl. todo; click inserts + filters", async ({
+  page,
+}) => {
+  await load(page);
+  await summon(page);
+
+  await input(page).fill("is:");
+  // Values folded from every plugin sharing the `is` key (core + todos + …).
+  await expect(option(page, "is:todo")).toBeVisible();
+  await expect(option(page, "is:complete")).toBeVisible();
+
+  await option(page, "is:todo").click();
+
+  // Insertion writes the completed term (trailing space) into the input; the
+  // debounced `?q=` write applies the filter.
+  await expect(input(page)).toHaveValue("is:todo ");
+  await expect(page).toHaveURL(/[?&]q=is/);
+  await expect(row(page, "milk").first()).toBeVisible();
+  await expect(row(page, "mom")).toHaveCount(0);
+  await expect(row(page, "ship")).toHaveCount(0);
+});
+
+test("keyboard: ArrowDown highlights a row, Enter inserts it", async ({
+  page,
+}) => {
+  await load(page);
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  await page.keyboard.press("ControlOrMeta+f");
+  await page.clock.runFor(32);
+  await expect(input(page)).toBeFocused();
+
+  await input(page).fill("is:");
+  await input(page).press("ArrowDown"); // -> first row (is:todo)
+  await expect(option(page, "is:todo")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+
+  // Settling the initial subheader animation must not clear a choice made
+  // while it was opening. Advance past its deferred popover reveal.
+  await page.clock.runFor(250);
+  await expect(option(page, "is:todo")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+
+  await input(page).press("Enter"); // an active row -> insert (stays open)
+  await expect(input(page)).toHaveValue("is:todo ");
+  await expect(input(page)).toBeVisible();
+});
+
+test("`#` shows seeded tags; picking one filters", async ({ page }) => {
+  await load(page);
+  await summon(page);
+
+  await input(page).fill("#");
+  await expect(option(page, "#home")).toBeVisible();
+  await expect(option(page, "#work")).toBeVisible();
+
+  await option(page, "#work").click();
+
+  await expect(input(page)).toHaveValue("#work ");
+  await expect(page).toHaveURL(/q=%23work/);
+  await expect(row(page, "milk").first()).toBeVisible();
+  await expect(row(page, "ship").first()).toBeVisible();
+  await expect(row(page, "mom")).toHaveCount(0);
+  await expect(row(page, "home")).toHaveCount(0);
+});

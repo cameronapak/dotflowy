@@ -15,11 +15,10 @@
     "noEmit": true,
     "verbatimModuleSyntax": false,
     "isolatedModules": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-    },
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src", "vite.config.ts"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "repos/**"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }

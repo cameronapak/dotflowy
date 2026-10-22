@@ -5,21 +5,21 @@
  */
 
 export function placeCaretAtEnd(el: HTMLElement) {
-  const range = document.createRange()
-  range.selectNodeContents(el)
-  range.collapse(false)
-  const sel = window.getSelection()
-  sel?.removeAllRanges()
-  sel?.addRange(range)
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
 }
 
 export function placeCaretAtStart(el: HTMLElement) {
-  const range = document.createRange()
-  range.selectNodeContents(el)
-  range.collapse(true)
-  const sel = window.getSelection()
-  sel?.removeAllRanges()
-  sel?.addRange(range)
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
 }
 
 /**
@@ -33,19 +33,22 @@ export function caretFromPoint(
   y: number,
 ): { node: Node; offset: number } | null {
   if (document.caretPositionFromPoint) {
-    const pos = document.caretPositionFromPoint(x, y)
-    return pos ? { node: pos.offsetNode, offset: pos.offset } : null
+    const pos = document.caretPositionFromPoint(x, y);
+    return pos ? { node: pos.offsetNode, offset: pos.offset } : null;
   }
+  // SAFETY: legacy WebKit API absent from the Document typings, same shape as the standard one
   const legacy = (
     document as Document & {
-      caretRangeFromPoint?: (x: number, y: number) => Range | null
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
     }
-  ).caretRangeFromPoint
+  ).caretRangeFromPoint;
   if (legacy) {
-    const range = legacy.call(document, x, y)
-    return range ? { node: range.startContainer, offset: range.startOffset } : null
+    const range = legacy.call(document, x, y);
+    return range
+      ? { node: range.startContainer, offset: range.startOffset }
+      : null;
   }
-  return null
+  return null;
 }
 
 /**
@@ -60,17 +63,17 @@ export function focusTextFromRowTap(
   x: number,
   y: number,
 ) {
-  if (!span) return
-  span.focus()
-  const hit = caretFromPoint(x, y)
+  if (!span) return;
+  span.focus();
+  const hit = caretFromPoint(x, y);
   if (hit && span.contains(hit.node)) {
-    const range = document.createRange()
-    range.setStart(hit.node, hit.offset)
-    range.collapse(true)
-    const sel = window.getSelection()
-    sel?.removeAllRanges()
-    sel?.addRange(range)
+    const range = document.createRange();
+    range.setStart(hit.node, hit.offset);
+    range.collapse(true);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
   } else {
-    placeCaretAtEnd(span)
+    placeCaretAtEnd(span);
   }
 }

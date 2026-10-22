@@ -12,6 +12,9 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
+    // worker/version.ts imports ../package.json -- one source for the version
+    // the MCP server advertises and the sync handshake stamps (ADR 0046).
+    "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": false
   },

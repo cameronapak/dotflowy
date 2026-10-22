@@ -6,20 +6,32 @@
 // The pure link layer (parse/strip/encode) stays in src/data/links.ts; this is
 // just the decoration half expressed as El descriptors.
 
-import { Effect } from "effect";
+import { LinkIcon } from "lucide-react";
+
+import {
+  getSelectionRange,
+  mdPunct,
+  readSource,
+  sourceOffsetUpTo,
+} from "../../components/inline-code";
+import { openUrlInFocusedTab } from "../../components/open-url";
+import { getEditorFeatures } from "../../data/editor-features";
+import { unfurlLinks } from "../../data/link-unfurl";
 import {
   bareHttpUrl,
   encodeUrlForMarkdown,
   isHttpUrl,
   LINK_PATTERN,
-  sanitizeLinkLabel,
-  swapLinkLabel,
 } from "../../data/links";
-import { appRuntime } from "../../data/runtime";
 import { getTreeIndex } from "../../data/tree-store";
-import { getViewRootId } from "../../data/view-state";
+import { isRevealed, resolveNodeId } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
-import { openLinkEditPopover } from "./link-edit-popover";
+import { LINK_FILTER_OPERATORS } from "./filter-operators";
+import {
+  openLinkCreatePopover,
+  openLinkEditPopover,
+} from "./link-edit-popover";
+import { unfurlNodeLinks } from "./unfurl";
 
 // Pull `[label](url)` apart for rendering. Mirrors the combined-regex shape, so
 // it always matches what the tokenizer fed us.
@@ -58,10 +70,7 @@ function faviconImgEl(host: string): El {
   };
 }
 
-// The trailing pencil affordance -- a text-free span (icon painted by CSS mask)
-// that opens the Edit Link popover. Inside a folded <a> it's invisible to
-// source/caret math (readSource stops at the atom's `data-src`); inside the
-// revealed url chip it's interior to that atom, same story.
+// A text-free icon, painted by CSS mask inside the accessible pencil button.
 function editIconEl(): El {
   return {
     tag: "span",
@@ -69,30 +78,69 @@ function editIconEl(): El {
   };
 }
 
-// A folded link: a clean, ATOMIC <a> showing the site favicon + label + the
-// edit pencil. The whole `(url)` is hidden; `contenteditable="false"` makes it
-// one indivisible caret unit. `data-src`/`data-src-len` carry the full markdown
-// so the core's readSource can reconstruct it and the caret helpers can count
-// it (ADR 0005) -- readSource stops at the <a> and reads `data-src`, so the
-// inner <img>/pencil never perturb source/caret math. Attr order is preserved
-// verbatim so the generated HTML stays byte-identical.
-function foldedLinkEl(label: string, url: string, tok: string): El {
-  const host = linkHost(url);
+function editButtonEl(token?: string): El {
   return {
-    tag: "a",
+    tag: "button",
     attrs: {
-      class: LINK_CLASS,
-      "data-link": true,
+      type: "button",
+      class: "link-edit-button",
+      "aria-label": "Edit link",
+      title: "Edit link",
+      contenteditable: "false",
+      "data-src": "",
+      "data-src-len": 0,
+      "data-link-token": token,
+    },
+    children: [editIconEl()],
+  };
+}
+
+// The wrapper is one source atom. The anchor visits the URL and the sibling
+// pencil edits it, without nesting interactive controls inside the anchor.
+// Plain URLs use the same wrapper without a favicon or metadata lookup.
+function foldedLinkEl(
+  label: string,
+  url: string,
+  tok: string,
+  plain = false,
+): El {
+  const host = plain ? null : linkHost(url);
+  const start = label.match(/^\s*\S/u)?.[0] ?? label;
+  return {
+    tag: "span",
+    attrs: {
+      class: "link-with-editor",
       contenteditable: "false",
       "data-src": tok,
       "data-src-len": tok.length,
-      href: url,
-      target: "_blank",
-      rel: "noopener noreferrer",
     },
-    children: host
-      ? [faviconImgEl(host), label, editIconEl()]
-      : [label, editIconEl()],
+    children: [
+      {
+        tag: "a",
+        attrs: {
+          class: LINK_CLASS,
+          "data-link": !plain,
+          "data-plain-url": plain,
+          contenteditable: "false",
+          "data-src": tok,
+          "data-src-len": tok.length,
+          href: url,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        },
+        children: host
+          ? [
+              {
+                tag: "span",
+                attrs: { class: "link-start" },
+                children: [faviconImgEl(host), start],
+              },
+              label.slice(start.length),
+            ]
+          : [label],
+      },
+      editButtonEl(),
+    ],
   };
 }
 
@@ -106,111 +154,98 @@ function foldedLinkEl(label: string, url: string, tok: string): El {
 // text. Clicking the chip opens the Edit Link popover. Everything except the
 // chip stays 1:1 with its slice of the source.
 function revealedLinkEl(label: string, url: string): El {
-  const punct = (s: string): El => ({
-    tag: "span",
-    attrs: { class: "md-punct" },
-    children: [s],
-  });
   return {
     tag: "span",
     attrs: { class: "link-reveal", "data-link-reveal": true },
     children: [
-      punct("["),
+      mdPunct("["),
       { tag: "span", attrs: { class: "link-label" }, children: [label] },
-      punct("]"),
-      punct("("),
+      mdPunct("]"),
+      mdPunct("("),
       {
-        tag: "span",
+        tag: "button",
         attrs: {
           class: "link-url-chip",
           "data-src": url,
           "data-src-len": url.length,
           contenteditable: "false",
           title: "Edit link",
+          type: "button",
+          "aria-label": "Edit link",
         },
         children: [editIconEl()],
       },
-      punct(")"),
+      mdPunct(")"),
     ],
   };
 }
 
-// Resolve a click on an edit affordance to (nodeId, token, anchor rect) and
-// open the popover. The pencil inside a folded <a> reads the full token off
+// Resolve a click on an edit affordance to (nodeId, token, pencil rect) and
+// open the popover. A folded link's sibling pencil reads the full token off
 // the anchor's data-src; the revealed url chip reads its own data-src (the
 // bare url) plus the label from the sibling span (fresh -- every keystroke
 // re-decorates). The node id comes from the enclosing row's `data-node-id`;
 // the zoomed title has no row, so it falls back to the zoom root (which IS
 // the title's node).
 function openEditFor(el: HTMLElement, ctx: PluginContext): void {
-  const anchor = el.closest<HTMLElement>("a[data-link]");
+  const wrapper = el.closest<HTMLElement>(".link-with-editor");
+  const anchor =
+    wrapper?.querySelector<HTMLElement>("a[data-link], a[data-plain-url]") ??
+    el.closest<HTMLElement>("a[data-link]");
   let token: string;
-  let rectEl: HTMLElement;
-  if (anchor) {
+  const plainToken = el.getAttribute("data-link-token");
+  if (plainToken) {
+    token = plainToken;
+  } else if (anchor) {
     token = anchor.getAttribute("data-src") ?? "";
-    rectEl = anchor;
   } else {
     const chip = el.closest<HTMLElement>(".link-url-chip");
     if (!chip) return;
     const reveal = chip.closest<HTMLElement>(".link-reveal");
     const label = reveal?.querySelector(".link-label")?.textContent ?? "";
     token = `[${label}](${chip.getAttribute("data-src") ?? ""})`;
-    rectEl = reveal ?? chip;
   }
   const parts = LINK_PARTS.exec(token);
-  if (!parts) return;
-  const nodeId =
-    el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
-    getViewRootId();
+  if (!parts && !bareHttpUrl(token)) return;
+  const nodeId = resolveNodeId(el);
   if (!nodeId) return;
-  const rect = rectEl.getBoundingClientRect();
+  const textEl = el.closest<HTMLElement>(".node-text");
+  const tokenEl = wrapper ?? el.closest<HTMLElement>(".link-reveal") ?? anchor;
+  const parent = tokenEl?.parentNode;
+  if (!textEl || !tokenEl || !parent) return;
+  const start = sourceOffsetUpTo(
+    textEl,
+    parent,
+    Array.from(parent.childNodes).indexOf(tokenEl),
+  );
+  const source = readSource(textEl);
+  const end = start + token.length;
+  if (source.slice(start, end) !== token) return;
+  const buttons = textEl?.querySelectorAll<HTMLElement>(
+    ".link-edit-button, .link-url-chip",
+  );
+  const buttonIndex = buttons ? Array.from(buttons).indexOf(el) : -1;
+  const rect = el.getBoundingClientRect();
   openLinkEditPopover(
     {
       nodeId,
       token,
-      label: parts[1] ?? "",
-      url: parts[2] ?? "",
-      x: rect.left,
+      source,
+      start,
+      end,
+      label: parts?.[1] ?? "",
+      url: parts?.[2] ?? token,
+      x: rect.left + rect.width / 2,
       y: rect.bottom + 6,
+      restoreFocus: () => {
+        const button = textEl?.querySelectorAll<HTMLElement>(
+          ".link-edit-button, .link-url-chip",
+        )[buttonIndex];
+        (button ?? textEl)?.focus({ preventScroll: true });
+      },
     },
     ctx,
   );
-}
-
-// While its title is being fetched, a just-pasted bare-url link wears this
-// transient class (ADR 0016) -- CSS swaps its favicon slot for a spinner. Same
-// one-shot-class mechanic as flash-node / rejectRow: applied imperatively here,
-// removed on resolve; the success re-decorate replaces the <a> outright.
-const UNFURLING_CLASS = "link-unfurling";
-
-// Fetch a pasted URL's title from the auth-gated Worker endpoint (ADR 0016), as
-// an Effect. Same-origin, so the session cookie rides along by default. Any
-// failure -- a non-200, a malformed body, a network error -- collapses to null,
-// and the caller keeps the url placeholder (the graceful fallback). The runtime
-// `signal` wires the fetch up to be interruptible; nothing interrupts it per
-// node today (see the runFork site), so it runs to completion either way.
-function fetchLinkTitleE(url: string): Effect.Effect<string | null> {
-  return Effect.tryPromise({
-    try: async (signal) => {
-      const res = await fetch(`/api/unfurl?url=${encodeURIComponent(url)}`, {
-        signal,
-      });
-      if (!res.ok) return null;
-      const data = (await res.json()) as { title?: string | null };
-      return typeof data.title === "string" && data.title ? data.title : null;
-    },
-    catch: (cause) => cause,
-  }).pipe(Effect.orElseSucceed(() => null));
-}
-
-// The just-folded <a> for `token` inside `el` (matched on its `data-src`, which
-// is the full link source), or null if it isn't there (the bullet was blurred,
-// or re-decorated away by a keystroke before we looked).
-function findFoldedAnchor(el: HTMLElement, token: string): HTMLElement | null {
-  for (const a of el.querySelectorAll<HTMLElement>("a[data-link]")) {
-    if (a.getAttribute("data-src") === token) return a;
-  }
-  return null;
 }
 
 // If the clipboard HTML is "essentially a single anchor" -- exactly one
@@ -230,6 +265,51 @@ function singleAnchor(html: string): { text: string; href: string } | null {
   return { text, href };
 }
 
+// Seam C `/link` + the desktop toolbar's link button (ADR 0036): wrap the
+// current selection in a link and open the edit popover to fill the url. Reads
+// the focused contentEditable directly (the same seam wrap.ts uses); resolves a
+// mirror row to its source node so the write lands where the text lives. With no
+// selection it opens the popover with an empty label (type both). Positioned at
+// the selection rect, falling back to the span.
+function createLinkFromSelection(nodeId: string, ctx: PluginContext): void {
+  // SAFETY: document.activeElement is an Element or null, elements here are HTMLElements
+  const el = document.activeElement as HTMLElement | null;
+  if (!el || !el.isContentEditable) return;
+
+  const contentId = getTreeIndex().byId.get(nodeId)?.mirrorOf ?? nodeId;
+  const source = readSource(el);
+  const range = getSelectionRange(el) ?? {
+    start: source.length,
+    end: source.length,
+  };
+  const selText = source.slice(range.start, range.end);
+
+  let x = window.innerWidth / 2;
+  let y = window.innerHeight / 2;
+  const sel = window.getSelection();
+  const rect =
+    sel && sel.rangeCount > 0
+      ? sel.getRangeAt(0).getBoundingClientRect()
+      : el.getBoundingClientRect();
+  if (rect.width || rect.height) {
+    x = rect.left;
+    y = rect.bottom + 6;
+  }
+
+  openLinkCreatePopover(
+    {
+      nodeId: contentId,
+      source,
+      start: range.start,
+      end: range.end,
+      selText,
+      x,
+      y,
+    },
+    ctx,
+  );
+}
+
 export default definePlugin({
   id: "links",
   tokens: [
@@ -240,28 +320,69 @@ export default definePlugin({
       // `#tag` or `code` run inside a label/url never becomes its own chip.
       precedence: 0,
       folds: true,
-      render: (tok, { revealOffset, start, end }) => {
+      render: (tok, view) => {
         const parts = LINK_PARTS.exec(tok);
         const label = parts?.[1] ?? "";
         const url = parts?.[2] ?? "";
-        const reveal =
-          revealOffset != null && revealOffset >= start && revealOffset <= end;
-        return reveal
+        return isRevealed(view)
           ? revealedLinkEl(label, url)
           : foldedLinkEl(label, url, tok);
       },
     },
+    {
+      id: "plain-url",
+      pattern: "[Hh][Tt][Tt][Pp][Ss]?:\\/\\/[^\\s<>\\x60|\\[\\]]+",
+      precedence: 0,
+      folds: true,
+      render: (tok, view) => {
+        const link = unfurlLinks(tok)[0];
+        if (!link || !bareHttpUrl(link.token))
+          return { tag: "span", children: [tok] };
+        if (!isRevealed(view)) {
+          // Plain URLs keep their literal label, without a title or favicon.
+          return {
+            tag: "span",
+            children: [
+              foldedLinkEl(link.token, link.url, link.token, true),
+              tok.slice(link.token.length),
+            ],
+          };
+        }
+        return {
+          tag: "span",
+          attrs: { class: "link-with-editor" },
+          children: [tok, editButtonEl(link.token)],
+        };
+      },
+    },
   ],
 
-  // Seam B: the edit pencil (in a folded <a> AND the revealed `(url)` chip)
-  // opens the Edit Link popover -- listed FIRST so a click on the pencil inside
-  // the anchor dispatches here, not to the open-in-new-tab handler below. A
+  // Seam C: `/link` wraps the selection in a link and opens the edit popover.
+  // caretScoped -- it needs the live selection the overlay-based Cmd+K can't hold
+  // (ADR 0034), so it's a slash-palette + toolbar action, not a command-center
+  // row. The desktop selection toolbar (ADR 0036) runs this same command.
+  commands: [
+    {
+      id: "link",
+      label: "Link",
+      description: "Wrap the selection in a link",
+      icon: LinkIcon,
+      keywords: ["link", "url", "hyperlink", "anchor", "href"],
+      available: () => true,
+      caretScoped: true,
+      run: (nodeId: string, ctx: PluginContext) =>
+        createLinkFromSelection(nodeId, ctx),
+    },
+  ],
+
+  // Seam B: the pencil beside a folded anchor or inside the revealed URL chip
+  // opens the editor. The destination anchor opens in a new tab. A
   // folded link itself opens in a new tab; its mousedown blocks the editing
   // caret (editing the label is done from its edges -- click beside it reveals
   // the brackets; editing the url is the popover's job).
   interactions: [
     {
-      selector: ".link-edit-icon, .link-url-chip",
+      selector: ".link-edit-button, .link-url-chip",
       blockCaretOnMouseDown: true,
       onClick: (el, ctx, e) => {
         e.preventDefault();
@@ -270,13 +391,17 @@ export default definePlugin({
       },
     },
     {
-      selector: "a[data-link]",
+      selector: "a[data-link], a[data-plain-url]",
       blockCaretOnMouseDown: true,
       onClick: (el, _ctx, e) => {
         e.preventDefault();
         e.stopPropagation();
+        // SAFETY: the selector "a[data-link]" matched, so el is an anchor
         const href = (el as HTMLAnchorElement).href;
-        window.open(href, "_blank", "noopener,noreferrer");
+        const textEl = el.closest<HTMLElement>(".node-text");
+        openUrlInFocusedTab(href, {
+          restoreFocus: () => textEl?.focus({ preventScroll: true }),
+        });
       },
     },
   ],
@@ -291,6 +416,13 @@ export default definePlugin({
   // an existing SELECTION keeps the old end-of-link caret (no stray space).
   input: {
     onPaste: ({ plain, html, selectedText, hasSelection }) => {
+      const preferences = getEditorFeatures();
+      const choiceUrl =
+        !hasSelection && (!preferences.ready || preferences.embeds)
+          ? bareHttpUrl(plain)
+          : null;
+      // Standalone URLs wait for an explicit display choice before any lookup.
+      if (choiceUrl) return choiceUrl;
       const selUrl = bareHttpUrl(plain);
       const anchor = hasSelection ? null : singleAnchor(html);
       if (hasSelection && selUrl)
@@ -302,49 +434,22 @@ export default definePlugin({
       return null;
     },
 
-    // Seam I (ADR 0016): after a bare-url paste lands, fetch the page title and
-    // swap it into the label. Self-gates to OUR placeholder -- `[url](encUrl)`
-    // whose label IS the url (encoding the label reproduces the url half). A
-    // selection-wrap or anchor paste has a real-text label, so it's skipped.
-    afterPaste: ({ inserted, nodeId, el }, ctx) => {
-      const parts = LINK_PARTS.exec(inserted.trimEnd());
-      if (!parts) return;
-      const label = parts[1] ?? "";
-      const encodedUrl = parts[2] ?? "";
-      if (!isHttpUrl(label) || encodeUrlForMarkdown(label) !== encodedUrl)
+    // Full source supplies code/spoiler context; the old source prevents backfill.
+    afterPaste: ({ before, text, nodeId, el }, ctx) => {
+      const preferences = getEditorFeatures();
+      if (
+        !before.trim() &&
+        (!preferences.ready || preferences.embeds) &&
+        el?.closest(".outline-row, .zoomed-title") &&
+        bareHttpUrl(text)
+      )
         return;
-
-      const token = `[${label}](${encodedUrl})`;
-      const anchor = findFoldedAnchor(el, token);
-      anchor?.classList.add(UNFURLING_CLASS);
-
-      // Fork the unfurl on the app runtime (a tracked fiber, not a floating
-      // `void promise.then`). NOTE: it's app-scoped, not node-scoped -- nothing
-      // interrupts it when the bullet is deleted, so the continuation's own
-      // guards (current == null, verbatim swapLinkLabel match) are what keep a
-      // late title from writing into a deleted or since-edited bullet.
-      appRuntime.runFork(
-        fetchLinkTitleE(label).pipe(
-          Effect.flatMap((title) =>
-            Effect.sync(() => {
-              // Drop the spinner. On success the swap re-decorates a fresh <a>
-              // anyway; on failure this is what clears it (text unchanged).
-              anchor?.classList.remove(UNFURLING_CLASS);
-              if (!title) return; // keep the url placeholder
-              const safe = sanitizeLinkLabel(title);
-              if (!safe) return;
-              // Read the LIVE text at swap time (not a paste-time snapshot): the
-              // user may have typed since. Verbatim-match-or-drop (swapLinkLabel)
-              // does the rest -- only an untouched placeholder is rewritten, and
-              // a deleted node (current == null) is skipped.
-              const current = getTreeIndex().byId.get(nodeId)?.text;
-              if (current == null) return;
-              const next = swapLinkLabel(current, encodedUrl, label, safe);
-              if (next != null) ctx.mutations.onTextChange(nodeId, next);
-            }),
-          ),
-        ),
-      );
+      unfurlNodeLinks(nodeId, before, text, ctx, el);
     },
   },
+
+  // Query filter (ADR 0047 §4): `has:link` -- a markdown `[label](url)` run in
+  // the text. Reuses the pure `hasLink` (bails before any regex on `[`-free
+  // text), so the predicate is O(1) on the overwhelming majority of nodes.
+  filterOperators: LINK_FILTER_OPERATORS,
 });

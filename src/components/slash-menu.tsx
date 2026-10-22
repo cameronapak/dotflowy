@@ -1,56 +1,34 @@
+import { AnimatePresence } from "motion/react";
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { CopyPlusIcon, CornerUpRightIcon } from "lucide-react";
+
 import type { Node } from "../data/schema";
 import type { CommandSpec, PluginContext } from "../plugins/types";
-import { commandSpecs } from "../plugins/registry";
-import { isMirrorsEnabled } from "../data/flags";
+
+import { CORE_COMMANDS } from "../data/core-commands";
+import { useIsMobile } from "../hooks/use-mobile";
+import { usePluginChrome } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
-import {
-  decorate,
-  readSource,
-  setCaretOffset,
-} from "./inline-code";
+import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { SlashMenuList } from "./slash-menu-list";
+import { TypingSuggestions } from "./typing-suggestions";
+import { useClampedMenuPosition } from "./use-menu-position";
 
-/**
- * The core's own slash commands. Move is structural (reparent any node), not a
- * feature concept, so it stays core; feature commands (`/todo`, `/bullet`) are
- * the todos plugin's, registered via Seam C. The whole list is plugin commands
- * (array order) THEN core, so the contextual type-change commands lead and Move
- * trails -- preserving the pre-plugin palette order.
- */
-const CORE_COMMANDS: CommandSpec[] = [
-  {
-    id: "move",
-    label: "Move",
-    description: "Move under another node",
-    icon: CornerUpRightIcon,
-    keywords: ["move", "reparent", "under", "into", "relocate", "home"],
-    available: () => true,
-    run: (id, ctx) => ctx.mutations.onRequestMove(id),
-  },
-  // Mirror is structural like Move (it relinks the tree), so it stays core too.
-  // Hidden until the mirrors feature flag is on (ADR 0022) -- a mirror-free
-  // build never offers it. Opens the SAME destination picker, in mirror mode.
-  {
-    id: "mirror",
-    label: "Mirror to",
-    description: "Show a live copy under another node",
-    icon: CopyPlusIcon,
-    keywords: ["mirror", "synced", "instance", "alias", "reference", "clone"],
-    available: () => isMirrorsEnabled(),
-    run: (id, ctx) => ctx.mutations.onRequestMirror(id),
-  },
-];
-
-/** The composed command list driving the `/` palette: plugin commands (Seam C),
- *  then the core's. Detection/filtering/keyboard/rendering below stay generic. */
-const COMMANDS: CommandSpec[] = [...commandSpecs, ...CORE_COMMANDS];
-
-function filterCommands(node: Node, query: string): CommandSpec[] {
+/** The composed command list driving the `/` palette: plugin commands (Seam C,
+ *  array order), then the core's (`data/core-commands.ts`) -- so the contextual
+ *  type-change commands lead and the destination pickers trail, preserving the
+ *  pre-plugin palette order. Detection/filtering/keyboard/rendering stay generic. */
+function filterCommands(
+  node: Node,
+  query: string,
+  commands: CommandSpec[],
+  ctx: PluginContext,
+  commandFilter?: (spec: CommandSpec) => boolean,
+): CommandSpec[] {
   const q = query.toLowerCase();
-  const available = COMMANDS.filter((c) => c.available(node));
+  const all = [...commands, ...CORE_COMMANDS];
+  const base = commandFilter ? all.filter(commandFilter) : all;
+  const available = base.filter((c) => c.available(node, ctx));
   if (!q) return available;
   return available.filter(
     (c) =>
@@ -62,7 +40,8 @@ function filterCommands(node: Node, query: string): CommandSpec[] {
 /** Open-menu state. `slashIndex` is the char offset of the triggering "/". */
 interface SlashState {
   query: string;
-  slashIndex: number;
+  /** Null when a read-only locked row opened the palette without inserting /. */
+  slashIndex: number | null;
   activeIndex: number;
   x: number;
   y: number;
@@ -71,7 +50,7 @@ interface SlashState {
 /**
  * Drives the `/` command menu for a single bullet's contentEditable span.
  *
- * Returns input/keydown handlers the OutlineNode wires into its existing
+ * Returns input/keydown handlers the OutlineRow wires into its existing
  * handlers, a `close` callback (for blur), `isOpen`, and the rendered menu
  * element (portaled, so it's safe to drop anywhere in the JSX).
  */
@@ -80,6 +59,7 @@ export function useSlashMenu({
   ctx,
   getEl,
   onTextChange,
+  commandFilter,
 }: {
   node: Node;
   /** The PluginContext factory (read live values at event time), the same one
@@ -87,12 +67,42 @@ export function useSlashMenu({
   ctx: () => PluginContext;
   getEl: () => HTMLElement | null;
   onTextChange: (text: string) => void;
+  /** Restrict the palette to a subset of commands (ADR 0049): the quick-add
+   *  mini-editor curates out the structural verbs (Move/Mirror/Delete/Send to
+   *  Today) so its text-authoring surface never relocates the capture. Omit for
+   *  the full outline palette. */
+  commandFilter?: (spec: CommandSpec) => boolean;
 }) {
+  const { commandSpecs } = usePluginChrome();
   const [state, setState] = useState<SlashState | null>(null);
+  const mobile = useIsMobile();
 
-  const items = state ? filterCommands(node, state.query) : [];
+  const items = state
+    ? filterCommands(node, state.query, commandSpecs, ctx(), commandFilter)
+    : [];
+
+  // Keep the menu on screen: clamp the caret coords to the viewport (shift left
+  // near the right edge, flip above near the bottom). Re-measures on item count.
+  const menuPosition = useClampedMenuPosition(
+    state?.x ?? 0,
+    state?.y ?? 0,
+    items.length,
+  );
 
   const close = () => setState(null);
+
+  const openWithoutInput = () => {
+    const el = getEl();
+    if (!el) return;
+    const pos = caretPosition(el);
+    setState({
+      query: "",
+      slashIndex: null,
+      activeIndex: 0,
+      x: pos.x,
+      y: pos.y,
+    });
+  };
 
   // Re-evaluate the trigger after every input. Opens, updates, or closes.
   const handleInput = () => {
@@ -117,7 +127,13 @@ export function useSlashMenu({
   const select = (index: number) => {
     const el = getEl();
     if (!el || !state) return;
-    const list = filterCommands(node, state.query);
+    const list = filterCommands(
+      node,
+      state.query,
+      commandSpecs,
+      ctx(),
+      commandFilter,
+    );
     const item = list[index];
     if (!item) {
       setState(null);
@@ -126,12 +142,14 @@ export function useSlashMenu({
     // Strip the "/query" the user typed, then run the command. Work in
     // SOURCE space (readSource, not textContent) so a folded link elsewhere
     // on the line keeps its url instead of flattening to its label.
-    const text = readSource(el);
-    const end = state.slashIndex + 1 + state.query.length;
-    const newText = text.slice(0, state.slashIndex) + text.slice(end);
-    onTextChange(newText);
-    decorate(el, newText, state.slashIndex, false);
-    setCaretOffset(el, state.slashIndex);
+    if (state.slashIndex !== null) {
+      const text = readSource(el);
+      const end = state.slashIndex + 1 + state.query.length;
+      const newText = text.slice(0, state.slashIndex) + text.slice(end);
+      onTextChange(newText);
+      decorate(el, newText, state.slashIndex, false);
+      setCaretOffset(el, state.slashIndex);
+    }
     setState(null);
     item.run(node.id, ctx());
   };
@@ -160,6 +178,7 @@ export function useSlashMenu({
         return true;
       case "Escape":
         e.preventDefault();
+        e.stopPropagation();
         setState(null);
         return true;
       default:
@@ -167,20 +186,42 @@ export function useSlashMenu({
     }
   };
 
-  const menu = state
-    ? createPortal(
-        <SlashMenuList
-          items={items}
-          activeIndex={state.activeIndex}
-          style={{ position: "fixed", left: state.x, top: state.y + 6 }}
-          onHover={(i) => setState((s) => (s ? { ...s, activeIndex: i } : s))}
-          onSelect={select}
-        />,
-        document.body,
-      )
-    : null;
+  const menu = mobile ? (
+    <AnimatePresence>
+      {state && (
+        <TypingSuggestions getEditor={getEl} onDismiss={close}>
+          <SlashMenuList
+            items={items}
+            activeIndex={state.activeIndex}
+            inDock
+            onHover={(i) => setState((s) => (s ? { ...s, activeIndex: i } : s))}
+            onSelect={select}
+          />
+        </TypingSuggestions>
+      )}
+    </AnimatePresence>
+  ) : state ? (
+    createPortal(
+      <SlashMenuList
+        items={items}
+        activeIndex={state.activeIndex}
+        ref={menuPosition.ref}
+        style={menuPosition.style}
+        onHover={(i) => setState((s) => (s ? { ...s, activeIndex: i } : s))}
+        onSelect={select}
+      />,
+      document.body,
+    )
+  ) : null;
 
-  return { handleInput, handleKeyDown, close, isOpen: !!state, menu };
+  return {
+    handleInput,
+    handleKeyDown,
+    openWithoutInput,
+    close,
+    isOpen: !!state,
+    menu,
+  };
 }
 
 /**

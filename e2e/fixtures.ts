@@ -1,4 +1,125 @@
-import type { Page, Route, WebSocketRoute } from "@playwright/test";
+import type { Locator, Page, Route, WebSocketRoute } from "@playwright/test";
+
+import { Schema } from "effect";
+
+import {
+  KvClaimBody,
+  KvDeleteBody,
+  KvUpsertBody,
+  NodesDeleteBody,
+  NodesPatchBody,
+  NodesPostBody,
+  WeekStartPostBody,
+} from "../worker/wire";
+
+/** A node's editable text in the outline list (not the zoomed page title). */
+export const text = (page: Page, id: string): Locator =>
+  page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
+
+/**
+ * Focus `target` and collapse the caret at a source offset, or at either edge.
+ * Set the Selection directly instead of pressing Home/End or clicking at a
+ * pixel: those depend on visual lines and hit-testing. An atom (an element with
+ * `data-src`, such as a date or link chip) counts as its source length, and an
+ * offset inside one snaps to its leading edge at 0 and its trailing edge
+ * otherwise. An offset past the end lands at the end.
+ */
+export async function placeCaret(
+  target: Locator,
+  at: number | "start" | "end",
+): Promise<void> {
+  await target.evaluate((el: HTMLElement, at) => {
+    el.focus();
+    const sel = window.getSelection()!;
+    const place = (range: Range) => {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    };
+    const edge = (atEnd: boolean) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(!atEnd);
+      place(range);
+    };
+    if (at === "start" || at === "end") return edge(at === "end");
+    let remaining = at;
+    const visit = (node: Node): boolean => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const len = node.textContent?.length ?? 0;
+        if (remaining > len) {
+          remaining -= len;
+          return false;
+        }
+        const range = document.createRange();
+        range.setStart(node, remaining);
+        range.collapse(true);
+        place(range);
+        return true;
+      }
+      if (node instanceof Element && node.hasAttribute("data-src")) {
+        const len =
+          Number(node.getAttribute("data-src-len")) ||
+          (node.getAttribute("data-src") ?? "").length;
+        if (remaining >= len) {
+          remaining -= len;
+          return false;
+        }
+        const parent = node.parentNode!;
+        const index = Array.prototype.indexOf.call(parent.childNodes, node);
+        const range = document.createRange();
+        range.setStart(parent, remaining === 0 ? index : index + 1);
+        range.collapse(true);
+        place(range);
+        return true;
+      }
+      return Array.from(node.childNodes).some(visit);
+    };
+    if (!visit(el)) edge(true);
+  }, at);
+}
+
+/** Hold Daily's real claim boundary to exercise capture before its destination exists. */
+export async function holdDailyClaims(page: Page) {
+  let release!: () => void;
+  let markSeen!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const seen = new Promise<void>((resolve) => {
+    markSeen = resolve;
+  });
+  await page.route(
+    (url) =>
+      url.pathname === "/api/kv" &&
+      url.searchParams.get("collection") === "daily-index" &&
+      url.searchParams.get("op") === "claim",
+    async (route) => {
+      if (route.request().method() === "POST") {
+        markSeen();
+        await held;
+      }
+      await route.fallback();
+    },
+  );
+  return { seen, release };
+}
+
+/** Open a seeded Classic outline. */
+export async function openSeededOutline(
+  page: Page,
+  opts: { path?: string; anchorId?: string } = {},
+): Promise<void> {
+  await page.goto(opts.path ?? "/");
+  // The document load finishes before the lazy editor graph and initial sync.
+  // Wait for this page's outline within the test budget, not an interaction's
+  // 5s assertion budget. A cold dev server can still be compiling at that point.
+  const ready = opts.anchorId
+    ? page.locator(
+        `li[data-node-id="${opts.anchorId}"] > .outline-row .node-text`,
+      )
+    : page.locator(".outline-list");
+  await ready.waitFor({ state: "visible" });
+}
 
 // A node as the test author cares about it -- structural fields only. Everything
 // the schema also requires (isTask/completed/collapsed/timestamps) is filled in
@@ -13,15 +134,21 @@ export interface SeedNode {
   isTask?: boolean;
   /** Epoch ms when bookmarked; omit/null for an un-bookmarked node. */
   bookmarkedAt?: number | null;
+  /** Direct owner lock; descendant lock state is derived by the app. */
+  locked?: boolean;
   /** Source node id this is a mirror of (ADR 0022); omit/null for a normal node. */
   mirrorOf?: string | null;
   /** Provenance: agent harness name if created via MCP; omit/null for human. */
   origin?: string | null;
+  /** Node kind (ADR 0045); omit/null for a bullet-or-task. */
+  kind?: "paragraph" | "embed" | null;
+  /** Optional timestamp for benchmark controls; ordinary tests default to zero. */
+  updatedAt?: number;
 }
 
 /** A full node row as the /api/nodes Worker speaks it -- real booleans, all
  *  fields present. Mirrors the client `Node` type (src/data/schema.ts). */
-interface ApiNode {
+export interface ApiNode {
   id: string;
   parentId: string | null;
   prevSiblingId: string | null;
@@ -30,15 +157,17 @@ interface ApiNode {
   completed: boolean;
   collapsed: boolean;
   bookmarkedAt: number | null;
+  locked: boolean;
   mirrorOf: string | null;
   createdAt: number;
   updatedAt: number;
   origin: string | null;
+  kind: "paragraph" | "embed" | null;
 }
 
 /** One op in a change frame, as the DO broadcasts and the batch POST carries.
  *  Mirrors `ChangeOp` in src/data/realtime.ts. */
-type ApiChangeOp =
+export type ApiChangeOp =
   | { op: "insert"; value: ApiNode }
   | { op: "update"; value: ApiNode }
   | { op: "delete"; key: string };
@@ -53,14 +182,30 @@ function toNode(n: SeedNode): ApiNode {
     completed: n.completed ?? false,
     collapsed: n.collapsed ?? false,
     bookmarkedAt: n.bookmarkedAt ?? null,
+    locked: n.locked ?? false,
     mirrorOf: n.mirrorOf ?? null,
     createdAt: 0,
-    updatedAt: 0,
+    updatedAt: n.updatedAt ?? 0,
     // Every seeded node is "human" (null) — the origin marker only lights up for
     // MCP-created nodes, which the e2e mock never produces. Required by the wire
     // schema the client decodes inbound frames against, so it must be present.
     origin: n.origin ?? null,
+    // A seeded node is a bullet-or-task unless the spec says otherwise. Required
+    // by the wire schema the client decodes inbound frames against (ADR 0045),
+    // so it must be present on every row the mock emits.
+    kind: n.kind ?? null,
   };
+}
+
+export interface SeedOutlineController {
+  /** Commit and broadcast a change not made by this page. */
+  injectExternalChange(ops: readonly ApiChangeOp[]): Promise<number>;
+  /** Reconcile the socket, optionally replacing server truth without deltas. */
+  sendSnapshot(nodes?: readonly ApiNode[]): void;
+  /** Hold initial/reconnect snapshots until the returned release runs. */
+  holdSnapshots(): () => void;
+  /** Reject the next structural REST write before it mutates the store. */
+  failNextWrite(): void;
 }
 
 /**
@@ -80,6 +225,7 @@ function toNode(n: SeedNode): ApiNode {
  * The store is scoped to this test's `page`. Playwright gives each test its own
  * page/context, so two tests never share state. Register before `page.goto(...)`
  * (every spec does) so the collection's first sync is mocked.
+ *
  */
 export async function seedOutline(
   page: Page,
@@ -87,14 +233,32 @@ export async function seedOutline(
   opts: {
     echoDelayMs?: number;
     postDelayMs?: number;
+    /** Split a structural batch's echo into N frames (chunked ops, consecutive
+     *  seqs, staggered by echoDelayMs each), replying with the FINAL seq —
+     *  mirrors the DO's chunked recordChange (worker/outline-do.ts, issue
+     *  #124), which commits a >500-op batch as multiple consecutive-seq
+     *  changelog rows and echoes them as multiple frames. */
+    echoChunks?: number;
     /** Pre-seed plugin side-collections, keyed by collection namespace (e.g.
      *  `"daily-index"`). Each row is stored as `key -> value` exactly as a write
      *  would land, so the app's first GET returns it. Lets a spec start with a
      *  side-collection already populated (e.g. an existing Daily container) to
      *  exercise the async-load path that a fresh, navigation-free load hits. */
     kv?: Record<string, { key: string; value: unknown }[]>;
+    /** Stamp `serverVersion` onto the `snapshot` frame, as the real DO does
+     *  (ADR 0046). Omitted by default, which is faithful to a DO that predates
+     *  the field AND keeps every other spec free of an update toast; pass a
+     *  version different from package.json's to exercise the stale-tab path. */
+    serverVersion?: string;
+    /** Force every structural-batch POST (`body.ops`) to fail with a 500 before
+     *  it mutates the store, so a spec can drive the save-failure rollback +
+     *  toast path (#230). Reads and the legacy seed POST are untouched, so the
+     *  seeded outline still loads normally. A received 500 resolves the fetch
+     *  (not a transport error), so the client's retry policy doesn't kick in —
+     *  the failure lands immediately. */
+    failStructuralWrites?: boolean;
   } = {},
-): Promise<void> {
+): Promise<SeedOutlineController> {
   const echoDelayMs = opts.echoDelayMs ?? 0;
   // Delay only the structural-batch POST *response* (not its echo). Opens a
   // window to prove the client serializes batches: a second batch must not be
@@ -111,17 +275,29 @@ export async function seedOutline(
   // seq so the client can hold its optimistic overlay until the echo lands.
   let seq = 0;
   let socket: WebSocketRoute | null = null;
-  const broadcast = (ops: ApiChangeOp[]): number => {
+  let snapshotGate: Promise<void> | null = null;
+  const broadcast = (
+    ops: readonly ApiChangeOp[],
+    extraDelayMs = 0,
+    clientId?: string,
+  ): number => {
     seq += 1;
     const at = seq;
-    const frame = JSON.stringify({ type: "change", seq: at, ops });
+    const frame = JSON.stringify(
+      clientId === undefined
+        ? { type: "change", seq: at, ops }
+        : { type: "change", seq: at, ops, clientId },
+    );
     const deliver = () => socket?.send(frame);
-    if (echoDelayMs > 0) setTimeout(deliver, echoDelayMs);
+    const delay = echoDelayMs + extraDelayMs;
+    if (delay > 0) setTimeout(deliver, delay);
     else deliver();
     return at;
   };
+  const echoChunks = opts.echoChunks ?? 1;
+  let failNextStructuralWrite = false;
 
-  const reply = (route: Route, data: unknown) =>
+  const reply = <T>(route: Route, data: T) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -162,18 +338,48 @@ export async function seedOutline(
         case "GET":
           return reply(route, [...store.values()]);
         case "POST": {
-          const body = req.postDataJSON() as {
-            ops?: ApiChangeOp[];
-            nodes?: ApiNode[];
-          };
+          const body = Schema.decodeUnknownSync(NodesPostBody)(
+            req.postDataJSON(),
+          );
           // Atomic structural batch: apply every op, commit ONE frame, reply with
           // its seq (mirrors the DO's applyBatch -> { seq }).
           if (body.ops) {
+            if (body.expectedSeq !== undefined && body.expectedSeq !== seq) {
+              return route.fulfill({
+                status: 409,
+                contentType: "application/json",
+                body: JSON.stringify({ error: "stale_outline" }),
+              });
+            }
+            // Injected failure (#230): reject the batch BEFORE touching the
+            // store, so the optimistic overlay rolls back and the save-failure
+            // toast fires.
+            if (opts.failStructuralWrites || failNextStructuralWrite) {
+              failNextStructuralWrite = false;
+              return route.fulfill({
+                status: 500,
+                contentType: "application/json",
+                body: JSON.stringify({ error: "boom" }),
+              });
+            }
             for (const op of body.ops) {
               if (op.op === "delete") store.delete(op.key);
               else store.set(op.value.id, op.value);
             }
-            const at = broadcast(body.ops);
+            let at: number;
+            if (echoChunks > 1 && body.ops.length > 1) {
+              const size = Math.ceil(body.ops.length / echoChunks);
+              at = 0;
+              for (let i = 0; i * size < body.ops.length; i++) {
+                at = broadcast(
+                  body.ops.slice(i * size, (i + 1) * size),
+                  i * echoDelayMs,
+                  body.clientId,
+                );
+              }
+            } else {
+              at = broadcast(body.ops, 0, body.clientId);
+            }
             if (postDelayMs > 0) {
               await new Promise((r) => setTimeout(r, postDelayMs));
             }
@@ -185,13 +391,13 @@ export async function seedOutline(
             value: n,
           }));
           for (const n of body.nodes ?? []) store.set(n.id, n);
-          if (ops.length) broadcast(ops);
+          if (ops.length) broadcast(ops, 0, body.clientId);
           return reply(route, { ok: true });
         }
         case "PATCH": {
-          const { updates } = req.postDataJSON() as {
-            updates: { id: string; changes: Partial<ApiNode> }[];
-          };
+          const { updates, clientId } = Schema.decodeUnknownSync(
+            NodesPatchBody,
+          )(req.postDataJSON());
           const ops: ApiChangeOp[] = [];
           for (const u of updates ?? []) {
             const cur = store.get(u.id);
@@ -201,17 +407,19 @@ export async function seedOutline(
               ops.push({ op: "update", value: next });
             }
           }
-          if (ops.length) broadcast(ops);
-          return reply(route, { ok: true });
+          if (ops.length) broadcast(ops, 0, clientId);
+          return reply(route, { ok: true, seq });
         }
         case "DELETE": {
-          const { ids } = req.postDataJSON() as { ids: string[] };
+          const { ids, clientId } = Schema.decodeUnknownSync(NodesDeleteBody)(
+            req.postDataJSON(),
+          );
           const ops: ApiChangeOp[] = [];
           for (const id of ids ?? []) {
             store.delete(id);
             ops.push({ op: "delete", key: id });
           }
-          if (ops.length) broadcast(ops);
+          if (ops.length) broadcast(ops, 0, clientId);
           return reply(route, { ok: true });
         }
         default:
@@ -236,11 +444,40 @@ export async function seedOutline(
     return m;
   };
 
+  // Legacy accounts canonicalize their effective Monday default through the
+  // same authoritative endpoint used to switch to Sunday. Most editor specs
+  // have no Calendar scaffold to migrate, so mirror the endpoint's preference
+  // write and sequence receipt while the pure migration tests cover its graph
+  // rewrite in detail.
+  await page.route(
+    (url) => url.pathname === "/api/daily/week-start",
+    (route) => {
+      const body = Schema.decodeUnknownSync(WeekStartPostBody)(
+        route.request().postDataJSON(),
+      );
+      // SAFETY: only this fixture's week-start route writes this account-prefs
+      // key, always with the optional weekStart shape below.
+      const current = ns("account-prefs").get("daily:week-start") as
+        | { weekStart?: "sunday" | "monday" }
+        | undefined;
+      const weekStart =
+        body.operation === "set"
+          ? body.weekStart
+          : (current?.weekStart ?? "monday");
+      ns("account-prefs").set("daily:week-start", {
+        key: "daily:week-start",
+        weekStart,
+      });
+      return reply(route, { weekStart, seq });
+    },
+  );
+
   await page.route(
     (url) => url.pathname === "/api/kv",
     async (route) => {
       const req = route.request();
-      const collection = new URL(req.url()).searchParams.get("collection") ?? "";
+      const collection =
+        new URL(req.url()).searchParams.get("collection") ?? "";
       const m = ns(collection);
       switch (req.method()) {
         case "GET":
@@ -251,21 +488,22 @@ export async function seedOutline(
           // wins). The per-page Map IS the single source, so two claims for the
           // same key here resolve to one winner -- exactly as the real DO does.
           if (new URL(req.url()).searchParams.get("op") === "claim") {
-            const { key, value } = req.postDataJSON() as {
-              key: string;
-              value: unknown;
-            };
+            const { key, value } = Schema.decodeUnknownSync(KvClaimBody)(
+              req.postDataJSON(),
+            );
             if (!m.has(key)) m.set(key, value);
             return reply(route, { value: m.get(key) });
           }
-          const { rows } = req.postDataJSON() as {
-            rows: { key: string; value: unknown }[];
-          };
+          const { rows } = Schema.decodeUnknownSync(KvUpsertBody)(
+            req.postDataJSON(),
+          );
           for (const r of rows ?? []) m.set(r.key, r.value);
           return reply(route, { ok: true });
         }
         case "DELETE": {
-          const { keys } = req.postDataJSON() as { keys: string[] };
+          const { keys } = Schema.decodeUnknownSync(KvDeleteBody)(
+            req.postDataJSON(),
+          );
           for (const k of keys ?? []) m.delete(k);
           return reply(route, { ok: true });
         }
@@ -283,17 +521,57 @@ export async function seedOutline(
     (url) => url.pathname === "/api/sync",
     (ws) => {
       socket = ws;
-      ws.onMessage(() =>
+      ws.onMessage(async () => {
+        if (snapshotGate) await snapshotGate;
         ws.send(
           JSON.stringify({
             type: "snapshot",
             seq,
             nodes: [...store.values()],
+            serverVersion: opts.serverVersion,
           }),
-        ),
-      );
+        );
+      });
     },
   );
+
+  return {
+    async injectExternalChange(ops) {
+      for (const op of ops) {
+        if (op.op === "delete") store.delete(op.key);
+        else store.set(op.value.id, op.value);
+      }
+      return broadcast(ops);
+    },
+    sendSnapshot(nodes) {
+      if (nodes) {
+        store.clear();
+        for (const node of nodes) store.set(node.id, node);
+        seq++;
+      }
+      socket?.send(
+        JSON.stringify({
+          type: "snapshot",
+          seq,
+          nodes: [...store.values()],
+          serverVersion: opts.serverVersion,
+        }),
+      );
+    },
+    holdSnapshots() {
+      let release!: () => void;
+      snapshotGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => {
+        snapshotGate = null;
+        release();
+      };
+    },
+    failNextWrite() {
+      failNextStructuralWrite = true;
+    },
+  };
 }
 
 /**
@@ -313,5 +591,10 @@ export const STANDARD_TREE: SeedNode[] = [
   { id: "bravo", parentId: null, prevSiblingId: "alpha", text: "Bravo" },
   { id: "charlie", parentId: null, prevSiblingId: "bravo", text: "Charlie" },
   { id: "alpha-1", parentId: "alpha", prevSiblingId: null, text: "Alpha one" },
-  { id: "alpha-2", parentId: "alpha", prevSiblingId: "alpha-1", text: "Alpha two" },
+  {
+    id: "alpha-2",
+    parentId: "alpha",
+    prevSiblingId: "alpha-1",
+    text: "Alpha two",
+  },
 ];

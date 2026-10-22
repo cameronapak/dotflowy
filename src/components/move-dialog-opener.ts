@@ -12,9 +12,12 @@ export function setMoveDialogOpener(fn: typeof opener) {
 /** Open the destination picker for one node (the `/move` // `/mirror` commands)
  *  or several (node multi-selection's Move / Mirror action -- ADR 0018). A single
  *  id is normalized to a one-element run; `mode` defaults to a plain move. */
+const isSingleNode = (ids: string | string[]): ids is string =>
+  typeof ids === "string";
+
 export function openMoveDialog(
   nodeIds: string | string[],
   mode: MoveMode = "move",
 ) {
-  opener?.(typeof nodeIds === "string" ? [nodeIds] : nodeIds, mode);
+  opener?.(isSingleNode(nodeIds) ? [nodeIds] : nodeIds, mode);
 }

@@ -1,12 +1,19 @@
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import { useLayoutEffect, useState, type RefObject } from "react";
+
 import type { Node } from "../data/schema";
-import { keymapSpecs } from "../plugins/registry";
 import type { PluginContext } from "../plugins/types";
+import type { NodeCommands } from "./node-commands";
+
 import { selectSingle } from "../data/selection-state";
-import { getCaretOffset, readSource } from "./inline-code";
-import { openLinkAtCaret } from "./link-keymap";
-import type { NodeCommands } from "./OutlineNode";
+import { dispatchClick, keymapSpecs } from "../plugins/registry";
+import {
+  getCaretOffset,
+  getSelectedAtom,
+  readSource,
+  selectAdjacentAtom,
+} from "./inline-code";
+import { openInlineTargetAtCaret } from "./link-keymap";
 
 interface BulletKeymapArgs {
   node: Node;
@@ -29,15 +36,16 @@ interface BulletKeymapArgs {
 }
 
 /**
- * Outline keyboard shortcuts, scoped to ONE bullet's contentEditable via
- * `target: textRef`. Scoping to the element is what lets single keys
- * (Enter/Tab/Backspace/Arrows) fire from a contentEditable -- the manager only
- * ignores input elements that aren't the registration's own target.
+ * Outline keyboard shortcuts for ONE bullet's contentEditable. Most bind
+ * through `target: textRef`; Backspace binds directly below for iPhone Safari.
+ * Element scoping lets single keys fire from a contentEditable -- the manager
+ * only ignores input elements that aren't the registration's own target.
  *
- * Extracted from OutlineNodeBody so the body stays readable; the wiring is
- * unchanged. Caret-conditional keys (Backspace/Arrows) opt out of the default
+ * Extracted from the row body so the body stays readable. Caret-conditional
+ * arrows opt out of the default
  * preventDefault/stopPropagation and call them manually only when they actually
- * act, so normal in-line editing and caret movement still work.
+ * act, so normal caret movement still works. Backspace uses the direct native
+ * listener below because iPhone Safari can beat the focus-gated registration.
  */
 /** Stable empty keymap for unfocused bullets, so an unfocused re-render never
  *  hands `useHotkeys` a fresh array (which would re-run its registration work). */
@@ -87,6 +95,59 @@ export function useBulletKeymap({
     };
   }, [textRef]);
 
+  // Software keyboards can send either Backspace or beforeinput deletion
+  // intent. The iPhone trace has no beforeinput on an empty contentEditable.
+  // Bind the whole Backspace-at-start decision directly, without waiting for
+  // focus-gated hotkeys to register: task demotion, empty-node deletion, and
+  // non-empty joining must all survive that Safari event sequence.
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el || !enabled) return;
+    const handleBackspace = (e: Event) => {
+      if (
+        e.defaultPrevented ||
+        !e.cancelable ||
+        document.activeElement !== el ||
+        !isCaretAtStart(el)
+      )
+        return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (node.isTask) {
+        commands.onSetTask(node.id, false);
+      } else if (readSource(el) === "") {
+        // Source, not textContent: a folded token can render as an empty atom.
+        // INSTANCE, not content: mirrors pass the source as `node` (ADR 0022).
+        commands.onDeleteNode(instanceId);
+      } else {
+        commands.onJoinPrevious(instanceId);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key !== "Backspace" ||
+        e.isComposing ||
+        e.ctrlKey ||
+        e.altKey ||
+        e.metaKey
+      )
+        return;
+      // Shift does not change Backspace behavior. Capture keeps another key
+      // handler from acting on the same deletion intent.
+      handleBackspace(e);
+    };
+    const onBeforeInput = (e: InputEvent) => {
+      if (e.inputType === "deleteContentBackward" && !e.isComposing)
+        handleBackspace(e);
+    };
+    el.addEventListener("keydown", onKeyDown, true);
+    el.addEventListener("beforeinput", onBeforeInput);
+    return () => {
+      el.removeEventListener("keydown", onKeyDown, true);
+      el.removeEventListener("beforeinput", onBeforeInput);
+    };
+  }, [textRef, enabled, node.isTask, node.id, instanceId, commands]);
+
   useHotkeys(
     focused
       ? [
@@ -98,10 +159,17 @@ export function useBulletKeymap({
           ...keymapSpecs.map((k) => ({
             // KeymapSpec.hotkey is a plain string (plugin contract stays library-
             // agnostic); the manager wants its RegisterableHotkey union here.
+            // SAFETY: KeymapSpec.hotkey is documented as a react-hotkeys combo string
             hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
             callback: () => {
               const el = textRef.current;
-              if (k.hotkey === "Mod+Enter" && el && openLinkAtCaret(el)) return;
+              if (
+                k.hotkey === "Mod+Enter" &&
+                el &&
+                openInlineTargetAtCaret(el, pluginCtx(), { linkParens: "edit" })
+              ) {
+                return;
+              }
               k.run(node.id, pluginCtx());
             },
           })),
@@ -110,13 +178,53 @@ export function useBulletKeymap({
             // text to its right moves into a new sibling below (caret at the end is
             // just the empty-tail case of the same split).
             hotkey: "Enter",
-            callback: () => {
+            callback: (e) => {
               const el = textRef.current;
+              if (el) {
+                const atom = getSelectedAtom(el);
+                if (atom) {
+                  const rect = atom.getBoundingClientRect();
+                  const handled = dispatchClick(atom, pluginCtx(), {
+                    preventDefault: () => e.preventDefault(),
+                    stopPropagation: () => e.stopPropagation(),
+                    clientX: rect.left + rect.width / 2,
+                    clientY: rect.top + rect.height / 2,
+                    source: "keyboard",
+                  });
+                  if (handled) return;
+                }
+              }
               commands.onEnter(
                 node.id,
                 el ? getCaretOffset(el) : node.text.length,
               );
             },
+          },
+          {
+            // Space on a selected atom activates that atom's secondary keyboard
+            // action. Plain text space remains native.
+            hotkey: "Space",
+            callback: (e) => {
+              const el = textRef.current;
+              const atom = el ? getSelectedAtom(el) : null;
+              if (!atom) return;
+              // An atom is selected (a range around a contenteditable=false
+              // widget): a native space would REPLACE it, silently dropping the
+              // token. Always swallow the space here; then activate the atom's
+              // keyboard action if a plugin claims it.
+              e.preventDefault();
+              e.stopPropagation();
+              const rect = atom.getBoundingClientRect();
+              dispatchClick(atom, pluginCtx(), {
+                preventDefault: () => e.preventDefault(),
+                stopPropagation: () => e.stopPropagation(),
+                clientX: rect.left + rect.width / 2,
+                clientY: rect.top + rect.height / 2,
+                source: "keyboard",
+                key: " ",
+              });
+            },
+            options: { preventDefault: false, stopPropagation: false },
           },
           {
             // Shift+Enter: same as Enter -- split into a sibling, never insert a
@@ -156,38 +264,15 @@ export function useBulletKeymap({
             callback: () => commands.onMoveDown(node.id),
           },
           {
-            // Backspace at the start of a bullet. On a task, the first backspace
-            // "deletes the checkbox" -- demoting it to a plain bullet while keeping
-            // the text (mirrors the "[ ]" autoformat). On an empty plain bullet, it
-            // deletes the node and focuses the previous one. Otherwise it falls
-            // through to normal character deletion.
-            hotkey: "Backspace",
-            callback: (e) => {
-              const el = textRef.current;
-              if (!el || !isCaretAtStart(el)) return;
-              if (node.isTask) {
-                e.preventDefault();
-                e.stopPropagation();
-                commands.onSetTask(node.id, false);
-                return;
-              }
-              if (el.textContent !== "") return;
-              e.preventDefault();
-              e.stopPropagation();
-              commands.onDeleteNode(node.id);
-            },
-            options: { preventDefault: false, stopPropagation: false },
-          },
-          {
             // Cmd/Ctrl+Shift+Delete: delete this bullet and its whole subtree,
             // regardless of text or caret position. On Mac "delete" is the
             // Backspace key; register Delete too for the forward-delete key.
             hotkey: "Mod+Shift+Backspace",
-            callback: () => commands.onDeleteNode(node.id),
+            callback: () => commands.onDeleteNode(instanceId),
           },
           {
             hotkey: "Mod+Shift+Delete",
-            callback: () => commands.onDeleteNode(node.id),
+            callback: () => commands.onDeleteNode(instanceId),
           },
           {
             // Shift+ArrowUp from the top visual line: ENTER node multi-selection
@@ -283,7 +368,12 @@ export function useBulletKeymap({
             hotkey: "ArrowLeft",
             callback: (e) => {
               const el = textRef.current;
-              if (!el || !isCollapsedCaretAtStart(el)) return;
+              if (el && selectAdjacentAtom(el, "left")) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+              }
+              if (!el || !isCaretAtStart(el)) return;
               e.preventDefault();
               e.stopPropagation();
               commands.onMoveFocus(node.id, "up");
@@ -295,6 +385,11 @@ export function useBulletKeymap({
             hotkey: "ArrowRight",
             callback: (e) => {
               const el = textRef.current;
+              if (el && selectAdjacentAtom(el, "right")) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+              }
               if (!el || !isCaretAtEnd(el)) return;
               e.preventDefault();
               e.stopPropagation();
@@ -351,11 +446,22 @@ function isAllTextSelected(el: HTMLElement): boolean {
   return text.length > 0 && sel.toString() === text;
 }
 
-// Caret at the very start of the bullet, measured by absolute offset so the
-// test holds whether the line is one text node or split around chips.
+// Collapsed caret at the very start of the bullet, measured by absolute offset
+// so the test holds whether the line is one text node or split around chips.
+//
+// Deliberately fails CLOSED. `getCaretOffset` returns the literal 0 for three
+// different states -- no selection, a range outside this element, and a genuine
+// caret at offset 0 -- so the containment and collapse checks have to happen
+// here. This used to fail open (no selection => "at start"), which was tolerable
+// while both outcomes were non-destructive; now a false "at start" would MERGE
+// this bullet into the one above, and a non-collapsed selection ending at 0
+// would merge while text is selected.
 function isCaretAtStart(el: HTMLElement): boolean {
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return true;
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  const range = sel.getRangeAt(0);
+  if (!el.contains(range.startContainer) || !el.contains(range.endContainer))
+    return false;
   return getCaretOffset(el) === 0;
 }
 
@@ -363,11 +469,6 @@ function isCaretAtEnd(el: HTMLElement): boolean {
   const sel = window.getSelection();
   if (!sel || !sel.isCollapsed || sel.rangeCount === 0) return false;
   return getCaretOffset(el) === readSource(el).length;
-}
-
-function isCollapsedCaretAtStart(el: HTMLElement): boolean {
-  const sel = window.getSelection();
-  return !!sel && sel.isCollapsed && isCaretAtStart(el);
 }
 
 // Caret-to-neighbor navigation is about VISUAL lines, not text offset: on a
@@ -389,7 +490,7 @@ function caretLineRect(): DOMRect | null {
   return rect.height === 0 ? null : rect;
 }
 
-function atLineStart(el: HTMLElement): boolean {
+export function atLineStart(el: HTMLElement): boolean {
   const rect = caretLineRect();
   // No measurable caret (e.g. empty bullet) -> treat as the first line so Up
   // crosses to the neighbor.

@@ -10,9 +10,16 @@
  * revalidation, no credential forwarding, a timeout, a byte cap, a content-type
  * gate). The route in worker/index.ts gates it behind the session + a rate limit.
  *
- * The pure decisions (target guard, title sanitizer, the http(s) param check)
- * live in unfurl-core.ts so they import cleanly under `bun test`; this module is
- * the impure half (fetch + HTMLRewriter) and needs the CF runtime.
+ * Effect-shaped (ADR 0021): `unfurlTitleE` is the program the Worker router
+ * yields; timeout + interruption ride Effect's AbortSignal into each hop fetch,
+ * and the body reader is released via `Effect.ensuring`. The public contract is
+ * still `string | null` — every "couldn't get a title" reason collapses to null
+ * (ADR 0016); typed errors would buy the client nothing.
+ *
+ * The pure decisions (target guard, YouTube video identity, title sanitizer,
+ * the http(s) param check) live in unfurl-core.ts so they import cleanly under
+ * `bun test`; this module is the impure half (fetch + HTMLRewriter) and needs
+ * the CF runtime.
  *
  * The HTMLRewriter title extraction is adapted from tldraw/cloudflare-workers-unfurl
  * (MIT License, https://github.com/tldraw/cloudflare-workers-unfurl) -- its own
@@ -21,133 +28,259 @@
  * so its description/image/favicon handlers are intentionally dropped.
  */
 
-import { isAllowedUnfurlTarget, sanitizeServerTitle } from './unfurl-core'
+import { Duration, Effect, Schema } from "effect";
 
-export { isHttpUrlString } from './unfurl-core'
+import {
+  canonicalYouTubeVideoUrl,
+  isAllowedUnfurlTarget,
+  sanitizeServerTitle,
+} from "./unfurl-core";
 
-const TIMEOUT_MS = 5_000
-const MAX_BYTES = 64 * 1024
-const MAX_REDIRECTS = 3
-const USER_AGENT = 'dotflowy-bot/1.0 (+https://app.dotflowy.com)'
+export { isHttpUrlString } from "./unfurl-core";
+
+const TIMEOUT_MS = 5_000;
+const MAX_BYTES = 64 * 1024;
+const MAX_REDIRECTS = 3;
+const USER_AGENT = "dotflowy-bot/1.0 (+https://app.dotflowy.com)";
+const HTML_ACCEPT = "text/html,application/xhtml+xml";
+const JSON_ACCEPT = "application/json";
+const decodeYouTubeOembed = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ title: Schema.String })),
+);
 
 /** Cross-user cache key (titles are public, not user-specific). A synthetic
- *  same-shape Request keyed on the normalized url. */
+ *  same-shape Request keyed on the original URL, or a provider identity when
+ *  the same public resource has multiple URL forms. */
 function cacheKey(url: string): Request {
-  return new Request(`https://unfurl-cache.dotflowy.invalid/?u=${encodeURIComponent(url)}`)
+  return new Request(
+    `https://unfurl-cache.dotflowy.invalid/?u=${encodeURIComponent(url)}`,
+  );
 }
 
 /** GET the page with redirects handled manually so each hop is re-validated
  *  against the SSRF guard. Returns the final non-redirect Response, or null if a
  *  hop is disallowed / there are too many hops / a hop has no Location. */
-async function fetchManual(url: string, signal: AbortSignal): Promise<Response | null> {
-  let current = url
+export const fetchManualE = Effect.fnUntraced(function* (
+  url: string,
+  accept = HTML_ACCEPT,
+  allowedTarget: (target: string) => boolean = () => true,
+) {
+  let current = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    if (!isAllowedUnfurlTarget(current)) return null
-    const res = await fetch(current, {
-      method: 'GET',
-      redirect: 'manual',
-      signal,
-      // Anonymous: none of the user's cookies/headers are forwarded.
-      headers: { accept: 'text/html,application/xhtml+xml', 'user-agent': USER_AGENT },
-    })
+    if (!isAllowedUnfurlTarget(current) || !allowedTarget(current)) return null;
+    const res: Response = yield* Effect.tryPromise({
+      try: (signal) =>
+        fetch(current, {
+          method: "GET",
+          redirect: "manual",
+          signal,
+          // Anonymous: none of the user's cookies/headers are forwarded.
+          headers: {
+            accept,
+            "user-agent": USER_AGENT,
+          },
+        }),
+      catch: (cause) => cause,
+    });
     if (res.status >= 300 && res.status < 400) {
-      const loc = res.headers.get('location')
-      if (!loc) return null
-      current = new URL(loc, current).href
-      continue
+      const loc = res.headers.get("location");
+      if (!loc) return null;
+      current = new URL(loc, current).href;
+      continue;
     }
-    return res
+    return res;
   }
-  return null
-}
+  return null;
+});
 
-/** Read at most MAX_BYTES of the body as text, then cancel the stream. The
- *  title + og:title live in `<head>`, far inside 64KB on any real page, so this
- *  bounds memory/time without missing the title. */
-async function readCappedText(res: Response): Promise<string> {
-  const reader = res.body?.getReader()
-  if (!reader) return ''
-  const decoder = new TextDecoder()
-  let out = ''
-  let total = 0
-  try {
-    while (total < MAX_BYTES) {
-      const { done, value } = await reader.read()
-      if (done) break
-      total += value.byteLength
-      out += decoder.decode(value, { stream: true })
-    }
-    out += decoder.decode()
-  } finally {
-    await reader.cancel().catch(() => {})
-  }
-  return out
+/** Read at most MAX_BYTES of the body as text, then cancel the stream. This
+ *  bounds memory/time; providers whose useful metadata sits deeper must expose
+ *  a bounded metadata endpoint, as YouTube does through oEmbed. */
+export function readCappedTextE(res: Response): Effect.Effect<string, unknown> {
+  const reader = res.body?.getReader();
+  if (!reader) return Effect.succeed("");
+  return Effect.tryPromise({
+    try: async () => {
+      const decoder = new TextDecoder();
+      let out = "";
+      let total = 0;
+      while (total < MAX_BYTES) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const remaining = MAX_BYTES - total;
+        const chunk =
+          value.byteLength > remaining ? value.subarray(0, remaining) : value;
+        total += chunk.byteLength;
+        out += decoder.decode(chunk, { stream: true });
+      }
+      out += decoder.decode();
+      return out;
+    },
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.ensuring(
+      Effect.promise(() => reader.cancel().catch(() => undefined)),
+    ),
+  );
 }
 
 /** Extract a title from HTML via HTMLRewriter: prefer og:title, then
  *  twitter:title, then the `<title>` element (og/twitter are usually the clean
  *  page-intended title; raw `<title>` is often cluttered). Adapted from
  *  tldraw/cloudflare-workers-unfurl (MIT). */
-async function extractTitle(html: string): Promise<string | null> {
-  let titleText = ''
-  let ogTitle: string | null = null
-  let twitterTitle: string | null = null
+function extractTitleE(html: string): Effect.Effect<string | null, unknown> {
+  return Effect.tryPromise({
+    try: async () => {
+      let titleText = "";
+      let ogTitle: string | null = null;
+      let twitterTitle: string | null = null;
 
-  await new HTMLRewriter()
-    .on('title', {
-      text(t) {
-        titleText += t.text
-      },
-    })
-    .on('meta', {
-      element(el) {
-        const property = el.getAttribute('property')
-        const name = el.getAttribute('name')
-        if (property === 'og:title') ogTitle = el.getAttribute('content')
-        else if (name === 'twitter:title') twitterTitle = el.getAttribute('content')
-      },
-    })
-    .transform(new Response(html))
-    .arrayBuffer()
+      await new HTMLRewriter()
+        .on("title", {
+          text(t) {
+            titleText += t.text;
+          },
+        })
+        .on("meta", {
+          element(el) {
+            const property = el.getAttribute("property");
+            const name = el.getAttribute("name");
+            if (property === "og:title") ogTitle = el.getAttribute("content");
+            else if (name === "twitter:title")
+              twitterTitle = el.getAttribute("content");
+          },
+        })
+        .transform(new Response(html))
+        .arrayBuffer();
 
-  return ogTitle ?? twitterTitle ?? (titleText || null)
+      return ogTitle ?? twitterTitle ?? (titleText || null);
+    },
+    catch: (cause) => cause,
+  });
 }
+
+/** Fetch YouTube's bounded, keyless oEmbed representation for a canonical video
+ *  URL. Only its title is trusted, and it passes through the same sanitizer as
+ *  HTML titles; malformed/error responses fall back to generic extraction. */
+const fetchYouTubeTitleE = Effect.fnUntraced(function* (
+  canonicalVideoUrl: string,
+) {
+  const endpoint = new URL("https://www.youtube.com/oembed");
+  endpoint.searchParams.set("url", canonicalVideoUrl);
+  endpoint.searchParams.set("format", "json");
+
+  const res = yield* fetchManualE(endpoint.href, JSON_ACCEPT);
+  if (!res || !res.ok) return null;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!/^application\/json/i.test(contentType)) {
+    if (res.body) {
+      yield* Effect.promise(() => res.body!.cancel().catch(() => undefined));
+    }
+    return null;
+  }
+
+  const body = yield* readCappedTextE(res);
+  const data = yield* decodeYouTubeOembed(body).pipe(
+    Effect.orElseSucceed(() => null),
+  );
+  return data ? sanitizeServerTitle(data.title) : null;
+});
+
+/** Generic outbound HTML fetch + extract only (no cache). */
+const fetchHtmlTitleE = Effect.fnUntraced(function* (url: string) {
+  const res = yield* fetchManualE(url);
+  if (!res || !res.ok) return null;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!/^(text\/html|application\/xhtml\+xml)/i.test(contentType)) {
+    if (res.body) {
+      yield* Effect.promise(() => res.body!.cancel().catch(() => undefined));
+    }
+    return null;
+  }
+  return sanitizeServerTitle(yield* extractTitleE(yield* readCappedTextE(res)));
+});
+
+/** Prefer bounded provider metadata for recognized YouTube videos, then retain
+ *  the generic HTML path as the agreed best-effort fallback. */
+const fetchAndExtractE = Effect.fnUntraced(function* (
+  url: string,
+  youtubeVideoUrl: string | null,
+) {
+  if (youtubeVideoUrl) {
+    const title = yield* fetchYouTubeTitleE(youtubeVideoUrl).pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    if (title) return title;
+  }
+  return yield* fetchHtmlTitleE(url);
+});
 
 /**
  * Fetch and return a page's title, or null for any "couldn't get one" reason
  * (disallowed target, non-HTML, unreachable, timed out, no title). Successful
  * non-null results are cached cross-user for 24h; the common "same link pasted
  * again" case then skips the outbound fetch entirely.
+ *
+ * Effect-shaped: the Worker router `yield*`s this. Timeout interrupts in-flight
+ * hop fetches via the runtime AbortSignal (kv-client / links-unfurl parity).
  */
-export async function unfurlTitle(url: string): Promise<string | null> {
-  if (!isAllowedUnfurlTarget(url)) return null
+export const unfurlTitleE = Effect.fnUntraced(function* (url: string) {
+  if (!isAllowedUnfurlTarget(url)) return null;
+  const youtubeVideoUrl = canonicalYouTubeVideoUrl(url);
+  const titleIdentity = youtubeVideoUrl ?? url;
 
-  const cached = await caches.default.match(cacheKey(url))
+  const cached = yield* Effect.tryPromise({
+    try: () => caches.default.match(cacheKey(titleIdentity)),
+    catch: (cause) => cause,
+  }).pipe(Effect.orElseSucceed(() => undefined));
   if (cached) {
-    const data = (await cached.json().catch(() => null)) as { title?: string | null } | null
-    return data?.title ?? null
+    const data = yield* Effect.tryPromise({
+      // SAFETY: cache entries are written only by this module as JSON.stringify({ title }).
+      try: () => cached.json() as Promise<{ title?: string | null } | null>,
+      catch: (cause) => cause,
+    }).pipe(Effect.orElseSucceed(() => null));
+    return data?.title ?? null;
   }
 
-  try {
-    const res = await fetchManual(url, AbortSignal.timeout(TIMEOUT_MS))
-    if (!res || !res.ok) return null
-    const contentType = res.headers.get('content-type') ?? ''
-    if (!/^(text\/html|application\/xhtml\+xml)/i.test(contentType)) {
-      await res.body?.cancel().catch(() => {})
-      return null
-    }
-    const title = sanitizeServerTitle(await extractTitle(await readCappedText(res)))
-    if (title) {
-      await caches.default.put(
-        cacheKey(url),
-        new Response(JSON.stringify({ title }), {
-          headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=86400' },
-        }),
-      )
-    }
-    return title
-  } catch {
-    // Timeout, network error, malformed redirect Location -- all "no title".
-    return null
+  const title = yield* fetchAndExtractE(url, youtubeVideoUrl).pipe(
+    Effect.timeoutOrElse({
+      duration: Duration.millis(TIMEOUT_MS),
+      orElse: () => Effect.succeed<string | null>(null),
+    }),
+    Effect.orElseSucceed(() => null),
+  );
+
+  if (title) {
+    yield* Effect.tryPromise({
+      try: () =>
+        caches.default.put(
+          cacheKey(titleIdentity),
+          new Response(JSON.stringify({ title }), {
+            headers: {
+              "content-type": "application/json",
+              "cache-control": "public, max-age=86400",
+            },
+          }),
+        ),
+      catch: (cause) => cause,
+    }).pipe(Effect.orElseSucceed(() => undefined));
   }
+  return title;
+});
+
+/** Promise shell over `unfurlTitleE` for non-Effect call sites. Prefer the
+ *  Effect form inside the Worker pipeline. */
+export function unfurlTitle(url: string): Promise<string | null> {
+  return Effect.runPromise(unfurlTitleE(url));
 }
+
+/** Background authoring paths share the authenticated endpoint's quota. */
+export const rateLimitedTitleE = Effect.fn("Unfurl.rateLimitedTitle")(
+  function* (url: string, limiter: RateLimit, key: string) {
+    const allowed = yield* Effect.tryPromise({
+      try: () => limiter.limit({ key }),
+      catch: (cause) => cause,
+    }).pipe(Effect.orElseSucceed(() => ({ success: false })));
+    return allowed.success ? yield* unfurlTitleE(url) : null;
+  },
+);
