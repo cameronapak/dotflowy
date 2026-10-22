@@ -269,6 +269,11 @@
   flex: 0 0 auto;
   min-width: 0;
 }
+.node-deco:has(.node-deco-track:empty) {
+  /* Registered slots can render null. Keep an empty zone out of the row's
+     flex layout so it does not reserve a gap beside the content. */
+  display: none;
+}
 .node-deco-zone {
   display: flex;
   overflow: hidden;
@@ -364,12 +369,14 @@ h2 span.protection-indicator {
   }
 }
 
-.outline-row.node-acted {
+.outline-row.node-acted,
+.zoomed-title.node-acted {
   animation: node-acted-fade 0.9s ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .outline-row.node-acted {
+  .outline-row.node-acted,
+  .zoomed-title.node-acted {
     animation: none;
   }
 }

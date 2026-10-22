@@ -174,7 +174,7 @@ export function HeaderViewMenu() {
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
   const { index } = useTree();
-  const rootId = useParams({ strict: false }).nodeId;
+  const rootId = useParams({ strict: false }).nodeId ?? null;
   const current = rootId ? index.byId.get(rootId) : null;
 
   return (
@@ -244,18 +244,32 @@ export function HeaderViewMenu() {
         </DropdownMenuCheckboxItem>
 
         {globalActions
-          .filter((action) => action.menuLabel && action.checked !== undefined)
-          .map((action) => (
-            <DropdownMenuCheckboxItem
-              key={action.id}
-              checked={action.checked}
-              disabled={action.disabled}
-              onCheckedChange={() => action.run()}
-            >
-              <action.icon />
-              {action.menuLabel}
-            </DropdownMenuCheckboxItem>
-          ))}
+          .filter(
+            (action) =>
+              action.menuLabel && (action.available?.(rootId) ?? true),
+          )
+          .map((action) =>
+            action.checked === undefined ? (
+              <DropdownMenuItem
+                key={action.id}
+                disabled={action.disabled}
+                onClick={() => action.run(rootId)}
+              >
+                <action.icon />
+                {action.menuLabel}
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuCheckboxItem
+                key={action.id}
+                checked={action.checked}
+                disabled={action.disabled}
+                onCheckedChange={() => action.run(rootId)}
+              >
+                <action.icon />
+                {action.menuLabel}
+              </DropdownMenuCheckboxItem>
+            ),
+          )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

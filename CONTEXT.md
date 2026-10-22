@@ -123,6 +123,10 @@ _Avoid_: plugin unloading, access control
 A writing view that displays outline text in a scribble font, including the active node, to reduce distraction and rereading while you write. It changes appearance, not text source, and is distinct from a Spoiler.
 _Avoid_: redaction, hidden text, privacy mode
 
+**Focus session**:
+A time-boxed commitment to one node that you choose to work on. It stays visible while you work anywhere in the outline, and it ends when you finish, let it go, or end it early. Starting one changes neither the node nor where you are.
+_Avoid_: focus mode (Spotlight is the dimming view mode), timer, pomodoro (one way to run a session)
+
 **View menu**:
 The header menu for the outline view you are looking at: actions scoped to the current zoom root, and display modes such as Show completed and Spotlight mode.
 _Avoid_: More menu, overflow menu, options menu

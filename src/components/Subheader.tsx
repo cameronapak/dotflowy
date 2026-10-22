@@ -27,7 +27,7 @@ import { SUBHEADER_EXPAND_MS } from "./subheader-expand";
 export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
   const { subheaderSlots } = usePluginChrome();
   const reduceMotion = useReducedMotion();
-  const contentRef = useRef<HTMLElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const [{ open, height, measured, snapOpen }, setBand] = useState({
     open: false,
@@ -50,7 +50,11 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
     const content = contentRef.current;
     const shell = shellRef.current;
     if (!content || !shell) return;
-    const has = content.childElementCount > 0;
+    const has = Array.from(content.children).some((child) =>
+      child.hasAttribute("data-subheader-shared")
+        ? child.childElementCount > 0
+        : true,
+    );
     const shouldSnapOpen = Boolean(
       has &&
       !openRef.current &&
@@ -120,22 +124,28 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
         ref={shellRef}
         className={cn("bg-muted/30", open && "border-b border-border")}
       >
-        <section
-          ref={contentRef}
-          aria-label="Active filters"
-          className={cn(
-            "mx-auto flex max-w-[720px] flex-wrap items-center gap-2",
-            open && "px-6 py-2 max-sm:px-4",
-          )}
-        >
-          {/* The `?q=` filter is CORE chrome (ADR 0047 §6); it sits beside the
+        <div ref={contentRef}>
+          {subheaderSlots
+            .filter((s) => s.placement === "full-width")
+            .map((s) => (
+              <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
+            ))}
+          <section
+            data-subheader-shared
+            aria-label="Active filters"
+            className="mx-auto flex max-w-[720px] flex-wrap items-center gap-2 px-6 py-2 empty:hidden max-sm:px-4"
+          >
+            {/* The `?q=` filter is CORE chrome (ADR 0047 §6); it sits beside the
               plugin subheader slots the way core commands sit beside plugin
               commands. Renders nothing when idle, so the band still collapses. */}
-          <QueryFilterBar />
-          {subheaderSlots.map((s) => (
-            <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
-          ))}
-        </section>
+            <QueryFilterBar />
+            {subheaderSlots
+              .filter((s) => s.placement !== "full-width")
+              .map((s) => (
+                <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
+              ))}
+          </section>
+        </div>
       </div>
     </motion.div>
   );

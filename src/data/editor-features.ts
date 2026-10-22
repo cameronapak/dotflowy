@@ -7,6 +7,11 @@ import { hasWindow } from "../env";
 import { subscribeCalendarSync } from "./calendar-sync";
 import { resyncNodes, waitForSeqStrictE } from "./collection";
 import { DEFAULT_WEEK_START, type WeekStart } from "./date-links";
+import {
+  DEFAULT_FOCUS_SETTINGS,
+  focusSettingsSchema,
+  type FocusSettings,
+} from "./focus-settings";
 import { kvFetch, kvPut, toKvRows } from "./kv-api";
 import { queryClient } from "./query-client";
 
@@ -19,6 +24,7 @@ const KEYS = {
   dayStream: "daily:day-stream",
   weekStrip: "daily:week-strip",
   emptyDays: "daily:empty-days",
+  focus: "focus:settings",
 } as const;
 export type EditorFeature = "bible" | "daily" | "embeds";
 /** A Daily notes option that is a plain on/off switch (ADR 0070). */
@@ -53,6 +59,10 @@ const rowSchema = Schema.Union([
   weekStartRowSchema,
   dailyToggleRowSchema,
   emptyDaysRowSchema,
+  Schema.Struct({
+    key: Schema.Literal(KEYS.focus),
+    settings: focusSettingsSchema,
+  }),
 ]);
 type PreferenceRow = Schema.Schema.Type<typeof rowSchema>;
 const isPreferenceKey = Schema.is(
@@ -66,6 +76,7 @@ const isPreferenceKey = Schema.is(
       KEYS.dayStream,
       KEYS.weekStrip,
       KEYS.emptyDays,
+      KEYS.focus,
     ]),
   }),
 );
@@ -110,6 +121,7 @@ interface FeatureSnapshot {
   dayStream: boolean;
   weekStrip: boolean;
   emptyDays: EmptyDaysMode;
+  focus: FocusSettings;
   ready: boolean;
   error: boolean;
 }
@@ -124,6 +136,7 @@ const INITIAL: FeatureSnapshot = {
   dayStream: true,
   weekStrip: true,
   emptyDays: "show",
+  focus: DEFAULT_FOCUS_SETTINGS,
   ready: false,
   error: false,
 };
@@ -147,6 +160,9 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
   const dayStreamRow = rows.find((r) => r.key === KEYS.dayStream);
   const weekStripRow = rows.find((r) => r.key === KEYS.weekStrip);
   const emptyDaysRow = rows.find((r) => r.key === KEYS.emptyDays);
+  const focusRow = rows.find((r) => r.key === KEYS.focus);
+  const focus =
+    focusRow?.key === KEYS.focus ? focusRow.settings : DEFAULT_FOCUS_SETTINGS;
   // Missing rows mean the defaults (ADR 0070).
   const dayStream =
     dayStreamRow && "enabled" in dayStreamRow ? dayStreamRow.enabled : true;
@@ -183,6 +199,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     snapshot.dayStream === dayStream &&
     snapshot.weekStrip === weekStrip &&
     snapshot.emptyDays === emptyDays &&
+    snapshot.focus === focus &&
     snapshot.ready === ready &&
     snapshot.error === error
   )
@@ -198,6 +215,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     dayStream,
     weekStrip,
     emptyDays,
+    focus,
     ready,
     error,
   };
@@ -315,6 +333,17 @@ export async function setEmptyDaysMode(mode: EmptyDaysMode): Promise<void> {
         if ("emptyDays" in draft) draft.emptyDays = mode;
       })
     : collection.insert({ key, emptyDays: mode });
+  await transaction.isPersisted.promise;
+}
+
+export async function setFocusSettings(settings: FocusSettings): Promise<void> {
+  await loadEditorFeatures();
+  const key = KEYS.focus;
+  const transaction = collection.has(key)
+    ? collection.update(key, (draft) => {
+        if ("settings" in draft) draft.settings = settings;
+      })
+    : collection.insert({ key, settings });
   await transaction.isPersisted.promise;
 }
 

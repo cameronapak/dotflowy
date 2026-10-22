@@ -60,6 +60,13 @@ test.each([
   ["http://app.localhost/", false],
   ["http://printer.local/", false],
   ["http://db.internal/", false],
+  // Normalize the entire DNS root-dot suffix before checking hostnames.
+  ["http://db.internal./", false],
+  ["http://db.internal../", false],
+  ["http://printer.local.../", false],
+  ["http://app.localhost../", false],
+  ["https://X.COM../jack/status/20", false],
+  ["https://example.com./", true],
   // Private, loopback, link-local, and CGNAT IPv4 literals.
   ["http://127.0.0.1/", false],
   ["http://10.0.0.5/", false],
