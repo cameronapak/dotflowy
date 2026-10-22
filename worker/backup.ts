@@ -8,13 +8,17 @@
  * docs/runbooks/offsite-backup-r2.md.
  */
 
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 import { NodeSchema } from "../src/data/wire-schema";
 
 /** Bump when the snapshot shape changes; the restore path refuses a version it
  *  doesn't know rather than guessing at a partial read. */
-export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_VERSION = 2;
+
+export function isSupportedSnapshotVersion(version: number): boolean {
+  return version === 1 || version === SNAPSHOT_VERSION;
+}
 
 /**
  * A kv side-collection row exactly as the DO's SQLite stores it: `value` stays
@@ -37,13 +41,37 @@ export type SnapshotKvRow = Schema.Schema.Type<typeof SnapshotKvRowSchema>;
  * the restore boundary instead of inserting `undefined` into SQLite. `seq` +
  * `exportedAt` are observability metadata, not restore inputs.
  */
-export const OutlineSnapshotSchema = Schema.Struct({
-  version: Schema.Number,
+const SnapshotFields = {
   exportedAt: Schema.Number,
   seq: Schema.Number,
-  nodes: Schema.Array(NodeSchema),
   kv: Schema.Array(SnapshotKvRowSchema),
+};
+
+const CurrentOutlineSnapshotSchema = Schema.Struct({
+  version: Schema.Literal(SNAPSHOT_VERSION),
+  ...SnapshotFields,
+  nodes: Schema.Array(NodeSchema),
 });
+
+// Version 1 predates owner locks. Compatibility belongs only at this persisted
+// backup boundary; current wire nodes remain strict and always require locked.
+const LegacySnapshotNodeSchema = Schema.Struct({
+  ...NodeSchema.fields,
+  locked: NodeSchema.fields.locked.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+  ),
+});
+
+const LegacyOutlineSnapshotSchema = Schema.Struct({
+  version: Schema.Literal(1),
+  ...SnapshotFields,
+  nodes: Schema.Array(LegacySnapshotNodeSchema),
+});
+
+export const OutlineSnapshotSchema = Schema.Union([
+  CurrentOutlineSnapshotSchema,
+  LegacyOutlineSnapshotSchema,
+]);
 export type OutlineSnapshot = Schema.Schema.Type<typeof OutlineSnapshotSchema>;
 
 /** The UTC calendar date a sweep runs on — one object per DO per day; a re-run

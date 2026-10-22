@@ -1,0 +1,22 @@
+{
+  "disabled": false,
+  "pathTemplate": "~/.humanlayer/workspaces/{{ TASKSLUG }}/{{ REPOBASENAME }}",
+  "branchTemplate": "{{ TASKSLUG }}",
+  "sourceRef": "origin/main",
+  "setupCommand": "bun run bootstrap",
+  "copyGlobs": [
+    ".env",
+    ".env.local",
+    ".env.development.local",
+    ".claude/settings.local.json",
+    ".humanlayer/workspace.local.json",
+    ".dev.vars"
+  ],
+  "repos": [
+    {
+      "localPath": ".",
+      "description": "Dotflowy app + Worker",
+      "primary": true
+    }
+  ]
+}

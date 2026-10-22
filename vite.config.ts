@@ -28,12 +28,21 @@ export default defineConfig({
   build: sentryAuthToken ? { sourcemap: true } : {},
   server: {
     port: 3000,
+    // Amp orb portals proxy the dev server through *.onamp.dev.
+    allowedHosts: [".onamp.dev"],
     // Dev only: proxy the data API to a locally-running Worker + D1
     // (`bun run dev:api` -> wrangler dev on :8787). This keeps Vite HMR for the
     // UI while the real /api/nodes path is served by the Worker against a local
     // D1. In production the same Worker serves both. See docs/adr/0008-sync-via-a-per-user-durable-object.md.
+    // `ws: true` is required — Vite's string shorthand only sets
+    // `{ target, changeOrigin }` and skips the upgrade listener, so
+    // `/api/sync` never reaches wrangler (outline stuck on "Loading outline").
     proxy: {
-      "/api": "http://localhost:8787",
+      "/api": {
+        target: "http://localhost:8787",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   plugins: [

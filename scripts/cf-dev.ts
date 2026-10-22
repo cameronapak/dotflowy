@@ -24,20 +24,17 @@
  * That is the cost of exercising the real Worker + per-user DO path. For pure UI
  * work, `bun run dev` (both servers, HMR) is still the faster loop.
  */
-import { watch as fsWatch, copyFileSync, existsSync } from "node:fs";
+import { watch as fsWatch } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
 const SRC_DIR = resolve(ROOT, "src");
-const CLIENT_DIR = resolve(ROOT, "dist/client");
-const SHELL = resolve(CLIENT_DIR, "_shell.html");
-const INDEX = resolve(CLIENT_DIR, "index.html");
 
 const log = (msg: string) => console.log(`\x1b[36m[cf:dev]\x1b[0m ${msg}`);
 
 /** Run a full `vite build`, then copy the freshly prerendered shell to index.html. */
 async function build(): Promise<boolean> {
-  const proc = Bun.spawn(["bunx", "vite", "build"], {
+  const proc = Bun.spawn(["bun", "run", "build:cf"], {
     cwd: ROOT,
     stdio: ["inherit", "inherit", "inherit"],
   });
@@ -45,10 +42,6 @@ async function build(): Promise<boolean> {
   if (code !== 0) {
     log(`build failed (exit ${code}) - keeping previous dist`);
     return false;
-  }
-  if (existsSync(SHELL)) {
-    copyFileSync(SHELL, INDEX);
-    log("copied _shell.html -> index.html");
   }
   return true;
 }

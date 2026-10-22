@@ -48,8 +48,10 @@ export function resolveRestorePoint(
   input: { at?: string | number; bookmark?: string },
   now: number,
 ): RestorePointResult {
+  const isBookmark = (v: string | undefined): v is string =>
+    typeof v === "string";
   const hasBookmark =
-    typeof input.bookmark === "string" && input.bookmark.trim().length > 0;
+    isBookmark(input.bookmark) && input.bookmark.trim().length > 0;
   const hasAt = input.at !== undefined && input.at !== null && input.at !== "";
 
   if (hasBookmark && hasAt) {
@@ -85,7 +87,8 @@ export function resolveRestorePoint(
 /** Coerce an epoch-ms number or an ISO/date string into finite epoch ms, or null
  *  if it doesn't parse. A bare number is treated as ms already. */
 function parseTimestamp(value: string | number): number | null {
-  if (typeof value === "number") {
+  const isEpochMs = (v: string | number): v is number => typeof v === "number";
+  if (isEpochMs(value)) {
     return Number.isFinite(value) ? value : null;
   }
   const trimmed = value.trim();

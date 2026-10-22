@@ -15,13 +15,26 @@
  * (`Schema.toJsonSchemaDocument`), so the contract `tools/list` publishes and
  * the validator `tools/call` enforces are the same value (ADR 0014's rule).
  * JSON-RPC-level failures (parse, bad request, unknown method/tool, bad args)
- * map to typed error responses; tool-level refusals surface as `isError` tool
- * results; unexpected defects (DO faults) collapse to -32603 without leaking.
+ * map to typed error responses; tool-level refusals and store faults surface
+ * as `isError` tool results carrying their real reason (the caller is the
+ * store owner's own agent; the Lunora shard redacts its fault text upstream,
+ * so that path carries a coded "internal error" instead); only unexpected
+ * non-store defects collapse to -32603.
  */
 
-import { Effect, Schema } from "effect";
+import {
+  Effect,
+  JsonSchema as EffectJsonSchema,
+  Predicate,
+  Schema,
+} from "effect";
 
-import { type OutlineStore, tools } from "./mcp-tools";
+import {
+  type AfterTextWrite,
+  type OutlineStore,
+  type ToolResult,
+  tools,
+} from "./mcp-tools";
 import { APP_VERSION } from "./version";
 
 // --- Protocol constants -------------------------------------------------------
@@ -38,12 +51,22 @@ const SERVER_INFO = {
   name: "dotflowy",
   title: "Dotflowy",
   version: APP_VERSION,
+  // Additive display metadata: icon-aware clients can render it without
+  // changing the protocol revisions this server actually implements.
+  icons: [
+    {
+      src: "https://app.dotflowy.com/icon-192.png",
+      mimeType: "image/png",
+      sizes: ["192x192"],
+    },
+  ],
 };
 
 const SERVER_INSTRUCTIONS =
   'Dotflowy is the user\'s personal outline (nested bullets; some are to-dos; daily notes live under a "Daily" container). ' +
   "Read with get_outline / search_nodes — every line carries the node id the write tools need. " +
-  "add_to_today and mirror_to_today are the fastest ways to put something on the user's daily note; pass the user's local date when you know it.";
+  "add_to_today and mirror_to_today are the fastest ways to put something on the user's daily note; " +
+  'pass `timeZone` (e.g. "America/New_York") so an omitted `date` resolves to the user\'s own today.';
 
 // JSON-RPC 2.0 error codes.
 const PARSE_ERROR = -32700;
@@ -72,7 +95,9 @@ const JsonRpcMessageSchema = Schema.Struct({
   // Absent id = a notification (no response expected).
   id: Schema.optional(JsonRpcIdSchema),
   method: Schema.String,
-  params: Schema.optional(Schema.Unknown),
+  // Params arrive as raw JSON off the request body; each method decodes its
+  // own shape below.
+  params: Schema.optional(Schema.Json),
 });
 
 const InitializeParamsSchema = Schema.Struct({
@@ -81,8 +106,11 @@ const InitializeParamsSchema = Schema.Struct({
 
 const CallToolParamsSchema = Schema.Struct({
   name: Schema.String,
-  arguments: Schema.optional(Schema.Unknown),
+  arguments: Schema.optional(Schema.Json),
 });
+
+/** A JSON-RPC params value: raw JSON off the request body, pre-decode. */
+type RpcJson = (typeof JsonRpcMessageSchema.Type)["params"];
 
 // --- Response builders ----------------------------------------------------------
 
@@ -95,14 +123,23 @@ const CORS_HEADERS = {
     "content-type, authorization, mcp-protocol-version, mcp-session-id",
 };
 
-function json(data: unknown, status = 200): Response {
+/** A JSON-RPC 2.0 response body: exactly one of result or error. */
+type JsonRpcResponse =
+  | { jsonrpc: "2.0"; id: JsonRpcId; result: RpcResult }
+  | {
+      jsonrpc: "2.0";
+      id: JsonRpcId;
+      error: { code: number; message: string };
+    };
+
+function json(data: JsonRpcResponse, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json", ...CORS_HEADERS },
   });
 }
 
-function rpcResult(id: JsonRpcId, result: unknown): Response {
+function rpcResult(id: JsonRpcId, result: RpcResult): Response {
   return json({ jsonrpc: "2.0", id, result });
 }
 
@@ -126,17 +163,54 @@ export function mcpCorsPreflight(): Response {
 // Schema from each tool's Effect Schema here guarantees the published contract
 // can't drift from the decoder used in tools/call below.
 
-const toolList = tools.map((tool) => {
-  const doc = Schema.toJsonSchemaDocument(tool.input);
-  const inputSchema: Record<string, unknown> = { ...doc.schema };
+/** One tools/list entry: the tool's name, doc, and registry-derived input
+ *  schema (a JSON Schema document, per toJsonSchemaDocument). */
+interface ToolDescriptor {
+  name: string;
+  description: string;
+  inputSchema: EffectJsonSchema.JsonSchema;
+  outputSchema?: EffectJsonSchema.JsonSchema;
+  annotations: {
+    title: string;
+    readOnlyHint: boolean;
+    destructiveHint: boolean;
+  };
+}
+
+/** The result payloads this server returns: handshake metadata, the tool
+ *  list, tool output, or nothing (ping). */
+type RpcResult =
+  | {
+      protocolVersion: string;
+      capabilities: { tools: { listChanged: boolean } };
+      serverInfo: typeof SERVER_INFO;
+      instructions: string;
+    }
+  | { tools: ToolDescriptor[] }
+  | ToolResult
+  | Record<string, never>;
+
+function publishedSchema(schema: Schema.Top): EffectJsonSchema.JsonSchema {
+  const doc = Schema.toJsonSchemaDocument(schema);
+  const jsonSchema = { ...doc.schema };
   if (Object.keys(doc.definitions).length)
-    inputSchema["$defs"] = doc.definitions;
-  return {
+    jsonSchema["$defs"] = doc.definitions;
+  return jsonSchema;
+}
+
+const toolList: ToolDescriptor[] = tools.map((tool) => {
+  const descriptor: ToolDescriptor = {
     name: tool.name,
     description: tool.description,
-    inputSchema,
-    annotations: { readOnlyHint: tool.readOnly },
+    inputSchema: publishedSchema(tool.input),
+    annotations: {
+      title: tool.title,
+      readOnlyHint: tool.readOnly,
+      destructiveHint: tool.destructive,
+    },
   };
+  if (tool.output) descriptor.outputSchema = publishedSchema(tool.output);
+  return descriptor;
 });
 
 // --- Dispatch --------------------------------------------------------------------
@@ -145,13 +219,13 @@ const decodeOrNull = <
   S extends Schema.Top & { readonly DecodingServices: never },
 >(
   schema: S,
-  value: unknown,
+  value: RpcJson,
 ): S["Type"] | null => {
   const result = Schema.decodeUnknownOption(schema)(value);
   return result._tag === "Some" ? result.value : null;
 };
 
-function handleInitialize(id: JsonRpcId, params: unknown): Response {
+function handleInitialize(id: JsonRpcId, params: RpcJson): Response {
   const parsed = decodeOrNull(InitializeParamsSchema, params ?? {});
   const requested = parsed?.protocolVersion;
   const protocolVersion =
@@ -168,9 +242,10 @@ function handleInitialize(id: JsonRpcId, params: unknown): Response {
 
 function handleToolCall(
   id: JsonRpcId,
-  params: unknown,
+  params: RpcJson,
   store: OutlineStore,
   origin: string | null,
+  afterTextWrite?: AfterTextWrite,
 ): Effect.Effect<Response> {
   const call = decodeOrNull(CallToolParamsSchema, params);
   if (!call) {
@@ -184,18 +259,18 @@ function handleToolCall(
       rpcError(id, INVALID_PARAMS, `unknown tool: ${call.name}`),
     );
 
-  // The registry erases each tool's input type (`Schema.Struct<any>`), which
-  // would leak `any` into the Effect requirements channel — pin the decode
-  // signature at this one seam instead.
-  const decodeInput = Schema.decodeUnknownEffect(tool.input) as unknown as (
-    input: unknown,
-  ) => Effect.Effect<unknown, { readonly message: string }>;
+  const decodeInput = Schema.decodeUnknownEffect(tool.input);
   return decodeInput(call.arguments ?? {}).pipe(
     Effect.mapError((issue) => rpcError(id, INVALID_PARAMS, issue.message)),
     Effect.flatMap((input) =>
-      tool.handle(input, store, origin).pipe(
-        Effect.map((text) =>
-          rpcResult(id, { content: [{ type: "text", text }] }),
+      tool.handle(input, store, origin, afterTextWrite).pipe(
+        Effect.map((result) =>
+          rpcResult(
+            id,
+            Predicate.isString(result)
+              ? { content: [{ type: "text", text: result }] }
+              : result,
+          ),
         ),
         Effect.catchTag("ToolError", (e) =>
           Effect.succeed(
@@ -223,6 +298,7 @@ function dispatch(
   store: OutlineStore,
   origin: string | null,
   agentAccess: boolean,
+  afterTextWrite?: AfterTextWrite,
 ): Effect.Effect<Response> {
   // A notification (no id) never gets a JSON-RPC response body, whatever the
   // method — `notifications/initialized` and friends land here.
@@ -241,7 +317,7 @@ function dispatch(
       // connection can handshake and see WHY, but every tool call — read AND
       // write — is refused until the plan includes agent access (#170).
       return agentAccess
-        ? handleToolCall(id, message.params, store, origin)
+        ? handleToolCall(id, message.params, store, origin, afterTextWrite)
         : Effect.succeed(rpcError(id, UPGRADE_REQUIRED, UPGRADE_MESSAGE));
     default:
       return Effect.succeed(
@@ -271,6 +347,7 @@ export function handleMcp(
   store: OutlineStore,
   origin: string | null,
   agentAccess: boolean,
+  afterTextWrite?: AfterTextWrite,
 ): Effect.Effect<Response> {
   switch (request.method) {
     case "OPTIONS":
@@ -311,7 +388,7 @@ export function handleMcp(
         rpcError(null, INVALID_REQUEST, issue.message),
       ),
     );
-    return yield* dispatch(message, store, origin, agentAccess);
+    return yield* dispatch(message, store, origin, agentAccess, afterTextWrite);
   }).pipe(
     // The typed error channel only ever carries already-built error Responses.
     Effect.catch((response) => Effect.succeed(response)),

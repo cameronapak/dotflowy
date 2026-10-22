@@ -3,6 +3,7 @@ import { createCollection } from "@tanstack/react-db";
 import { Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
+import { hasCryptoRandomUuid, hasWindow } from "../env";
 import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from "./kv-api";
 import { queryClient } from "./query-client";
 import {
@@ -71,26 +72,32 @@ export const savedQueriesCollection = createCollection(
 
 // --- Mutations --------------------------------------------------------------
 
+function liveRows(): SavedQueryRow[] {
+  return savedQueriesCollection.toArray;
+}
+
 /** Save the current query, name defaulting to the query text (ADR 0048
  *  decision 3). No-op on an empty query or one already saved (idempotent, so a
  *  double-save can't create a duplicate). Returns the row id, or null. */
 export function saveQuery(query: string, name?: string): string | null {
   const q = normalizeQuery(query);
   if (!q) return null;
-  const existing = findSavedQuery(savedQueriesCollection.toArray, q);
+  const existing = findSavedQuery(liveRows(), q);
   if (existing) return existing.id;
-  const id =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `sq_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const id = hasCryptoRandomUuid()
+    ? crypto.randomUUID()
+    : `sq_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const trimmedName = name?.trim();
-  savedQueriesCollection.insert({
+  const nameVal =
+    trimmedName && trimmedName.length > 0 ? trimmedName : defaultQueryName(q);
+  const createdAt = Date.now();
+  const row: SavedQueryRow = {
     id,
-    name:
-      trimmedName && trimmedName.length > 0 ? trimmedName : defaultQueryName(q),
+    name: nameVal,
     query: q,
-    createdAt: Date.now(),
-  });
+    createdAt,
+  };
+  savedQueriesCollection.insert(row);
   return id;
 }
 
@@ -98,14 +105,15 @@ export function saveQuery(query: string, name?: string): string | null {
 export function unsaveQuery(query: string): void {
   const q = normalizeQuery(query);
   if (!q) return;
-  for (const row of savedQueriesCollection.toArray) {
-    if (normalizeQuery(row.query) === q) savedQueriesCollection.delete(row.id);
+  for (const row of liveRows()) {
+    if (normalizeQuery(row.query) !== q) continue;
+    savedQueriesCollection.delete(row.id);
   }
 }
 
 /** Pin toggle: save if this query isn't saved, else unsave it. */
 export function toggleSavedQuery(query: string): void {
-  if (isQuerySaved(savedQueriesCollection.toArray, query)) unsaveQuery(query);
+  if (isQuerySaved(liveRows(), query)) unsaveQuery(query);
   else saveQuery(query);
 }
 
@@ -114,16 +122,14 @@ export function toggleSavedQuery(query: string): void {
 export function renameSavedQuery(id: string, name: string): void {
   const n = name.trim();
   if (!n) return;
-  if (savedQueriesCollection.toArray.some((r) => r.id === id)) {
-    savedQueriesCollection.update(id, (draft) => void (draft.name = n));
-  }
+  if (!liveRows().some((r) => r.id === id)) return;
+  savedQueriesCollection.update(id, (draft) => void (draft.name = n));
 }
 
 /** Delete a saved query by id (the popover row's X). */
 export function deleteSavedQuery(id: string): void {
-  if (savedQueriesCollection.toArray.some((r) => r.id === id)) {
-    savedQueriesCollection.delete(id);
-  }
+  if (!liveRows().some((r) => r.id === id)) return;
+  savedQueriesCollection.delete(id);
 }
 
 // --- Reactive read (mirrors tag-colors.ts; prerender-safe) ------------------
@@ -137,14 +143,18 @@ let sorted: SavedQueryRow[] = EMPTY;
 const listeners = new Set<() => void>();
 let started = false;
 
-function rebuild() {
-  rows = savedQueriesCollection.toArray;
+function rebuildFrom(source: SavedQueryRow[]) {
+  rows = source;
   sorted = rows.length === 0 ? EMPTY : sortSavedNewestFirst(rows);
   for (const l of listeners) l();
 }
 
+function rebuild() {
+  rebuildFrom(savedQueriesCollection.toArray);
+}
+
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   savedQueriesCollection.subscribeChanges(() => rebuild(), {
     includeInitialState: true,

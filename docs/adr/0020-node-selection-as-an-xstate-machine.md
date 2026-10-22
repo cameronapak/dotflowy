@@ -70,6 +70,11 @@ re-derive from the live collection inside a `runStructural` batch) lives in pure
 the live getters (`getTreeIndex`/`getViewRootId`/...), the [ADR 0004](./0004-localized-rendering-via-the-tree-store.md)
 idiom. The machine isn't a self-contained pure statechart — the tree is ambient input. XState cleaned
 up the _mode + keyboard-routing_; it did not dissolve the derivation, and was never going to.
+The week-calendar date drop (ADR 0054) follows the same boundary: the drag hook
+reads selected roots through the actor's imperative API, while pointer capture,
+hit-testing, external-target precedence, and async commit stay in the existing
+imperative drag lifecycle. A second state machine there would duplicate working
+gesture state rather than clarify implicit domain state.
 
 **Don't regress:**
 

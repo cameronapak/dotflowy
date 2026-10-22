@@ -1,5 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 
+import { hasWindow } from "../env";
+
 /**
  * A tiny hand-rolled wrapper over Cloudflare Turnstile (#293). We load the
  * official script directly rather than add a dependency — the widget's whole
@@ -41,7 +43,7 @@ const SCRIPT_SRC =
 /** Load the Turnstile script once, shared across every widget instance. */
 let scriptPromise: Promise<void> | null = null;
 function loadTurnstileScript(): Promise<void> {
-  if (typeof window === "undefined")
+  if (!hasWindow())
     return Promise.reject(new Error("Turnstile requires a browser"));
   if (window.turnstile) return Promise.resolve();
   if (scriptPromise) return scriptPromise;

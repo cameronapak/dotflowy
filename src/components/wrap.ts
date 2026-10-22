@@ -31,6 +31,7 @@ export type { MarkerPair };
 
 /** The focused contentEditable, or null when no bullet/title is focused. */
 function activeEditable(): HTMLElement | null {
+  // SAFETY: document.activeElement is an Element or null, elements here are HTMLElements
   const el = document.activeElement as HTMLElement | null;
   return el && el.isContentEditable ? el : null;
 }
@@ -181,4 +182,35 @@ export function toggleHighlightSelection(
   if (sel.length === 0) setCaretOffset(el, innerStart);
   else setSelectionOffsets(el, innerStart, innerStart + sel.length);
   return true;
+}
+
+/** A saved selection inside the focused contentEditable, in SOURCE offsets. */
+export interface SelectionSnapshot {
+  el: HTMLElement;
+  start: number;
+  end: number;
+}
+
+/** Save the focused span's selection, for a touch toolbar press (ADR 0069).
+ *  Null when nothing is focused or the selection is collapsed. */
+export function snapshotSelection(): SelectionSnapshot | null {
+  const el = activeEditable();
+  if (!el) return null;
+  const range = getSelectionRange(el);
+  if (!range || range.start === range.end) return null;
+  return { el, start: range.start, end: range.end };
+}
+
+/** Put a saved selection back if the press collapsed it in between. Touch
+ *  WebKit may drop a range on a tap elsewhere even with `pointerdown`
+ *  prevented; the action must still see what the finger landed on. A no-op
+ *  when the selection survived or focus moved to another span. */
+export function restoreSelection(snap: SelectionSnapshot | null): void {
+  if (!snap || activeEditable() !== snap.el) return;
+  const range = getSelectionRange(snap.el);
+  if (range && range.start === snap.start && range.end === snap.end) return;
+  // The press may have moved the caret out of a revealed run, folding it into
+  // an atom. Reveal it again before mapping interior offsets into the live DOM.
+  decorate(snap.el, readSource(snap.el), snap.end, false);
+  setSelectionOffsets(snap.el, snap.start, snap.end);
 }

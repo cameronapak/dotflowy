@@ -57,7 +57,7 @@ affordance under the zoomed title, rendering nothing at zero, opening the mirror
 "×N places" chrome** — one grammar for "this node's edges." Rejected: Roam/Obsidian's always-expanded
 "Linked references" section (the loudest possible answer in a deliberately quiet outline; Notion's
 collapsed count proves it unnecessary) and per-row backlink chrome in the list (fights the
-node-decoration budget, [ADR 0031](./0031-two-lane-plugin-governance.md), for information rarely
+node-decoration budget, [ADR 0031](./0031-two-lane-plugin-trust.md), for information rarely
 needed mid-list).
 
 **Deleting a linked-to node degrades; it never blocks and never rewrites referrers.** The delete

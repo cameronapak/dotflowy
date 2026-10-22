@@ -21,6 +21,7 @@ import type { NodeCommands } from "../../components/node-commands";
 import type { PluginContext } from "../types";
 
 import { placeCaretAtEnd } from "../../components/caret-place";
+import { useEditorFeatures } from "../../data/editor-features";
 import { Button, Input } from "../kit";
 import { replaceTokenInNode } from "../token-kit";
 import {
@@ -116,6 +117,7 @@ export function BiblePassageEditPopover({
   onSubmit: (input: string) => void;
   onClose: () => void;
 }) {
+  const { bible } = useEditorFeatures();
   const ref = useRef<HTMLFormElement | null>(null);
   const suggestionsId = useId();
   const initialStructured = structuredFromInput(token);
@@ -140,6 +142,12 @@ export function BiblePassageEditPopover({
     activeSuggestion >= 0 ? `${suggestionsId}-${activeSuggestion}` : undefined;
 
   useEffect(() => {
+    // A remote disable closes the overlay without applying its draft or moving
+    // focus back into a note the user may no longer be editing.
+    if (!bible) onClose();
+  }, [bible, onClose]);
+
+  useEffect(() => {
     setActiveSuggestion(suggestions.length > 0 ? 0 : -1);
   }, [suggestions]);
 
@@ -159,6 +167,7 @@ export function BiblePassageEditPopover({
 
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
+      // SAFETY: a pointer event's target is the DOM node hit
       if (!ref.current?.contains(e.target as Node)) closeAndRefocus();
     };
     const onKey = (e: KeyboardEvent) => {
@@ -208,6 +217,8 @@ export function BiblePassageEditPopover({
 
   const left = Math.max(8, Math.min(x, window.innerWidth - 336));
   const top = Math.max(8, Math.min(y, window.innerHeight - 280));
+
+  if (!bible) return null;
 
   return createPortal(
     <form
@@ -307,6 +318,7 @@ export function BiblePassageEditPopover({
               onChange={(e) =>
                 applyStructured({
                   ...structured,
+                  // SAFETY: the options are generated from OSIS_BOOK_CODES, so value is an OsisBookCode
                   book: e.currentTarget.value as OsisBookCode,
                   chapter: 1,
                   startVerse: null,

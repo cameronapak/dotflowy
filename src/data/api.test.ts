@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import type { ChangeOp } from "./realtime";
 
-import { persistBatch, updateNodes } from "./api";
+import { persistBatch, updateNodes, waitForPendingWrites } from "./api";
 
 // Pins the structural-batch serialization (the `writeSem` semaphore in api.ts):
 // rapid batches must NOT overlap on the wire (else the DO can reorder them and
@@ -20,10 +20,11 @@ let pending: Pending[] = [];
 
 function installControlledFetch(): void {
   pending = [];
+  // SAFETY: test stub, not a real fetch: the code under test only calls it with (url, init) and reads init.body.
   globalThis.fetch = ((_url: string, init: { body?: unknown }) =>
     new Promise<Response>((resolve) => {
       pending.push({ body: String(init.body), resolve });
-    })) as unknown as typeof fetch;
+    })) as typeof fetch;
 }
 
 /** A pending request, narrowed away from undefined (noUncheckedIndexedAccess). */
@@ -38,6 +39,25 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
 const ok = (seq: number): Response =>
   new Response(JSON.stringify({ seq }), { status: 200 });
 const op = (key: string): ChangeOp => ({ op: "delete", key });
+
+test("history's write barrier waits for coalesced fields and structural sends", async () => {
+  installControlledFetch();
+  const field = updateNodes([{ id: "a", changes: { text: "new" } }]);
+  const batch = persistBatch([op("b")]);
+  let settled = false;
+  const barrier = waitForPendingWrites().then(() => {
+    settled = true;
+  });
+  await tick();
+  expect(pending.length).toBe(2);
+  expect(settled).toBe(false);
+  at(0).resolve(ok(8));
+  await tick();
+  expect(settled).toBe(false);
+  at(1).resolve(ok(9));
+  await Promise.all([field, batch, barrier]);
+  expect(settled).toBe(true);
+});
 
 afterEach(() => {
   globalThis.fetch = realFetch;
@@ -90,7 +110,7 @@ describe("persistBatch serialization (writeSem)", () => {
 // invariant -- every caller that merged into a failed generation rolls back
 // together (shared-fate). A field PATCH is `void`-shaped (no `{seq}` body to
 // read), so a 200 with any body is success and a 5xx rejects without retrying.
-const okField = (): Response => new Response(null, { status: 200 });
+const okField = (): Response => ok(10);
 
 describe("updateNodes field coalescer (fieldSem generations)", () => {
   test("shared-fate: both callers of a failed generation reject", async () => {
@@ -116,45 +136,35 @@ describe("updateNodes field coalescer (fieldSem generations)", () => {
     await expect(pA).resolves.toBeUndefined();
   });
 
-  test("coalesces a burst during the in-flight window into one PATCH", async () => {
+  test("coalesces a burst during the in-flight window into one field-wise PATCH", async () => {
     installControlledFetch();
     const pA = updateNodes([{ id: "a", changes: { text: "a1" } }]);
     await tick();
     expect(pending.length).toBe(1);
     expect(at(0).body).toContain("a1");
 
-    // Burst while gen 1 is in flight: same id twice + a different id.
-    updateNodes([{ id: "a", changes: { text: "a2" } }]);
-    updateNodes([{ id: "a", changes: { text: "a3" } }]);
-    updateNodes([{ id: "b", changes: { text: "b1" } }]);
-
-    at(0).resolve(okField());
-    await tick();
-    // One PATCH for the whole burst; last-write-wins on `a`, `b` carried along.
-    expect(pending.length).toBe(2);
-    const body = at(1).body;
-    expect(body).toContain("a3");
-    expect(body).not.toContain("a2"); // superseded by a3
-    expect(body).toContain("b1");
-
-    at(1).resolve(okField());
-    await expect(pA).resolves.toBeUndefined();
-  });
-
-  test("a generation does not send before the prior responds", async () => {
-    installControlledFetch();
-    const pA = updateNodes([{ id: "a", changes: { text: "a" } }]);
-    await tick();
-    updateNodes([{ id: "b", changes: { text: "b" } }]); // gen 2, parked on permit
+    // Burst while gen 1 is in flight: same id thrice (overlapping and new
+    // fields) + a different id.
+    const burst = [
+      updateNodes([{ id: "a", changes: { text: "a2" } }]),
+      updateNodes([{ id: "a", changes: { completed: true } }]),
+      updateNodes([{ id: "a", changes: { text: "a3" } }]),
+      updateNodes([{ id: "b", changes: { text: "b1" } }]),
+    ];
     await tick();
     expect(pending.length).toBe(1); // gen 2 stays off the wire
 
     at(0).resolve(okField());
     await tick();
+    // One PATCH for the whole burst; last-write-wins per field on `a`.
     expect(pending.length).toBe(2);
-    expect(at(1).body).toContain('"b"');
+    expect(JSON.parse(at(1).body).updates).toEqual([
+      { id: "a", changes: { text: "a3", completed: true } },
+      { id: "b", changes: { text: "b1" } },
+    ]);
+
     at(1).resolve(okField());
-    await pA;
+    await Promise.all([pA, ...burst]);
   });
 
   test("a failed generation does not wedge the next", async () => {
@@ -170,32 +180,5 @@ describe("updateNodes field coalescer (fieldSem generations)", () => {
 
     at(1).resolve(okField());
     await expect(pB).resolves.toBeUndefined();
-  });
-
-  test("merges field-wise last-write-wins per id", async () => {
-    installControlledFetch();
-    const pA = updateNodes([{ id: "a", changes: { text: "x" } }]);
-    await tick();
-    // During flight: overlapping + new fields on the same id.
-    updateNodes([{ id: "a", changes: { completed: true } }]);
-    updateNodes([{ id: "a", changes: { text: "y" } }]);
-
-    at(0).resolve(okField());
-    await tick();
-    const body = at(1).body; // merged: { text: 'y', completed: true }
-    expect(body).toContain('"y"');
-    expect(body).toContain("completed");
-    expect(body).not.toContain('"x"'); // text superseded
-    at(1).resolve(okField());
-    await pA;
-  });
-
-  test("the first edit hits the wire on a tick, not after a debounce", async () => {
-    installControlledFetch();
-    const pA = updateNodes([{ id: "a", changes: { text: "a" } }]);
-    await tick(); // one scheduler tick, not a timer window
-    expect(pending.length).toBe(1);
-    at(0).resolve(okField());
-    await pA;
   });
 });

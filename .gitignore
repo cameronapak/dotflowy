@@ -21,3 +21,15 @@ dist
 
 # Playwright artifacts
 test-results/
+
+# Cursor continual-learning hook state (local index, not shared)
+.cursor/hooks/state/continual-learning*.json
+
+# Riptide artifacts (cloud-synced)
+.humanlayer/tasks/
+
+# Riptide workspace machine-local overrides
+.humanlayer/workspace.local.json
+
+# Amp orb portal runtime files
+.amp/portals/*

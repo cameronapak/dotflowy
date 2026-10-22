@@ -3,7 +3,12 @@ import { createCollection } from "@tanstack/react-db";
 import { Effect, Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
+import { subscribeCalendarSync } from "../../data/calendar-sync";
 import { localDateKey } from "../../data/date-links";
+import {
+  getEditorFeatures,
+  subscribeEditorFeatures,
+} from "../../data/editor-features";
 import {
   kvDelete,
   kvFetch,
@@ -13,6 +18,8 @@ import {
 } from "../../data/kv-api";
 import { kvGetOrCreateE } from "../../data/kv-client-effect";
 import { queryClient } from "../../data/query-client";
+import { hasWindow } from "../../env";
+import { resolveDailyClaim } from "./claim-mapping";
 
 /**
  * The daily index -- the *identity* of a daily note (ADR 0001). A row maps a
@@ -185,20 +192,11 @@ export function setMapping(key: string, nodeId: string): void {
  * itself — the caller supplies a `candidate` node id, and this returns the
  * AUTHORITATIVE winner plus whether this caller won (so it should create the
  * node under `candidate`). Two devices with a stale replica both miss the key
- * locally and both claim; the single-threaded DO lets exactly one win, killing
- * the duplicate-daily-note race at the source.
+ * locally and both claim; the single-threaded DO lets exactly
+ * one win, killing the duplicate-daily-note race at the source.
  *
- * This is the boundary that degrades to a value on failure: on a network/server
- * failure it logs and degrades to the optimistic local path (treats `candidate`
- * as the winner), so the feature keeps working — the rare failure window just
- * reopens the pre-fix race, no worse than before the claim existed.
- *
- * Why Effect here (and throwing everywhere else in the kv path): the TanStack
- * DB mutation handlers signal failure by THROWING (a throw triggers optimistic
- * rollback), so the rest of kv-api.ts stays throw-based on purpose. claimMapping
- * has no TanStack caller — it's an awaitable from a click handler — so it can
- * speak Effect's typed-error channel directly and route with catchTag, proving
- * the ergonomics on real I/O. See kv-client-effect.ts.
+ * Uses `/api/kv?op=claim` (Effect path). On network/server failure, treat `candidate`
+ * as the winner so the feature keeps working.
  */
 export async function claimMapping(
   key: string,
@@ -225,7 +223,7 @@ export async function claimMapping(
       }),
     ),
   );
-  return { winner: row.nodeId, won: row.nodeId === candidate };
+  return resolveDailyClaim(row.nodeId, candidate);
 }
 
 // --- Reactive read (mirrors tag-colors.ts; prerender-safe) ------------------
@@ -238,27 +236,55 @@ let keyByNodeId = new Map<string, string>();
 const listeners = new Set<() => void>();
 let started = false;
 
-function rebuild() {
-  rows = dailyIndexCollection.toArray;
+function rebuildFrom(source: DailyRow[]) {
+  rows = source;
   const next = new Map<string, string>();
   for (const r of rows) next.set(r.nodeId, r.key);
   keyByNodeId = next;
   for (const l of listeners) l();
 }
 
+function rebuild() {
+  rebuildFrom(dailyIndexCollection.toArray);
+}
+
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   dailyIndexCollection.subscribeChanges(() => rebuild(), {
     includeInitialState: true,
+  });
+  let weekStart = getEditorFeatures().weekStart;
+  subscribeEditorFeatures(() => {
+    const next = getEditorFeatures().weekStart;
+    if (next === weekStart) return;
+    weekStart = next;
+    void dailyIndexCollection.utils
+      .refetch()
+      .catch((err) =>
+        console.warn("daily: week-start index refetch failed", err),
+      );
+  });
+  subscribeCalendarSync((calendar) => {
+    if (calendar.upserts || calendar.deletes) {
+      const next = new Map(rows.map((row) => [row.key, row]));
+      for (const key of calendar.deletes ?? []) next.delete(key);
+      for (const row of calendar.upserts ?? []) next.set(row.key, row);
+      rebuildFrom([...next.values()]);
+    }
+    void dailyIndexCollection.utils
+      .refetch()
+      .catch((err) =>
+        console.warn("daily: calendar index reconciliation failed", err),
+      );
   });
 }
 
 /** Subscribe to any change in the daily index (rebuilt on every collection
  *  change, including the initial fetch resolving). Drives the reactive date
- *  badge AND the container's protection lock (Seam: `protectsChanged`) -- the
- *  lock must re-render when the `container -> nodeId` mapping arrives, not only
- *  after an unrelated re-render. Returns an unsubscribe. */
+ *  badge AND the container's protection indicator (`protectsChanged`) -- the
+ *  indicator must re-render when the `container -> nodeId` mapping arrives, not
+ *  only after an unrelated re-render. Returns an unsubscribe. */
 export function subscribeDailyIndex(cb: () => void): () => void {
   ensureStarted();
   listeners.add(cb);
@@ -269,9 +295,9 @@ export function subscribeDailyIndex(cb: () => void): () => void {
 
 /** Start the index's kv fetch eagerly (the plugin `preload` seam, called once
  *  at editor mount). Without this the fetch starts lazily at the FIRST badge/
- *  lock render -- i.e. only after the outline snapshot has already painted --
- *  so the day badges and the container lock popped in a beat later (a layout
- *  shift). Preloading lets the kv fetch race the nodes snapshot instead of
+ *  indicator render -- i.e. only after the outline snapshot has painted --
+ *  so day badges and the container indicator popped in later (a layout shift).
+ *  Preloading lets the kv fetch race the nodes snapshot instead of
  *  queuing behind it. */
 export function preloadDailyIndex(): void {
   ensureStarted();

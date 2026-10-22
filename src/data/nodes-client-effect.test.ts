@@ -17,14 +17,36 @@ import {
 
 const realFetch = globalThis.fetch;
 let calls = 0;
+let requestBodies: Array<{ clientId?: string; expectedSeq?: number }> = [];
+
+/** The preconnect member the Workers fetch type carries; no-op in tests. */
+const stubPreconnect = {
+  preconnect: (
+    _url: string | URL,
+    _options?: {
+      dns?: boolean;
+      tcp?: boolean;
+      http?: boolean;
+      https?: boolean;
+    },
+  ): void => {},
+};
 
 /** Install a fetch that returns `make()` and counts invocations. */
 function stubFetch(make: () => Response): void {
   calls = 0;
-  globalThis.fetch = (() => {
-    calls += 1;
-    return Promise.resolve(make());
-  }) as unknown as typeof fetch;
+  requestBodies = [];
+  // Test stub, not a real fetch: it ignores all arguments, and the code under
+  // test only needs a response promise. preconnect is a no-op to satisfy the
+  // full fetch type.
+  globalThis.fetch = Object.assign(
+    (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls += 1;
+      requestBodies.push(JSON.parse(String(init?.body)));
+      return Promise.resolve(make());
+    },
+    stubPreconnect,
+  );
 }
 
 afterEach(() => {
@@ -38,47 +60,63 @@ describe("sendBatchE", () => {
     expect(calls).toBe(1);
   });
 
-  test("fails NodesTransportError on a missing seq", async () => {
-    stubFetch(
-      () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
-    );
-    const err = await Effect.runPromise(Effect.flip(sendBatchE([])));
-    expect(err._tag).toBe("NodesTransportError");
-  });
-
-  test("fails NodesTransportError on a non-JSON 200 (proxy HTML)", async () => {
-    stubFetch(() => new Response("<html>nope</html>", { status: 200 }));
-    const err = await Effect.runPromise(Effect.flip(sendBatchE([])));
-    expect(err._tag).toBe("NodesTransportError");
-  });
-
-  test("fails NodesResponseError on 5xx and does NOT retry", async () => {
-    stubFetch(() => new Response("boom", { status: 500 }));
-    const err = await Effect.runPromise(Effect.flip(sendBatchE([])));
-    expect(err._tag).toBe("NodesResponseError");
-    expect((err as NodesResponseError).status).toBe(500);
-    expect(calls).toBe(1); // a received response is never retried
-  });
-});
-
-describe("createNodesE / deleteNodesE", () => {
-  test("resolve void on 2xx", async () => {
-    stubFetch(() => new Response(null, { status: 200 }));
+  test("correlates every write from this page and sends expectedSeq only for history batches", async () => {
+    stubFetch(() => new Response(JSON.stringify({ seq: 8 }), { status: 200 }));
     await runPromise(createNodesE([]));
     await runPromise(deleteNodesE([]));
-    expect(calls).toBe(2);
+    await runPromise(sendBatchE([], 7));
+
+    const clientIds = requestBodies.map((body) => body.clientId);
+    expect(clientIds[0]).toEqual(expect.any(String));
+    expect(new Set(clientIds).size).toBe(1);
+    expect(requestBodies[0]).not.toHaveProperty("expectedSeq");
+    expect(requestBodies[1]).not.toHaveProperty("expectedSeq");
+    expect(requestBodies[2]).toHaveProperty("expectedSeq", 7);
   });
 
-  test("createNodesE fails NodesResponseError on 5xx", async () => {
-    stubFetch(() => new Response("err", { status: 503 }));
-    const err = await Effect.runPromise(Effect.flip(createNodesE([])));
-    expect(err._tag).toBe("NodesResponseError");
+  test.each([
+    ["stale expectedSeq", 409, 6],
+    ["server error", 500, undefined],
+  ] as const)(
+    "a %s fails NodesResponseError with its status and is never retried",
+    async (_name, status, expectedSeq) => {
+      stubFetch(() => new Response("err", { status }));
+      const err = await Effect.runPromise(
+        Effect.flip(sendBatchE([], expectedSeq)),
+      );
+      expect(err).toBeInstanceOf(NodesResponseError);
+      if (!(err instanceof NodesResponseError)) throw err;
+      expect(err.status).toBe(status);
+      expect(calls).toBe(1);
+    },
+  );
+
+  test("does not retry a guarded restore after losing its acknowledgement", async () => {
+    stubFetch(() => {
+      throw new TypeError("connection lost after commit");
+    });
+    const err = await Effect.runPromise(Effect.flip(sendBatchE([], 6)));
+    expect(err._tag).toBe("NodesTransportError");
+    expect(calls).toBe(1);
+  });
+
+  test.each([
+    ["a missing seq", JSON.stringify({ ok: true })],
+    ["a non-JSON 200 (proxy HTML)", "<html>nope</html>"],
+  ])("fails NodesTransportError on %s", async (_name, body) => {
+    stubFetch(() => new Response(body, { status: 200 }));
+    const err = await Effect.runPromise(Effect.flip(sendBatchE([])));
+    expect(err._tag).toBe("NodesTransportError");
   });
 });
 
-describe("runPromise bridge", () => {
-  test("rejects (throws) on a typed failure, for TanStack rollback", async () => {
-    stubFetch(() => new Response("err", { status: 500 }));
-    await expect(runPromise(sendBatchE([]))).rejects.toThrow();
-  });
+test("createNodesE / deleteNodesE resolve on 2xx and fail NodesResponseError on 5xx", async () => {
+  stubFetch(() => new Response(null, { status: 200 }));
+  await runPromise(createNodesE([]));
+  await runPromise(deleteNodesE([]));
+  expect(calls).toBe(2);
+
+  stubFetch(() => new Response("err", { status: 503 }));
+  const err = await Effect.runPromise(Effect.flip(createNodesE([])));
+  expect(err._tag).toBe("NodesResponseError");
 });

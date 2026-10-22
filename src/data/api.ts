@@ -1,4 +1,4 @@
-import { Effect, Semaphore } from "effect";
+import { Effect, Latch, Semaphore } from "effect";
 
 import type { ChangeOp } from "./realtime";
 import type { Node } from "./schema";
@@ -57,6 +57,39 @@ import {
 // promise still rejects → that transaction rolls back).
 const writeSem = Semaphore.makeUnsafe(1);
 
+let pendingWrites = 0;
+let acknowledgedSeq = 0;
+const drained = Latch.makeUnsafe(true);
+
+function trackWrite<A>(
+  effect: Effect.Effect<A, NodesError>,
+): Effect.Effect<A, NodesError> {
+  return Effect.suspend(() => {
+    pendingWrites++;
+    drained.closeUnsafe();
+    return effect.pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          pendingWrites--;
+          if (pendingWrites === 0) drained.openUnsafe();
+        }),
+      ),
+    );
+  });
+}
+
+/** Replay waits for older writes before planning against the authoritative cursor. */
+export const waitForPendingWritesE = Effect.gen(function* () {
+  // Let collection mutationFns armed in this tick enter their send lanes.
+  yield* Effect.yieldNow;
+  yield* drained.await;
+  return acknowledgedSeq;
+});
+
+export function waitForPendingWrites(): Promise<number> {
+  return runPromise(waitForPendingWritesE);
+}
+
 /**
  * Persist a structural mutation as one atomic batch — the Effect core. The DO
  * applies every op and commits a SINGLE change frame, returning its sequence
@@ -68,8 +101,19 @@ const writeSem = Semaphore.makeUnsafe(1);
  */
 export const persistBatchE = (
   ops: ChangeOp[],
+  expectedSeq?: number,
 ): Effect.Effect<{ seq: number }, NodesError> =>
-  writeSem.withPermits(1)(sendBatchE(ops));
+  trackWrite(
+    writeSem.withPermits(1)(
+      sendBatchE(ops, expectedSeq).pipe(
+        Effect.tap(({ seq }) =>
+          Effect.sync(() => {
+            acknowledgedSeq = Math.max(acknowledgedSeq, seq);
+          }),
+        ),
+      ),
+    ),
+  );
 
 /**
  * Throw-shell over `persistBatchE` for the non-composing callers (and the unit
@@ -151,11 +195,18 @@ function startFieldFlush(gen: FieldGen): Promise<void> {
           id,
           changes,
         }));
-        return updateNodesE(updates);
+        return updateNodesE(updates).pipe(
+          Effect.tap(({ seq }) =>
+            Effect.sync(() => {
+              acknowledgedSeq = Math.max(acknowledgedSeq, seq);
+            }),
+          ),
+          Effect.asVoid,
+        );
       }),
     ),
   );
-  return runPromise(flush);
+  return runPromise(trackWrite(flush));
 }
 
 export function updateNodes(

@@ -10,7 +10,7 @@
  * `decodeBody` helper makes at the boundary. See docs/adr/0014.
  */
 
-import { describe, expect, it } from "bun:test";
+import { expect, test } from "bun:test";
 import { Schema } from "effect";
 
 import {
@@ -22,6 +22,7 @@ import {
   NodesPatchBody,
   NodesPostBody,
   WaitlistPostBody,
+  WeekStartPostBody,
   type Node,
 } from "./wire";
 
@@ -34,6 +35,7 @@ const node = (id: string): Node => ({
   completed: false,
   collapsed: false,
   bookmarkedAt: null,
+  locked: false,
   mirrorOf: null,
   createdAt: 1,
   updatedAt: 1,
@@ -43,153 +45,150 @@ const node = (id: string): Node => ({
 
 type AnyBody = Schema.Codec<unknown, unknown, never, never>;
 
-const accepts = (schema: AnyBody, input: unknown) =>
-  expect(() => Schema.decodeUnknownSync(schema)(input)).not.toThrow();
+/** Undecoded request-body payloads as the boundary schemas receive them. */
+type WirePayload = { readonly [key: string]: Schema.Json };
 
-const rejects = (schema: AnyBody, input: unknown) =>
-  expect(() => Schema.decodeUnknownSync(schema)(input)).toThrow();
+const { text: _text, ...missingText } = node("a");
 
-describe("NodesPostBody (POST /api/nodes)", () => {
-  it("accepts an atomic structural batch of ops", () => {
-    accepts(NodesPostBody, {
+test("NodesPostBody decodes ops with correlation and history metadata", () => {
+  const post = Schema.decodeUnknownSync(NodesPostBody)({
+    ops: [{ op: "delete", key: "a" }],
+    clientId: "page-1",
+    expectedSeq: 12,
+  });
+  expect(post.clientId).toBe("page-1");
+  expect(post.expectedSeq).toBe(12);
+});
+
+test.each<[string, AnyBody, WirePayload]>([
+  [
+    "NodesPostBody: an atomic structural batch of ops",
+    NodesPostBody,
+    {
       ops: [
         { op: "insert", value: node("a") },
         { op: "update", value: node("b") },
         { op: "delete", key: "c" },
       ],
-    });
-  });
-
-  it("accepts the legacy nodes-upsert / seed shape", () => {
-    accepts(NodesPostBody, { nodes: [node("a"), node("b")] });
-  });
-
-  it("accepts an empty body (both fields optional — a no-op write)", () => {
-    accepts(NodesPostBody, {});
-  });
-
-  it("rejects an insert op missing its value (the half-applied 500 the gate prevents)", () => {
-    rejects(NodesPostBody, { ops: [{ op: "insert" }] });
-  });
-
-  it("rejects a delete op missing its key", () => {
-    rejects(NodesPostBody, { ops: [{ op: "delete" }] });
-  });
-
-  it("rejects an unknown op discriminant", () => {
-    rejects(NodesPostBody, { ops: [{ op: "frobnicate", value: node("a") }] });
-  });
-
-  it("rejects a node with a wrong field type", () => {
-    rejects(NodesPostBody, {
-      ops: [{ op: "insert", value: { ...node("a"), isTask: "yes" } }],
-    });
-  });
-
-  it("rejects a node missing a required field", () => {
-    const { text: _omit, ...missingText } = node("a");
-    rejects(NodesPostBody, { ops: [{ op: "insert", value: missingText }] });
-  });
-
-  it("rejects a node missing mirrorOf (required + nullable at the boundary — ADR 0022)", () => {
-    const { mirrorOf: _omit, ...missingMirrorOf } = node("a");
-    rejects(NodesPostBody, { ops: [{ op: "insert", value: missingMirrorOf }] });
-  });
-});
-
-describe("NodesPatchBody (PATCH /api/nodes)", () => {
-  it("accepts field updates with an open changes record", () => {
-    accepts(NodesPatchBody, {
+    },
+  ],
+  [
+    "NodesPostBody: the legacy nodes-upsert / seed shape",
+    NodesPostBody,
+    { nodes: [node("a"), node("b")] },
+  ],
+  ["NodesPostBody: an empty no-op write", NodesPostBody, {}],
+  [
+    "NodesPatchBody: field updates with an open changes record and clientId",
+    NodesPatchBody,
+    {
       updates: [{ id: "a", changes: { text: "x", completed: true } }],
-    });
-  });
-
-  it("rejects an update missing its changes record", () => {
-    rejects(NodesPatchBody, { updates: [{ id: "a" }] });
-  });
-
-  it("rejects a missing updates array", () => {
-    rejects(NodesPatchBody, {});
-  });
+      clientId: "page-1",
+    },
+  ],
+  [
+    "NodesDeleteBody: an array of ids with clientId",
+    NodesDeleteBody,
+    { ids: ["a", "b"], clientId: "page-1" },
+  ],
+  [
+    "KvClaimBody: key + arbitrary value",
+    KvClaimBody,
+    { key: "today", value: { nodeId: "n1" } },
+  ],
+  [
+    "KvUpsertBody: rows",
+    KvUpsertBody,
+    { rows: [{ key: "#a", value: { color: "red" } }] },
+  ],
+  ["KvDeleteBody: keys", KvDeleteBody, { keys: ["#a", "#b"] }],
+  [
+    "WaitlistPostBody: email + source",
+    WaitlistPostBody,
+    { email: "a@b.com", source: "landing" },
+  ],
+  ["WaitlistPostBody: email alone", WaitlistPostBody, { email: "a@b.com" }],
+  [
+    "AdminRestorePostBody: email + ISO time",
+    AdminRestorePostBody,
+    { email: "a@b.com", at: "2026-07-16T12:00:00Z" },
+  ],
+  [
+    "AdminRestorePostBody: userId + epoch-ms time",
+    AdminRestorePostBody,
+    { userId: "usr_1", at: 1_752_000_000_000 },
+  ],
+  [
+    "AdminRestorePostBody: a raw bookmark (the undo path)",
+    AdminRestorePostBody,
+    { userId: "usr_1", bookmark: "bk-abc" },
+  ],
+])("accepts %s", (_label, schema, input) => {
+  expect(() => Schema.decodeUnknownSync(schema)(input)).not.toThrow();
 });
 
-describe("NodesDeleteBody (DELETE /api/nodes)", () => {
-  it("accepts an array of ids", () => {
-    accepts(NodesDeleteBody, { ids: ["a", "b"] });
-  });
-
-  it("rejects a non-string id", () => {
-    rejects(NodesDeleteBody, { ids: ["a", 7] });
-  });
-
-  it("rejects a missing ids array", () => {
-    rejects(NodesDeleteBody, {});
-  });
+test.each<[string, AnyBody, WirePayload]>([
+  [
+    "NodesPostBody: a non-integer expectedSeq",
+    NodesPostBody,
+    { ops: [], expectedSeq: 1.5 },
+  ],
+  // The half-applied 500 the gate prevents.
+  [
+    "NodesPostBody: an insert op missing its value",
+    NodesPostBody,
+    { ops: [{ op: "insert" }] },
+  ],
+  [
+    "NodesPostBody: a node missing text",
+    NodesPostBody,
+    { nodes: [missingText] },
+  ],
+  [
+    "NodesPatchBody: an update missing its changes",
+    NodesPatchBody,
+    { updates: [{ id: "a" }] },
+  ],
+  ["NodesPatchBody: a missing updates array", NodesPatchBody, {}],
+  ["NodesDeleteBody: a non-string id", NodesDeleteBody, { ids: ["a", 7] }],
+  ["NodesDeleteBody: a missing ids array", NodesDeleteBody, {}],
+  ["KvClaimBody: a missing key", KvClaimBody, { value: 1 }],
+  [
+    "KvUpsertBody: a row missing its key",
+    KvUpsertBody,
+    { rows: [{ value: 1 }] },
+  ],
+  ["KvDeleteBody: a non-string key", KvDeleteBody, { keys: [1] }],
+  ["WaitlistPostBody: a missing email", WaitlistPostBody, {}],
+  ["WaitlistPostBody: a non-string email", WaitlistPostBody, { email: 42 }],
+  [
+    "AdminRestorePostBody: an object at",
+    AdminRestorePostBody,
+    { userId: "usr_1", at: { when: 1 } },
+  ],
+  [
+    "AdminRestorePostBody: a non-string email",
+    AdminRestorePostBody,
+    { email: 42 },
+  ],
+])("rejects %s", (_label, schema, input) => {
+  expect(() => Schema.decodeUnknownSync(schema)(input)).toThrow();
 });
 
-describe("kv bodies (/api/kv)", () => {
-  it("accepts a claim body (key + arbitrary value)", () => {
-    accepts(KvClaimBody, { key: "today", value: { nodeId: "n1" } });
+test("WeekStartPostBody separates targetless canonicalization from an explicit preference change", () => {
+  const decode = Schema.decodeUnknownSync(WeekStartPostBody);
+  expect(decode({ operation: "canonicalize" })).toEqual({
+    operation: "canonicalize",
   });
-
-  it("rejects a claim body missing its key", () => {
-    rejects(KvClaimBody, { value: 1 });
+  expect(decode({ operation: "set", weekStart: "sunday" })).toEqual({
+    operation: "set",
+    weekStart: "sunday",
   });
-
-  it("accepts an upsert body of rows", () => {
-    accepts(KvUpsertBody, { rows: [{ key: "#a", value: { color: "red" } }] });
+  // Effect Struct discards excess properties. The discriminant still
+  // guarantees this cannot become an explicit preference change.
+  expect(decode({ operation: "canonicalize", weekStart: "sunday" })).toEqual({
+    operation: "canonicalize",
   });
-
-  it("rejects an upsert row missing its key", () => {
-    rejects(KvUpsertBody, { rows: [{ value: 1 }] });
-  });
-
-  it("accepts a delete body of keys", () => {
-    accepts(KvDeleteBody, { keys: ["#a", "#b"] });
-  });
-
-  it("rejects a non-string key in a delete body", () => {
-    rejects(KvDeleteBody, { keys: [1] });
-  });
-});
-
-describe("WaitlistPostBody (POST /api/waitlist)", () => {
-  it("accepts an email with an optional source", () => {
-    accepts(WaitlistPostBody, { email: "a@b.com", source: "landing" });
-    accepts(WaitlistPostBody, { email: "a@b.com" });
-  });
-
-  it("rejects a missing or non-string email", () => {
-    rejects(WaitlistPostBody, {});
-    rejects(WaitlistPostBody, { email: 42 });
-  });
-});
-
-describe("AdminRestorePostBody (POST /api/admin/restore)", () => {
-  it("accepts an email + ISO restore time", () => {
-    accepts(AdminRestorePostBody, {
-      email: "a@b.com",
-      at: "2026-07-16T12:00:00Z",
-    });
-  });
-
-  it("accepts a userId + epoch-ms restore time", () => {
-    accepts(AdminRestorePostBody, { userId: "usr_1", at: 1_752_000_000_000 });
-  });
-
-  it("accepts a raw bookmark (the undo path)", () => {
-    accepts(AdminRestorePostBody, { userId: "usr_1", bookmark: "bk-abc" });
-  });
-
-  it("accepts an empty body (the exactly-one-of rules are enforced in the route, not the schema)", () => {
-    accepts(AdminRestorePostBody, {});
-  });
-
-  it("rejects a non-string/number at", () => {
-    rejects(AdminRestorePostBody, { userId: "usr_1", at: { when: 1 } });
-  });
-
-  it("rejects a non-string email", () => {
-    rejects(AdminRestorePostBody, { email: 42 });
-  });
+  expect(() => decode({ operation: "set" })).toThrow();
+  expect(() => decode({ operation: "change", weekStart: "sunday" })).toThrow();
 });

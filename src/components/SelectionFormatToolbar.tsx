@@ -1,13 +1,5 @@
 import {
-  BoldIcon,
-  EyeOffIcon,
-  HighlighterIcon,
-  ItalicIcon,
-  LinkIcon,
-  StrikethroughIcon,
-  UnderlineIcon,
-} from "lucide-react";
-import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -17,56 +9,22 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import { getSelectedAtom } from "./inline-code";
+import { hasWindow } from "../env";
 import {
-  detectMarkerWrap,
-  type MarkerPair,
-  readActiveSelectionSource,
-} from "./wrap";
+  FORMAT_BUTTONS,
+  type FormatTarget,
+  readFormatTarget,
+  type SelectionFormatActions,
+} from "./selection-format";
 
-/**
- * The zero-arg command surface the desktop formatting toolbar drives (ADR 0036).
- * The facade `useSelectionFormatActions` in OutlineEditor resolves the focused
- * (mirror-aware) content node internally, so the toolbar stays dumb chrome over
- * the existing emphasis/highlight/link machinery — no new mutation path, same
- * runStructural/field-edit semantics as the keymap.
- */
-export interface SelectionFormatActions {
-  /** Toggle an emphasis marker (`**`, `*`, `~~`, `~`) over the selection. */
-  toggleMarker: (marker: MarkerPair) => void;
-  /** Toggle a default-blue highlight over the selection. */
-  toggleHighlight: () => void;
-  /** Wrap the selection in a link + open the edit popover, or null when the
-   *  links plugin isn't loaded. */
-  createLink: (() => void) | null;
-}
+export type { SelectionFormatActions };
 
-const BOLD: MarkerPair = { pre: "**", post: "**" };
-const ITALIC: MarkerPair = { pre: "*", post: "*" };
-const STRIKE: MarkerPair = { pre: "~~", post: "~~" };
-const UNDER: MarkerPair = { pre: "~", post: "~" };
-const HIGHLIGHT: MarkerPair = { pre: "==", post: "==" };
-const SPOILER: MarkerPair = { pre: "||", post: "||" };
-
-/** The six togglable markers, in button order, for the active-state read. Link
- *  is create-only (no lit state), so it isn't here. Spoiler is a plain marker
- *  (ADR 0043), so it rides the same `toggleMarker`/`detectMarkerWrap` path as
- *  emphasis — no special-casing like highlight/link. */
-const MARKERS: ReadonlyArray<[key: string, marker: MarkerPair]> = [
-  ["bold", BOLD],
-  ["italic", ITALIC],
-  ["strike", STRIKE],
-  ["underline", UNDER],
-  ["highlight", HIGHLIGHT],
-  ["spoiler", SPOILER],
-];
-
-/** A coarse pointer never gets this toolbar — that's the mobile actions bar's
- *  world (ADR 0030). We gate on `(pointer: fine)`, the inverse seam. One shared
- *  MediaQueryList (the value only flips on hardware/OS change), so the
- *  selection-tick re-renders don't each allocate a fresh matchMedia. */
-const fineMql =
-  typeof window === "undefined" ? null : window.matchMedia("(pointer: fine)");
+/** A coarse pointer never gets this toolbar — touch formats from the mobile
+ *  actions bar's format mode (ADR 0030, ADR 0069). We gate on `(pointer: fine)`,
+ *  the inverse seam. One shared MediaQueryList (the value only flips on
+ *  hardware/OS change), so the selection-tick re-renders don't each allocate a
+ *  fresh matchMedia. */
+const fineMql = hasWindow() ? window.matchMedia("(pointer: fine)") : null;
 function subscribeFine(onChange: () => void) {
   fineMql?.addEventListener("change", onChange);
   return () => fineMql?.removeEventListener("change", onChange);
@@ -77,50 +35,6 @@ function useFinePointer(): boolean {
     () => fineMql?.matches ?? false,
     () => false,
   );
-}
-
-/** The `.node-text` contentEditable containing a DOM node, or null. Both an
- *  outline bullet and the zoomed title carry `.node-text`, so this is the honest
- *  "the selection is inside one editable outline span" test. */
-function outlineSpanOf(node: Node): HTMLElement | null {
-  const el = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
-  return el?.closest<HTMLElement>(".node-text") ?? null;
-}
-
-interface SelectionInfo {
-  rect: DOMRect;
-  /** The marker keys already wrapping the selection (lit buttons). */
-  active: Set<string>;
-}
-
-/** The current selection as a formatting target, or null when it isn't one: no
- *  selection, collapsed, or spanning more than one bullet (a cross-bullet range
- *  can't be wrapped in source, so we don't offer to). */
-function computeSelection(): SelectionInfo | null {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
-  const range = sel.getRangeAt(0);
-  const host = outlineSpanOf(range.startContainer);
-  if (!host || !host.isContentEditable) return null;
-  if (outlineSpanOf(range.endContainer) !== host) return null;
-
-  // Arrow-selecting a chip (e.g. a Bible ref) wraps its contenteditable=false
-  // atom in a non-collapsed range inside the span — which otherwise looks like a
-  // formatting target. A folded widget atom can't be source-wrapped, so suppress
-  // the toolbar when the selection is exactly one atom (ADR 0036).
-  if (getSelectedAtom(host)) return null;
-
-  const rect = range.getBoundingClientRect();
-  if (!rect.width && !rect.height) return null;
-
-  const active = new Set<string>();
-  const src = readActiveSelectionSource();
-  if (src) {
-    for (const [key, m] of MARKERS) {
-      if (detectMarkerWrap(src.source, src.start, src.end, m)) active.add(key);
-    }
-  }
-  return { rect, active };
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -188,7 +102,7 @@ export function SelectionFormatToolbar({
   actions: SelectionFormatActions;
 }) {
   const fine = useFinePointer();
-  const [info, setInfo] = useState<SelectionInfo | null>(null);
+  const [info, setInfo] = useState<FormatTarget | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
 
@@ -206,12 +120,13 @@ export function SelectionFormatToolbar({
     let dragging = false;
     const recompute = () => {
       raf = 0;
-      setInfo(dragging ? null : computeSelection());
+      setInfo(dragging ? null : readFormatTarget());
     };
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(recompute);
     };
     const onDown = (e: PointerEvent) => {
+      // SAFETY: a pointer event's target is the DOM node hit
       if (ref.current?.contains(e.target as Node)) return;
       dragging = true;
       setInfo(null);
@@ -269,54 +184,22 @@ export function SelectionFormatToolbar({
         visibility: box.w ? "visible" : "hidden",
       }}
     >
-      <ToolbarButton
-        label="Bold"
-        active={info.active.has("bold")}
-        onRun={() => actions.toggleMarker(BOLD)}
-      >
-        <BoldIcon className="size-4" />
-      </ToolbarButton>
-      <ToolbarButton
-        label="Italic"
-        active={info.active.has("italic")}
-        onRun={() => actions.toggleMarker(ITALIC)}
-      >
-        <ItalicIcon className="size-4" />
-      </ToolbarButton>
-      <ToolbarButton
-        label="Strikethrough"
-        active={info.active.has("strike")}
-        onRun={() => actions.toggleMarker(STRIKE)}
-      >
-        <StrikethroughIcon className="size-4" />
-      </ToolbarButton>
-      <ToolbarButton
-        label="Underline"
-        active={info.active.has("underline")}
-        onRun={() => actions.toggleMarker(UNDER)}
-      >
-        <UnderlineIcon className="size-4" />
-      </ToolbarButton>
-      <Divider />
-      <ToolbarButton
-        label="Highlight"
-        active={info.active.has("highlight")}
-        onRun={actions.toggleHighlight}
-      >
-        <HighlighterIcon className="size-4" />
-      </ToolbarButton>
-      <ToolbarButton
-        label="Spoiler"
-        active={info.active.has("spoiler")}
-        onRun={() => actions.toggleMarker(SPOILER)}
-      >
-        <EyeOffIcon className="size-4" />
-      </ToolbarButton>
-      {actions.createLink && (
-        <ToolbarButton label="Link" onRun={actions.createLink}>
-          <LinkIcon className="size-4" />
-        </ToolbarButton>
-      )}
+      {FORMAT_BUTTONS.map((b, i) => {
+        const run = b.action(actions);
+        if (!run) return null;
+        return (
+          <Fragment key={b.key}>
+            {i > 0 && FORMAT_BUTTONS[i - 1]?.group !== b.group && <Divider />}
+            <ToolbarButton
+              label={b.label}
+              active={b.marker ? info.active.has(b.key) : undefined}
+              onRun={run}
+            >
+              <b.Icon className="size-4" />
+            </ToolbarButton>
+          </Fragment>
+        );
+      })}
     </div>
   );
 }

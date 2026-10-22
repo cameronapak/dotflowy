@@ -20,7 +20,7 @@ import { Schema } from "effect";
  * transforms and no optional fields, so the schema's Encoded and Type are the
  * same all-required shape -- which is what keeps TanStack DB's schema-typed
  * collection overload (WritableObjectDeep) happy. We always construct complete
- * nodes via makeNode(), so there's nothing to default.
+ * nodes via createNode(), so there's nothing to default.
  */
 export const nodeSchema = Schema.Struct({
   id: Schema.String,
@@ -38,10 +38,13 @@ export const nodeSchema = Schema.Struct({
   // timestamp beats a boolean: it carries both "is it pinned?" and "in what
   // order?" in one field. See ADR 0011.
   bookmarkedAt: Schema.NullOr(Schema.Number),
+  // Direct owner intent (ADR 0067). Descendant and mirror locks are derived
+  // from this field; locking one node never rewrites its whole subtree.
+  locked: Schema.Boolean,
   // Mirror pointer (ADR 0022). `null` = this node is its own source (the normal
   // case); a node id = this node is a *mirror* that windows that source's content
   // and children. The content id is `mirrorOf ?? id`. Required + nullable, no
-  // default (ADR 0003) -- makeNode() sets it to null. Stage 0 ships this field
+  // default (ADR 0003) -- createNode() sets it to null. Stage 0 ships this field
   // dark: nothing reads it yet.
   mirrorOf: Schema.NullOr(Schema.String),
   createdAt: Schema.Number,
@@ -51,18 +54,19 @@ export const nodeSchema = Schema.Struct({
   // non-null string = the harness name of the agent that created it via the MCP
   // server (e.g. "Claude"). Stamped server-side at the one MCP write choke point
   // (worker/outline-ops.ts newNode); the client always sets it to null via
-  // makeNode. Required + nullable, no default (ADR 0003). Read only for display
+  // createNode. Required + nullable, no default (ADR 0003). Read only for display
   // (the provenance plugin's origin marker) -- never a semantic branch.
   origin: Schema.NullOr(Schema.String),
   // Node kind (ADR 0045). `null` = a bullet or a task, decided by `isTask`;
   // `"paragraph"` = prose, drawn with a paragraph glyph where the bullet dot would be.
-  // The three kinds are mutually exclusive, but the TYPE cannot say so: `kind`
+  // `"embed"` = one external URL, with a plugin-rendered body below its text.
+  // The four kinds are mutually exclusive, but the TYPE cannot say so: `kind`
   // is additive precisely so `isTask` never had to migrate. Exclusivity is an
   // invariant of the mutation funnels instead (setKind clears `isTask`;
   // setIsTask clears `kind`), and the renderer tie-breaks in `kind`'s favor if a
   // stale client ever writes the illegal pair. Required + nullable, no default
-  // (ADR 0003) -- makeNode() sets it to null.
-  kind: Schema.NullOr(Schema.Literal("paragraph")),
+  // (ADR 0003) -- createNode() sets it to null.
+  kind: Schema.NullOr(Schema.Literals(["paragraph", "embed"])),
 });
 
 export type Node = Schema.Schema.Type<typeof nodeSchema>;

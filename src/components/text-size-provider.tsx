@@ -42,8 +42,11 @@ function subscribe(onStoreChange: () => void) {
 function getSnapshot(): TextSize {
   try {
     const stored = localStorage.getItem(TEXT_SIZE_KEY);
-    if (stored && VALID_SIZES.has(stored as TextSize))
+    // SAFETY: VALID_SIZES.has confirmed stored is one of the TextSize literals
+    if (stored && VALID_SIZES.has(stored as TextSize)) {
+      // SAFETY: set membership confirmed by the condition above
       return stored as TextSize;
+    }
   } catch {
     // localStorage can throw (private mode / disabled); fall back to default.
   }

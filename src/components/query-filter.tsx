@@ -27,6 +27,7 @@ import {
 import { normalizeQuery } from "../data/saved-queries-core";
 import { collectTagCorpus } from "../data/tags";
 import { getTreeIndex } from "../data/tree-store";
+import { hasWindow } from "../env";
 import { filterOperatorInfos } from "../plugins/registry";
 import {
   addTermToFilter,
@@ -61,6 +62,7 @@ export function useQueryFilter() {
   const params = useParams({ strict: false });
   const rootId = params.nodeId ?? null;
   const navigate = useNavigate();
+  // SAFETY: URL search params are string-valued, only the optional q string is read
   const search = useSearch({ strict: false }) as { q?: string };
   const rawQuery = search.q ?? "";
   const active = rawQuery.trim().length > 0;
@@ -113,6 +115,7 @@ export function useQueryFilter() {
  *  state is read from the search param directly rather than via
  *  `useQueryFilter()`, whose Escape/nav side effects would double-bind here. */
 export function FilterButton() {
+  // SAFETY: URL search params are string-valued, only the optional q string is read
   const search = useSearch({ strict: false }) as { q?: string };
   const active = (search.q ?? "").trim().length > 0;
   // `() => false` server snapshot keeps the header prerender-safe (the repo
@@ -638,7 +641,7 @@ export function QueryFilterBar() {
       el.setSelectionRange(end, end);
       recompute();
       const reduceMotion =
-        typeof window !== "undefined" &&
+        hasWindow() &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (needsExpandWait && !reduceMotion) {
         // onFocus would open immediately; hold until the band settles.
@@ -697,6 +700,9 @@ export function QueryFilterBar() {
   };
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Typing already opens and recomputes the popover. Its deferred initial
+    // reveal must not later reset a suggestion the user has highlighted.
+    cancelDeferredReveal();
     const value = e.target.value;
     draftRef.current = value;
     setDraft(value);
@@ -718,6 +724,7 @@ export function QueryFilterBar() {
     // Focus moving INTO the popover (the Saved rename input) must not collapse
     // it -- return before any state change so `focused` stays true and the
     // popover (hence the rename input) stays mounted (ADR 0048).
+    // SAFETY: relatedTarget is null when focus has nowhere to go, else an EventTarget that received focus
     const rt = e.relatedTarget as HTMLElement | null;
     if (rt && rt.closest("[data-filter-popover]")) return;
     setFocused(false);
@@ -732,6 +739,13 @@ export function QueryFilterBar() {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Keep native input undo/redo out of the document's outline history handler.
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+      e.stopPropagation();
+      // React delegates on document too; stop other listeners on that same target.
+      e.nativeEvent.stopImmediatePropagation();
+      return;
+    }
     if (e.key === "ArrowDown") {
       if (!showPopover) return;
       e.preventDefault();

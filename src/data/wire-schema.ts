@@ -33,15 +33,16 @@ export const NodeSchema = Schema.Struct({
   completed: Schema.Boolean,
   collapsed: Schema.Boolean,
   bookmarkedAt: Schema.NullOr(Schema.Number),
+  locked: Schema.Boolean,
   // Mirror pointer (ADR 0022): null = own source, an id = a mirror of that node.
   // Required + nullable at the boundary, same as every other field — the client
-  // always sends it (makeNode), so a body without it is malformed (→ 400).
+  // always sends it (createNode), so a body without it is malformed (→ 400).
   mirrorOf: Schema.NullOr(Schema.String),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
   // Provenance (write-once): null = human, a harness name = the agent that made
   // it over MCP. Mirrors the client's `nodeSchema` field-for-field; the client
-  // always sends it (makeNode), the DO always returns it (rowToNode), so a body
+  // always sends it (createNode), the DO always returns it (rowToNode), so a body
   // without it is malformed (→ 400). Backfilled to null on any legacy/e2e row
   // that omits it (collection.ts withNodeDefaults, DO ADD COLUMN default NULL).
   origin: Schema.NullOr(Schema.String),
@@ -49,7 +50,7 @@ export const NodeSchema = Schema.Struct({
   // prose. Additive + nullable so `isTask` never had to migrate; the literal
   // union widens if more kinds arrive. Same required-and-nullable boundary shape
   // as `mirrorOf`/`origin`, backfilled the same three ways.
-  kind: Schema.NullOr(Schema.Literal("paragraph")),
+  kind: Schema.NullOr(Schema.Literals(["paragraph", "embed"])),
 });
 export type Node = Schema.Schema.Type<typeof NodeSchema>;
 
@@ -74,8 +75,22 @@ export type ChangeOp = Schema.Schema.Type<typeof ChangeOpSchema>;
 export const ChangeFrameSchema = Schema.Struct({
   seq: Schema.Number,
   ops: Schema.Array(ChangeOpSchema),
+  /** Transport correlation only: absent means an old client or external writer. */
+  clientId: Schema.optional(Schema.String),
 });
 export type ChangeFrame = Schema.Schema.Type<typeof ChangeFrameSchema>;
+
+const CalendarSyncStateSchema = Schema.Struct({
+  weekStart: Schema.Literals(["sunday", "monday"]),
+  upserts: Schema.optional(
+    Schema.Array(Schema.Struct({ key: Schema.String, nodeId: Schema.String })),
+  ),
+  deletes: Schema.optional(Schema.Array(Schema.String)),
+});
+export type CalendarSyncState = Schema.Schema.Type<
+  typeof CalendarSyncStateSchema
+>;
+const calendar = Schema.optional(CalendarSyncStateSchema);
 
 // --- DO → client frames -----------------------------------------------------
 // `snapshot` = full state (initial connect or resync past the changelog window);
@@ -100,17 +115,21 @@ const SnapshotMessage = Schema.Struct({
   seq: Schema.Number,
   nodes: Schema.Array(NodeSchema),
   serverVersion,
+  calendar,
 });
 const ResumeMessage = Schema.Struct({
   type: Schema.Literal("resume"),
   seq: Schema.Number,
   changes: Schema.Array(ChangeFrameSchema),
   serverVersion,
+  calendar,
 });
 const ChangeMessage = Schema.Struct({
   type: Schema.Literal("change"),
   seq: Schema.Number,
   ops: Schema.Array(ChangeOpSchema),
+  clientId: Schema.optional(Schema.String),
+  calendar,
 });
 
 /** The union of every DO→client frame. `realtime.ts` decodes inbound frames

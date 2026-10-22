@@ -2,7 +2,6 @@
 @import "shadcn/tailwind.css";
 @import "tw-animate-css";
 @import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -11,7 +10,8 @@
  * is the mirror-blue (`--brand-blue` = the app's `--mirror-source`), used sparingly
  * and SOLID. This site follows suit: buttons stay grayscale (the app's real button
  * color), and blue appears only on interactive text (the hero accent word, links,
- * the live caret). No gradient, no `background-clip:text`. See PRODUCT.md principle 6. */
+ * the live caret). No gradient, no `background-clip:text`. See PRODUCT.md principle 6.
+ * Typeface is Geist only — no mono on the marketing surface. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -41,7 +41,7 @@
   --radius-4xl: calc(var(--radius) * 2.6);
   --font-heading: var(--font-sans);
   --font-sans: "Geist Variable", sans-serif;
-  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+  --font-mono: var(--font-sans);
 }
 
 :root {
@@ -109,5 +109,57 @@
     html {
       scroll-behavior: auto;
     }
+  }
+}
+
+/* The app's tag palette (src/data/tag-colors.ts), for hero concept graphics. */
+:root {
+  --tag-red: oklch(0.94 0.045 25);
+  --tag-red-fg: oklch(0.48 0.16 25);
+  --tag-orange: oklch(0.94 0.05 55);
+  --tag-orange-fg: oklch(0.48 0.13 50);
+  --tag-yellow: oklch(0.95 0.06 90);
+  --tag-yellow-fg: oklch(0.47 0.11 85);
+  --tag-green: oklch(0.94 0.06 150);
+  --tag-green-fg: oklch(0.45 0.13 150);
+  --tag-teal: oklch(0.94 0.05 195);
+  --tag-teal-fg: oklch(0.46 0.1 200);
+  --tag-blue: oklch(0.94 0.05 250);
+  --tag-blue-fg: oklch(0.49 0.15 255);
+  --tag-indigo: oklch(0.94 0.05 280);
+  --tag-indigo-fg: oklch(0.49 0.16 280);
+  --tag-purple: oklch(0.94 0.05 310);
+  --tag-purple-fg: oklch(0.49 0.17 310);
+  --tag-pink: oklch(0.94 0.05 345);
+  --tag-pink-fg: oklch(0.49 0.17 345);
+}
+.dark {
+  --tag-red: oklch(0.34 0.055 25);
+  --tag-red-fg: oklch(0.85 0.1 25);
+  --tag-orange: oklch(0.34 0.055 55);
+  --tag-orange-fg: oklch(0.86 0.1 60);
+  --tag-yellow: oklch(0.35 0.06 90);
+  --tag-yellow-fg: oklch(0.88 0.11 90);
+  --tag-green: oklch(0.34 0.06 150);
+  --tag-green-fg: oklch(0.86 0.11 150);
+  --tag-teal: oklch(0.34 0.055 195);
+  --tag-teal-fg: oklch(0.85 0.09 200);
+  --tag-blue: oklch(0.34 0.06 250);
+  --tag-blue-fg: oklch(0.84 0.11 255);
+  --tag-indigo: oklch(0.34 0.06 280);
+  --tag-indigo-fg: oklch(0.84 0.12 280);
+  --tag-purple: oklch(0.34 0.06 310);
+  --tag-purple-fg: oklch(0.85 0.12 310);
+  --tag-pink: oklch(0.34 0.06 345);
+  --tag-pink-fg: oklch(0.85 0.12 345);
+}
+
+@keyframes hero-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -6px;
   }
 }

@@ -18,7 +18,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import type { SearchAction } from "../plugins/types";
+import type { PluginDef, SearchAction } from "../plugins/types";
 
 import { getNodeActionBridge } from "../data/command-bridge";
 import {
@@ -33,7 +33,7 @@ import { matchSavedQuery } from "../data/saved-queries-core";
 import { buildTrail, type Node, type TreeIndex } from "../data/tree";
 import { useTree } from "../data/useTree";
 import {
-  searchAliases,
+  usePluginChrome,
   searchActions,
   searchAnnotation,
 } from "../plugins/registry";
@@ -102,7 +102,11 @@ const SAVED_FILTERS_HEADING = (
   </div>
 );
 
-function buildFuse(index: TreeIndex, nodes: Node[]): Fuse<Searchable> {
+function buildFuse(
+  index: TreeIndex,
+  nodes: Node[],
+  aliasProviders: readonly NonNullable<PluginDef["searchAliases"]>[],
+): Fuse<Searchable> {
   const mirrorsOn = isMirrorsEnabled();
   const searchable: Searchable[] = [];
   for (const n of nodes) {
@@ -111,7 +115,7 @@ function buildFuse(index: TreeIndex, nodes: Node[]): Fuse<Searchable> {
     searchable.push({
       node: n,
       text: flattenNodeText(index, n.text),
-      aliases: searchAliases(n),
+      aliases: aliasProviders.flatMap((provider) => provider(n)),
     });
   }
   return new Fuse(searchable, FUSE_OPTIONS);
@@ -136,6 +140,7 @@ function matchAction(q: string, action: CommandCenterAction): boolean {
  *  (unlike the focus registry's row key, which is a path address inside a
  *  mirror), so this targets the underlying node directly. */
 function readFocusedNodeId(): string | null {
+  // SAFETY: document.activeElement is an Element or null, elements here are HTMLElements
   const active = document.activeElement as HTMLElement | null;
   return active?.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId ?? null;
 }
@@ -243,14 +248,20 @@ function SwitcherDialog({
   // opt-out (ADR 0019). The list is rebuilt from cheap state each render anyway.
   "use no memo";
   const { index } = useTree();
+  const { aliasProviders } = usePluginChrome();
   const navigate = useNavigate();
   const bridge = getNodeActionBridge();
 
-  const nodes = useMemo(() => Array.from(index.byId.values()), [index]);
+  // A closed command center must not scan the outline on every keystroke.
+  // Opening it reads the current index, including edits made while closed.
+  const nodes = useMemo(
+    () => (open ? Array.from(index.byId.values()) : []),
+    [open, index],
+  );
 
   const fuse = useMemo(
-    () => (open ? buildFuse(index, nodes) : null),
-    [open, index, nodes],
+    () => (open ? buildFuse(index, nodes, aliasProviders) : null),
+    [open, index, nodes, aliasProviders],
   );
 
   const q = query.trim();
@@ -270,11 +281,9 @@ function SwitcherDialog({
     () => (open ? resolveAmbientTargetId(targetFocusedId) : null),
     [open, targetFocusedId],
   );
-  const ambientActions = useMemo(
-    () =>
-      ambientTargetId ? buildNodeActions(ambientTargetId, index, bridge) : [],
-    [ambientTargetId, index, bridge],
-  );
+  const ambientActions = ambientTargetId
+    ? buildNodeActions(ambientTargetId, index, bridge)
+    : [];
   const ambientLabel = ambientTargetId
     ? flattenNodeText(
         index,
@@ -291,10 +300,9 @@ function SwitcherDialog({
 
   // Per-result "actions for this node" sub-view (ADR 0034 / #83's `->` path).
   const [actionNodeId, setActionNodeId] = useState<string | null>(null);
-  const subActions = useMemo(
-    () => (actionNodeId ? buildNodeActions(actionNodeId, index, bridge) : []),
-    [actionNodeId, index, bridge],
-  );
+  const subActions = actionNodeId
+    ? buildNodeActions(actionNodeId, index, bridge)
+    : [];
   const subLabel = actionNodeId
     ? flattenNodeText(index, index.byId.get(actionNodeId)?.text ?? "").trim() ||
       "Untitled"
@@ -328,8 +336,12 @@ function SwitcherDialog({
   }
 
   function runAction(action: CommandCenterAction) {
-    close();
+    if (action.disabled) return;
+    // Run BEFORE close: verbs like Delete prefer `findFocusedId() ?? id`, and
+    // closing the dialog first lets Radix restore focus onto an unrelated row
+    // (Lunora tree remounts make this common) — deleting the wrong bullet.
     action.run();
+    close();
   }
 
   const actions: SearchAction[] = q
@@ -560,7 +572,7 @@ function ActionCommandRow({
 }) {
   const Icon = action.icon;
   return (
-    <CommandItem value={action.id} onSelect={onRun}>
+    <CommandItem value={action.id} onSelect={onRun} disabled={action.disabled}>
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="truncate">{action.label}</span>
@@ -568,18 +580,17 @@ function ActionCommandRow({
           {action.description}
         </span>
       </div>
-      {action.hotkey &&
-        action.hotkey.length > 0 && (
-          // data-slot="command-shortcut" hides CommandItem's trailing check so the
-          // shortcut sits flush at the row's right edge (ml-auto).
-          <span data-slot="command-shortcut" className="ml-auto shrink-0">
-            <KbdGroup>
-              {action.hotkey.map((k, i) => (
-                <Kbd key={i}>{k}</Kbd>
-              ))}
-            </KbdGroup>
-          </span>
-        )}
+      {action.hotkey && action.hotkey.length > 0 && (
+        // data-slot="command-shortcut" hides CommandItem's trailing check so the
+        // shortcut sits flush at the row's right edge (ml-auto).
+        <span data-slot="command-shortcut" className="ml-auto shrink-0">
+          <KbdGroup>
+            {action.hotkey.map((k, i) => (
+              <Kbd key={i}>{k}</Kbd>
+            ))}
+          </KbdGroup>
+        </span>
+      )}
     </CommandItem>
   );
 }

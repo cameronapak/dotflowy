@@ -13,8 +13,10 @@ import type { ComponentType, ReactNode } from "react";
 // Type-only (erased at runtime) -- PluginContext.mutations IS the promoted
 // NodeCommands (D8), so we reference its type without a runtime import cycle.
 import type { NodeCommands } from "../components/node-commands";
+import type { CommandCenterAction } from "../data/command-center-types";
 import type { FilterOperator } from "../data/filter-query";
 import type { Node, TreeIndex } from "../data/tree";
+import type { ViewStream } from "../data/view-stream";
 
 export type { FilterOperator } from "../data/filter-query";
 
@@ -264,15 +266,26 @@ export interface InteractionSpec {
 export interface ViewContext {
   /** Whether completed bullets are shown (the todo plugin's hide transform). */
   showCompleted: boolean;
-  /** The current route's search params (opaque to the core -- plugins parse). */
-  search: Record<string, unknown>;
+  /** The current route's search params, keyed by name (parsed from the URL). */
+  search: RouteSearch;
   /** The current zoom root, or null at the top. */
   rootId: string | null;
 }
 
+/** The string-valued search params the shell carries into the view pipe. */
+export interface RouteSearch {
+  /** The `?q=` filter query (ADR 0047). */
+  q?: string;
+  /** Focus landing hint, e.g. `focus=last` from /today. */
+  focus?: string;
+  /** The day stream's in-view day (ADR 0070). */
+  day?: string;
+}
+
 /**
  * A precomputed visible-set for a global view transform (the tag filter today).
- * `visibleIds`: nodes that render (matches + their ancestor context).
+ * Both sets contain render keys: bare node IDs until a mirror is crossed.
+ * `visibleIds`: rows that render (matches, their descendants, and ancestor context).
  * `matchIds`: the subset rendered as real matches; the rest are dimmed context.
  */
 export interface ViewFilter {
@@ -331,8 +344,12 @@ export interface PasteInput {
  *  link). Async follow-up work writes back through `ctx.mutations`. ADR 0016. */
 export interface AfterPasteInput {
   inserted: string;
+  /** Full source before and after insertion, including enclosing code/spoilers. */
+  before: string;
+  text: string;
   nodeId: string;
-  el: HTMLElement;
+  /** Structural pastes may create offscreen nodes without an element. */
+  el?: HTMLElement;
 }
 
 /** What an autoformat transform is told: the just-typed SOURCE text and the
@@ -392,7 +409,7 @@ export interface CommandSpec {
   keywords: string[];
   /** Hide the command for nodes it doesn't apply to (e.g. "To-do" once the
    *  bullet already is a task). */
-  available(node: Node): boolean;
+  available(node: Node, ctx?: PluginContext): boolean;
   /**
    * Marks a command whose `run` needs a live caret/text-selection inside the
    * bullet (e.g. emphasis wrap). The `/` palette and Seam D still run it (a caret
@@ -455,7 +472,10 @@ export type SlotPosition =
   | "row:before-text"
   | "title:before-text"
   | "row:after-text"
-  | "title:after-text";
+  | "title:after-text"
+  // Reviewed block content outside contentEditable, never runtime plugin HTML.
+  | "row:body"
+  | "title:body";
 
 export interface SlotSpec {
   id: string;
@@ -492,6 +512,13 @@ export interface HeaderSlotSpec {
 // optional; the core never depends on the plugin filling them in.
 
 export interface NodeProtection {
+  /** Optional plugin-owned visual identity for the protected node. The core
+   *  renders it in the shared protection position on rows and zoomed titles.
+   *  Omit for the generic core protection indicator. */
+  indicator?: {
+    icon: ComponentType<{ size?: number; strokeWidth?: number }>;
+    label: string;
+  };
   /** General "why" toasted for any rejected action, overriding the core default.
    *  Also the message for a rejected delete specifically. Per-action fields below
    *  override it for their action. */
@@ -526,6 +553,31 @@ export interface SubheaderSlotSpec {
   /** Return null to contribute nothing. `getCtx` is optional for plugins that
    *  read route state directly (the tag filter); call it inside handlers only. */
   render(getCtx: () => PluginContext): ReactNode;
+}
+
+// --- Seam M: external structural drop targets ------------------------------
+//
+// The core owns the bullet drag gesture and ordinary outline-gap projection. A
+// compiled-in plugin may expose one of its rendered controls as an alternate
+// destination without teaching core what that control means. Core stamps the
+// active element with `data-external-drop-active`; the plugin owns that state's
+// styling and the structural commit. First consumer: Daily's week-calendar day
+// pills (ADR 0054).
+
+export interface ExternalDropTargetSpec {
+  id: string;
+  /** `closest()` selector resolved from the element under the pointer. */
+  selector: string;
+  /** Optional event-time gate. Omit when every matching element accepts every
+   *  ordinary draggable root set. */
+  accepts?(element: HTMLElement, nodeIds: readonly string[]): boolean;
+  /** Commit the drop. Async work starts through `ctx.run`, so the editor owns
+   *  fiber lifetime and failures rather than leaving a floating promise. */
+  onDrop(
+    element: HTMLElement,
+    nodeIds: readonly string[],
+    ctx: PluginContext,
+  ): void;
 }
 
 // --- Protected nodes --------------------------------------------------------
@@ -656,7 +708,23 @@ export interface CaptureDestination {
   resolve(): Promise<string | null>;
 }
 
+// --- Seam N: view streams (ADR 0070) ----------------------------------------
+//
+// A zoom root may continue into neighboring roots, read as one scrolling list
+// (the Daily plugin's day stream). The plugin names the sections and what an
+// empty one means; core owns the windowed list, the caret walk across sections,
+// and scroll. See src/data/view-stream.ts.
+
+export type { ViewStream } from "../data/view-stream";
+
 // --- The plugin object ------------------------------------------------------
+
+/** A node-less action. Optional checked/menuLabel projects a toggle into the View menu.
+ * IDs are local to the plugin; the registry namespaces them. */
+export interface GlobalActionSpec extends Omit<CommandCenterAction, "scope"> {
+  menuLabel?: string;
+  checked?: boolean;
+}
 
 /**
  * One plugin: a default-exported object registering into whatever seams it
@@ -664,6 +732,15 @@ export interface CaptureDestination {
  */
 export interface PluginDef {
   id: string;
+  /** Node-less commands, retained even when optional editor seams are off so
+   * users can re-enable a feature. Read-only snapshot; no hooks or side effects. */
+  globalActions?(): GlobalActionSpec[];
+  /** Narrow appearance seam: first non-null font family wins, applied by the
+   * core ONLY to node text and its inline descendants, never app chrome. */
+  editorFont?(): string | null;
+  /** Notify when global actions or editorFont change. Account preferences are
+   * already observed by the registry; browser-local modes supply this signal. */
+  chromeChanged?(notify: () => void): () => void;
   // NOTE: there is deliberately NO `styles` seam (ADR 0031 retired raw plugin
   // CSS -- a plugin could restyle the whole app through it). A plugin styles its
   // own tokens/slots with Tailwind utility classes on the `El`/JSX it returns
@@ -683,6 +760,8 @@ export interface PluginDef {
   headerSlots?: HeaderSlotSpec[];
   /** Seam F (subheader): contextual chrome below the header (the tag filter). */
   subheaderSlots?: SubheaderSlotSpec[];
+  /** Seam M: plugin-owned DOM controls that accept a structural bullet drop. */
+  externalDropTargets?: ExternalDropTargetSpec[];
   /** Protected nodes: mark `nodeId` protected (the daily container is the first
    *  consumer). Return `false` to allow, or `true` / a {@link NodeProtection} to
    *  protect. `true` is enough -- the core enforces every rule (no delete / blank
@@ -736,6 +815,13 @@ export interface PluginDef {
    *  daily plugin returns today's note). First non-null across plugins wins; with
    *  no provider quick-add falls back to the top level. */
   captureDestination?(): CaptureDestination | null;
+  /** Seam N: the stream to show around this zoom root, or null for an ordinary
+   *  zoom view (ADR 0070). Return the SAME object until something it reports
+   *  changes, so the editor's cached list stays warm. First non-null wins. */
+  viewStream?(rootId: string): ViewStream | null;
+  /** Seam N: notify when any stream's sections may have changed without a tree
+   *  change (a section gained its node). Returns an unsubscribe. */
+  viewStreamChanged?(cb: () => void): () => void;
 }
 
 /** Identity helper -- gives a plugin object its type without a cast (D5). */

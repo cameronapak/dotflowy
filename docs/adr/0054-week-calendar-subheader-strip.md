@@ -7,6 +7,8 @@ and one-click navigation between days. Adapted (heavily) from iconiqui's
 MIT-licensed week-calendar component; most of that component was deliberately
 cut.
 
+Amended by [ADR 0070](./0070-day-stream.md): the strip now scrolls the day stream instead of navigating, and an account option can turn it off.
+
 ## Decisions
 
 1. **The strip is a daily-plugin subheader slot (Seam F) — the seam's first
@@ -43,22 +45,34 @@ cut.
 
    **Motion grammar (revised after an animation review):** the strip's chrome
    is **stationary** across a day switch. The selection pill is the **sole
-   moving element** — a `layoutId` sliding from the old day to the new one, a
+   moving element** — it slides from the old day to the new one using only the
+   horizontal delta captured from the current painted pills immediately before
+   navigation commits, with a
    **tween** on the house curve (`cubic-bezier(0.32, 0.72, 0, 1)`, the zoom
    morph's curve in `styles.css`), not a spring (dotflowy doesn't use springs,
    and the underdamped spring overshot). The week row has **no entrance
-   animation** — paging swaps it instantly (the month label + `W29` badge carry
-   the change), and a same-week switch is silent chrome. **Navigation from the
-   strip is plain, not the zoom morph** (`ctx.nav.open` / `goToDate(…, {morph:
-false})`): the clicked day isn't rendered in the outgoing view, so there's
+   animation** — paging swaps it instantly (the month label + date-range badge
+   carry the change), and a same-week switch is silent chrome. **Navigation
+   from the strip is plain, not the zoom morph** (`ctx.nav.open`): the clicked
+   day isn't rendered in the outgoing view, so there's
    no element to morph FROM — the pill slide IS the transition, and a zoom
    morph would stack a redundant title pop-in over it. Reduced motion snaps the
    pill and the subheader height, as before. The subheader itself **snaps to
    full height on mount** (it only animates open/close changes made after first
    paint), so the per-day-switch editor remount can't make the band re-open.
+   After async creation, the click re-queries the current pills and records only
+   their x delta immediately before navigation commits. The destination latches
+   that handoff until `animationend`; later renders cannot cut the tween short.
+   The handoff is discarded if paging or reduced-motion cancellation removes
+   the animation, so returning to the selected week cannot replay stale motion.
+   The painted pill does not use shared-layout projection, which would also
+   project the window's scroll restoration into y and scale. A mount-snap marker
+   makes delayed Daily chrome open at full height without relying on Motion timing.
+   Competing async clicks are latest-wins; failed or detached requests publish
+   no handoff and cannot navigate later.
 
-5. **Orientation chrome:** a quiet month+year label ("July 2026", the visible
-   ISO week's majority month — Thursday's month) plus a `W29` ISO week badge.
+5. **Orientation chrome:** a quiet month+year label ("July 2026") plus the
+   Calendar week's unambiguous date range (ADR 0068).
    Paging is ephemeral local state (reset on route change); while the visible
    week ≠ the zoomed day's week, a snap-back affordance re-centers the strip —
    **navigation-free**, unlike the header Today button (which navigates and
@@ -68,6 +82,39 @@ false})`): the clicked day isn't rendered in the outgoing view, so there's
    mapping AND the node has children. Existence alone would light up every
    shell minted by a seed-free peek, decaying the signal into noise.
 
+7. **The seven visible day pills are external structural drop targets.** A
+   node dragged from the open Daily note can be dropped on a date to move that
+   node and its whole subtree to the destination Daily note's end. A missing
+   destination is created seed-free before the move; Undo restores the moved
+   nodes but intentionally keeps that empty day, matching "Send to Today."
+   The view stays on the source day and confirms with the standard Move toast
+   ("Moved to Tuesday, October 6" + **Go**). Same-day drops have the same
+   append-or-no-op semantics as "Send to Today." Only the seven visible dates
+   participate — chevrons do not page on hover and the strip has no edge paging.
+
+   During drag-over, the outline insertion line is suppressed and the target
+   pill uses the chosen **Primary ring** treatment: a 2px monochrome primary
+   outline, muted fill, and quiet outer ring, with no chromatic accent. Hit
+   testing uses the pointer/finger center against the pill's existing ≥44px
+   target; adjacent invisible hit areas would make boundaries ambiguous. An
+   unminted day keeps the nodes in place while the existing Daily progress bar
+   reports creation. Failure leaves both tree and selection unchanged.
+
+   This is a narrow, generic **external drop-target plugin seam**, not a Daily
+   branch in core and not a private global-event bridge. Core owns the pointer
+   lifecycle, cancellation, dragged root set, and target arbitration; a
+   reviewed compiled-in plugin owns its rendered target, acceptance, active
+   styling, and commit. The seam is Lane A only (ADR 0031): it does not allow
+   runtime third-party code onto the outline surface.
+
+   If the grabbed row belongs to an active node selection, every selected root
+   moves in order as one structural batch and one undo step; all selected rows
+   dim, the drag pill keeps the grabbed text plus a count ("Prepare launch
+   notes +2"), and success clears selection because the roots left the current
+   day. A cancelled or failed drop keeps selection. The existing selection
+   actor supplies the root ids, but the established imperative drag lifecycle
+   remains imperative — this does not add another XState machine (ADR 0020).
+
 ## Consequences
 
 - The subheader band gains ~2 rows of sticky height on every day page. Accepted
@@ -75,11 +122,12 @@ false})`): the clicked day isn't rendered in the outgoing view, so there's
 - The seam-F subheader table in `AGENTS.md` gains its first plugin owner.
 - The strip lives in ONE render path (chrome), so the bullet/title/mini-editor
   duality trap does not apply.
-- `goToDate` gained a second in-plugin caller, and the strip↔`index.tsx`
-  import cycle it forced was real — so the whole get-or-create engine
-  (`getOrCreateDay`/`goToDate` + the scaffold cascade/migration) moved to
-  `get-or-create.ts`, a behavior-identical extraction (verified against the old
-  bodies in review) save for the one deliberate addition: `goToDate` gained the
-  `morph` option the strip needs for its plain (non-morph) navigation.
-  `index.tsx` keeps only the `protects` seam and re-exports `getOrCreateDay` for
-  `routes/today.tsx`.
+- External drop targets become a reviewed plugin capability. The first
+  consumer is Daily; ordinary outline gaps keep their existing projection and
+  indicator, while an active external target takes precedence.
+- The whole get-or-create engine (`getOrCreateDay`/`goToDate` + the scaffold
+  cascade/migration) lives in `get-or-create.ts`. The strip calls
+  `getOrCreateDay` directly, then publishes its measured handoff immediately
+  before plain `ctx.nav.open`; the other date-entry surfaces keep using
+  `goToDate`. `index.tsx` keeps only the `protects` seam and re-exports
+  `getOrCreateDay` for `routes/today.tsx`.

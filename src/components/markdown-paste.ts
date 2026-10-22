@@ -5,9 +5,8 @@
 // import's sliced apply once the batch is big enough to freeze the main thread.
 //
 // This is CORE, deliberately: structural paste *creates nodes*, and every guard
-// that makes node creation safe is core. It runs BEFORE the Seam I plugin chain,
-// which is why a bare URL inside a pasted line stays plain text while a lone
-// pasted URL still becomes a chip (ADR 0044: "a transfer preserves").
+// that makes node creation safe is core. Parsing precedes the plugin chain;
+// post-paste effects run only after the created nodes have persisted.
 
 import { toast } from "sonner";
 
@@ -15,6 +14,7 @@ import { nodesCollection } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
 import { capture, drop, RESTORE_SLICE_OPS } from "../data/history";
+import { getLiveNodes } from "../data/live-nodes";
 import {
   countForest,
   parseMarkdownForest,
@@ -24,8 +24,9 @@ import {
   type MdPastePlacement,
   type MdPastePlan,
 } from "../data/markdown-import";
-import { runStructural, runStructuralSliced } from "../data/structural";
-import { buildTreeIndex, makeNode, now, type Node } from "../data/tree";
+import { notifySaveFailed } from "../data/save-failure";
+import { runStructuralTracked, runStructuralSliced } from "../data/structural";
+import { buildTreeIndex, createNode, now, type TreeIndex } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import {
   getViewFilter,
@@ -34,7 +35,7 @@ import {
 } from "../data/view-state";
 import { scrollRowIntoView } from "../data/virtual-nav";
 import { buildVisibleRows } from "../data/visible-order";
-import { setRestoreProgress } from "./history-restore";
+import { setRestoreProgress } from "./history-restore-opener";
 import { guardProtected } from "./protection";
 
 /** How the editor hands the caret back once the tree has landed. `offset` is a
@@ -64,6 +65,9 @@ export interface MarkdownPasteArgs {
   /** The `.outline-row` to shake when a protection guard rejects. */
   rowEl: Element | null;
   focus: PasteFocusSink;
+  onApplied?: (
+    writes: Array<{ nodeId: string; before: string; text: string }>,
+  ) => void;
 }
 
 /**
@@ -126,6 +130,8 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
     return true;
 
   const timestamp = now();
+  const opCount = 1 + plan.insertCount + plan.repoints.length;
+
   const writeAnchor = () => {
     nodesCollection.update(anchorId, (draft) => {
       draft.text = plan.anchor.text;
@@ -144,10 +150,14 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
       draft.updatedAt = timestamp;
     });
   };
-  const writeInsert = (i: number) => {
-    const node = plan.inserts[i]!;
+  const writeInserts = (start: number, end: number) => {
+    if (start === end) return;
     nodesCollection.insert(
-      makeNode({ ...node, createdAt: timestamp, updatedAt: timestamp }),
+      plan.inserts
+        .slice(start, end)
+        .map((node) =>
+          createNode({ ...node, createdAt: timestamp, updatedAt: timestamp }),
+        ),
     );
   };
   const writeRepoints = () => {
@@ -159,26 +169,49 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
     }
   };
 
-  const opCount = 1 + plan.insertCount + plan.repoints.length;
   // ONE undo point BEFORE the batch: a single Cmd+Z removes the whole paste.
-  capture(index, activeKey);
+  capture(index, activeKey, null, { label: "paste" });
+
+  const notify = () => {
+    const literalIds = new Set(plan.literalIds);
+    const writes = [
+      { nodeId: anchorId, before: anchor?.text ?? "", text: plan.anchor.text },
+      // The tail may have moved to a new node. Its old URLs are not new input.
+      ...plan.inserts.map((node) => ({
+        nodeId: node.id,
+        before: head + tail,
+        text: node.text,
+      })),
+    ];
+    args.onApplied?.(writes.filter(({ nodeId }) => !literalIds.has(nodeId)));
+  };
 
   if (opCount < RESTORE_SLICE_OPS) {
     // The keystroke-adjacent path. It must stay synchronous: no confirm step, no
     // modal, no await. `DELETE_CONFIRM_THRESHOLD` exists because deletion is
     // destructive; a paste is additive and one Cmd+Z away.
-    runStructural(() => {
-      writeAnchor();
-      for (let i = 0; i < plan.inserts.length; i++) writeInsert(i);
-      writeRepoints();
-    });
-    const seam = resolveSeam(plan, anchorId, count);
+    try {
+      const { persisted } = runStructuralTracked(() => {
+        writeAnchor();
+        writeInserts(0, plan.inserts.length);
+        writeRepoints();
+      });
+      void persisted.then(notify, notifySaveFailed);
+    } catch (err) {
+      drop();
+      throw err;
+    }
+    // Both walks must see the same post-write state. Do not reuse the subscribed
+    // index: its notification can lag the optimistic collection writes.
+    const fresh =
+      plan.focusId === anchorId ? null : buildTreeIndex(getLiveNodes());
+    const seam = resolveSeam(plan, anchorId, count, fresh);
     if (seam.id === anchorId)
       focus.placeCaretHere(plan.anchor.text, seam.offset);
     else {
       // The seam row may not be mounted (a long paste in the windowed list), so
       // scroll it in and let it claim the pending focus on mount (ADR 0019).
-      const key = focusKeyFor(seam.id, activeKey);
+      const key = focusKeyFor(seam.id, activeKey, fresh ?? undefined);
       focus.setPendingFocus(key, seam.offset);
       scrollRowIntoView(key);
     }
@@ -190,9 +223,11 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   // passed (`history-restore.tsx` drops the caret the same way).
   void runSliced(plan.insertCount, opCount, {
     writeAnchor,
-    writeInsert,
+    writeInserts,
     writeRepoints,
     count,
+  }).then((applied) => {
+    if (applied) notify();
   });
   return true;
 }
@@ -211,18 +246,15 @@ function resolveSeam(
   plan: MdPastePlan,
   anchorId: string,
   count: number,
-): { id: string; offset: number } {
-  if (plan.focusId === anchorId)
-    return { id: anchorId, offset: plan.focusOffset };
+  fresh: TreeIndex | null,
+) {
+  if (!fresh) return { id: anchorId, offset: plan.focusOffset };
 
-  // Build the visible set from a FRESH index off `nodesCollection.toArray` --
-  // synchronously current after `runStructural` -- not `getTreeIndex()`, whose
-  // change-notify can lag the optimistic apply and drop the just-inserted seam
-  // node from the walk (the exact reason `focusKeyFor`, called right after this,
-  // rebuilds the same way; ADR 0044 / ADR 0022 Stage 2c).
+  // Visibility uses the active filter; focus-key derivation deliberately uses
+  // an unfiltered walk because filter membership can still be pre-edit.
   const visible = new Set(
     buildVisibleRows(
-      buildTreeIndex(nodesCollection.toArray as Node[]),
+      fresh,
       getViewRootId(),
       getViewIsHidden(),
       getViewFilter(),
@@ -250,7 +282,7 @@ async function runSliced(
   opCount: number,
   w: {
     writeAnchor: () => void;
-    writeInsert: (i: number) => void;
+    writeInserts: (start: number, end: number) => void;
     writeRepoints: () => void;
     count: number;
   },
@@ -265,7 +297,7 @@ async function runSliced(
   for (let i = 0; i < insertCount; i += RESTORE_SLICE_OPS) {
     const end = Math.min(i + RESTORE_SLICE_OPS, insertCount);
     slices.push(() => {
-      for (let j = i; j < end; j++) w.writeInsert(j);
+      w.writeInserts(i, end);
       applied += end - i;
     });
   }

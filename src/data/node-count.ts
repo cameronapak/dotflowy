@@ -2,37 +2,37 @@
  * Live total node count — the number the free-tier ceiling (#170) is measured
  * against, read reactively for the Settings page's usage meter.
  *
- * Modelled on `changelog-cursor.ts`: `subscribeChanges` + `useSyncExternalStore`,
- * NEVER `useLiveQuery` (which hard-fails the `/` prerender, and Settings shares
- * the same bundle). Subscribing here also STARTS the collection's sync if nothing
- * else has yet — a direct visit to `/settings` (no OutlineEditor mounted) still
- * gets a real count once the snapshot lands.
+ * Modelled on `changelog-cursor.ts`: `useSyncExternalStore` over the shared
+ * tree index + sync-ready signal, NEVER `useLiveQuery` (which hard-fails the
+ * `/` prerender, and Settings shares the same bundle).
  *
- * `toArray.length` is the same basis the DO caps on (every live row, including
- * the daily scaffold), so the meter and the wall agree.
+ * Count comes from `getTreeIndex().byId.size`, the same basis the free-tier wall
+ * measures (every live row, including the daily scaffold).
  */
 
 import { useSyncExternalStore } from "react";
 
-import { nodesCollection } from "./collection";
+import { hasWindow } from "../env";
+import { isSyncReady, subscribeSyncReady } from "./collection";
+import { getTreeIndex, subscribeTree } from "./tree-store";
 
 export interface NodeCountSnapshot {
   /** Total live nodes, or `0` until the first snapshot lands. */
   count: number;
-  /** False until the collection has loaded at least once — the meter shows a
-   *  muted placeholder while false so we never flash "0 of 10,000". */
+  /** False until sync is ready — the meter shows a muted placeholder while
+   *  false so we never flash "0 of 10,000" for a still-loading outline. */
   ready: boolean;
 }
 
 const HIDDEN: NodeCountSnapshot = { count: 0, ready: false };
 
 let snapshot: NodeCountSnapshot = HIDDEN;
-let ready = false;
-let started = false;
 const listeners = new Set<() => void>();
+let started = false;
 
 function rebuild() {
-  const count = ready ? nodesCollection.toArray.length : 0;
+  const ready = isSyncReady();
+  const count = ready ? getTreeIndex().byId.size : 0;
   // Referential stability: useSyncExternalStore re-renders on identity change.
   if (snapshot.ready === ready && snapshot.count === count) return;
   snapshot = { ready, count };
@@ -40,20 +40,12 @@ function rebuild() {
 }
 
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
-  // subscribeChanges starts the collection syncing if it hasn't already.
-  nodesCollection.subscribeChanges(() => rebuild(), {
-    includeInitialState: true,
-  });
-  void nodesCollection
-    .toArrayWhenReady()
-    .then(() => {
-      ready = true;
-      rebuild();
-    })
-    // A snapshot that never lands leaves the meter in its muted placeholder.
-    .catch(() => {});
+  // Tree subscription starts Classic collection sync.
+  subscribeTree(() => rebuild());
+  subscribeSyncReady(() => rebuild());
+  rebuild();
 }
 
 function subscribe(cb: () => void): () => void {

@@ -20,10 +20,15 @@ import { buildTreeIndex, childrenOf } from "./tree";
  * (the optimistic insert reverts, so the outline never visibly grows past cap).
  * A fixed toast `id` de-dupes a burst of blocked inserts into one notice.
  */
-async function persistStructuralBatch(ops: ChangeOp[]): Promise<void> {
+async function persistStructuralBatch(
+  ops: ChangeOp[],
+  expectedSeq?: number,
+): Promise<void> {
   try {
     await runPromise(
-      persistBatchE(ops).pipe(Effect.flatMap(({ seq }) => waitForSeqE(seq))),
+      persistBatchE(ops, expectedSeq).pipe(
+        Effect.flatMap(({ seq }) => waitForSeqE(seq)),
+      ),
     );
   } catch (err) {
     if (err instanceof NodesLimitError) {
@@ -92,10 +97,16 @@ export function runStructural<T>(body: () => T): T {
  * 0037: any fault means "nothing was imported"). Same single-batch guarantees
  * as `runStructural`; this only exposes the transaction's own completion.
  */
-export function runStructuralTracked<T>(body: () => T): {
+/** A structural run's outcome: the body's value plus its persistence promise. */
+export interface StructuralRun<T> {
   result: T;
   persisted: Promise<void>;
-} {
+}
+
+export function runStructuralTracked<T>(
+  body: () => T,
+  expectedSeq?: number,
+): StructuralRun<T> {
   // Nesting guard: a compound flow (e.g. the daily get-or-create, which creates
   // a container then a day) may call runStructural while already inside one.
   // Join the outer transaction so the whole flow is ONE frame; never open a
@@ -120,7 +131,7 @@ export function runStructuralTracked<T>(body: () => T): {
       // rolls the transaction back — comes from the batch send (incl. the free
       // node-ceiling 403, which also toasts). A chunked >500-op batch replies
       // with its FINAL seq (worker/outline-do.ts), so the wait spans every frame.
-      await persistStructuralBatch(ops);
+      await persistStructuralBatch(ops, expectedSeq);
     },
   });
   tx.mutate(() => {
@@ -149,6 +160,7 @@ export function runStructuralTracked<T>(body: () => T): {
 export async function runStructuralSliced(
   slices: ReadonlyArray<() => void>,
   onProgress?: () => void,
+  expectedSeq?: number,
 ): Promise<void> {
   // Nesting guard (same as runStructuralTracked): inside an ambient
   // transaction, apply synchronously — the outer transaction owns persistence,
@@ -162,7 +174,7 @@ export async function runStructuralSliced(
     mutationFn: async ({ transaction }) => {
       const ops = transaction.mutations.map(toChangeOp);
       if (ops.length === 0) return;
-      await persistStructuralBatch(ops);
+      await persistStructuralBatch(ops, expectedSeq);
     },
   });
   try {
@@ -187,6 +199,7 @@ type MutationLike = { type: string; key: unknown; modified: unknown };
  *  post-mutation node (an upsert); the DO recomputes insert-vs-update itself. */
 function toChangeOp(m: MutationLike): ChangeOp {
   if (m.type === "delete") return { op: "delete", key: String(m.key) };
+  // SAFETY: delete returned above and TanStack DB mutations are only insert/update/delete; insert and update carry the full post-mutation Node.
   return { op: m.type as "insert" | "update", value: m.modified as Node };
 }
 
@@ -199,13 +212,19 @@ function toChangeOp(m: MutationLike): ChangeOp {
  * located. Scoped to the touched parents so pre-existing corruption elsewhere
  * (repaired separately by healSiblingChains) doesn't cry wolf. Zero cost in prod.
  */
+/** Type-guard predicate: a modified value usable as a full Node row. */
+const isNodeLike = (mod: MutationLike["modified"]): mod is Node =>
+  mod !== null && mod !== undefined && typeof mod === "object";
+
 function assertTouchedChainsClean(mutations: readonly MutationLike[]): void {
   try {
+    // SAFETY: nodesCollection is a Collection<Node, string>, so toArray is the live Node rows.
     const index = buildTreeIndex(nodesCollection.toArray as Node[]);
     const parents = new Set<string | null>();
     for (const m of mutations) {
+      // SAFETY: insert/update modified values are full Node rows; the mod && typeof check guards before any field read.
       const mod = m.modified as Node | undefined;
-      if (mod && typeof mod === "object") parents.add(mod.parentId);
+      if (isNodeLike(mod)) parents.add(mod.parentId);
       const live = index.byId.get(String(m.key));
       if (live) parents.add(live.parentId);
     }

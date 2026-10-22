@@ -12,6 +12,8 @@
  * Durable Object.
  */
 
+import type { ShardNamespaceLike } from "lunorash/runtime";
+
 import { stripe } from "@better-auth/stripe";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
@@ -25,10 +27,25 @@ import {
   deleteResidualUserRows,
   isOwnerAccount,
 } from "./account-deletion";
+import { revokeCaptureKeys } from "./capture-keys";
 import { sendEmail } from "./email";
 import { isSignupOpen, matchesSharedInviteCode } from "./identity";
 import { isRedeemableInvite, normalizeEmail, redeemInvite } from "./invites";
+import { wipeLunoraUserShard } from "./lunora-mcp-store";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
+
+/** Any undecoded JSON request-body field as the auth hooks see it (Better Auth
+ *  parses the body only after this gate runs). */
+type AuthBodyField =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly AuthBodyField[]
+  | { readonly [key: string]: AuthBodyField };
+
+/** Type guard for undecoded request-body fields reaching the auth hooks. */
+const isString = (v: AuthBodyField): v is string => typeof v === "string";
 
 /** The slice of the Worker env Better Auth needs. */
 export interface AuthEnv {
@@ -74,6 +91,9 @@ export interface AuthEnv {
    *  /api/nodes through, resolved here from the authenticated session's user.id
    *  (never a client-supplied id; the DO trust boundary, ADR 0014). */
   USER_OUTLINE: DurableObjectNamespace<UserOutlineDO>;
+  /** Lunora shard DO namespace (ADR 0058). Self-serve deletion wipes this
+   *  alongside USER_OUTLINE — keyed by `user.id`, not resolveUserId. */
+  SHARD: ShardNamespaceLike;
   /** The owner's Better Auth `user.id`. When set, that one account routes to the
    *  constant 'default' DO (worker/index.ts resolveUserId); self-serve deletion
    *  refuses it (docs/adr/0051). */
@@ -179,6 +199,9 @@ export function createAuth(
       // A reset is the "my password leaked" move: kill every existing session
       // so a stolen one dies with the old password.
       revokeSessionsOnPasswordReset: true,
+      onPasswordReset: async ({ user }) => {
+        await revokeCaptureKeys(env.DB, user.id);
+      },
     },
     // Email verification (#293). `sendOnSignUp` is left at its default
     // (undefined = follow requireEmailVerification), so a verification email
@@ -243,6 +266,10 @@ export function createAuth(
             env.USER_OUTLINE.idFromName(user.id),
           );
           await stub.wipe();
+          // Lunora shard (ADR 0058): same Better Auth user.id the browser/MCP
+          // mutators use — NOT resolveUserId / 'default'. Throws on RPC failure
+          // so deletion aborts before identity rows vanish (ADR 0051 posture).
+          await wipeLunoraUserShard(env, user.id);
         },
         // afterDelete runs once the identity rows are gone. Better Auth's core
         // deletes user/session/account; the mcp OAuth rows and the email-keyed
@@ -306,6 +333,9 @@ export function createAuth(
         // email-keyed, so a different-address Google sign-in just finds no
         // account and hits disableSignUp).
         allowDifferentEmails: true,
+        // Copy Google's name/image after a successful link, not its email or
+        // verification state. Linking and signup gates stay unchanged.
+        updateUserInfoOnLink: true,
       },
     },
     // Dev serves the SPA from Vite (:3000) and proxies /api to the Worker, so
@@ -347,14 +377,13 @@ export function createAuth(
         // in the captcha plugin's onRequest). Accept and let the after-hook
         // redeem any invite that happened to ride along.
         if (isSignupOpen(env)) return;
-        const supplied =
-          typeof ctx.body?.inviteCode === "string"
-            ? ctx.body.inviteCode.trim()
-            : "";
-        const email =
-          typeof ctx.body?.email === "string"
-            ? normalizeEmail(ctx.body.email)
-            : "";
+        const beforeBody = ctx.body;
+        const supplied = isString(beforeBody?.inviteCode)
+          ? beforeBody.inviteCode.trim()
+          : "";
+        const email = isString(beforeBody?.email)
+          ? normalizeEmail(beforeBody.email)
+          : "";
         // (a) A per-email single-use invite bound to this address.
         if (
           supplied &&
@@ -371,19 +400,26 @@ export function createAuth(
         });
       }),
       after: createAuthMiddleware(async (ctx) => {
+        if (
+          ctx.path === "/change-password" &&
+          !(ctx.context.returned instanceof APIError)
+        ) {
+          const userId = ctx.context.session?.user.id;
+          if (userId) await revokeCaptureKeys(env.DB, userId);
+          return;
+        }
         if (ctx.path !== "/sign-up/email") return;
         // Only burn the code on a genuine account creation. On failure the
         // endpoint's result — surfaced here as `ctx.context.returned` — is an
         // APIError, so we leave the invite unredeemed and reusable.
         if (ctx.context.returned instanceof APIError) return;
-        const supplied =
-          typeof ctx.body?.inviteCode === "string"
-            ? ctx.body.inviteCode.trim()
-            : "";
-        const email =
-          typeof ctx.body?.email === "string"
-            ? normalizeEmail(ctx.body.email)
-            : "";
+        const afterBody = ctx.body;
+        const supplied = isString(afterBody?.inviteCode)
+          ? afterBody.inviteCode.trim()
+          : "";
+        const email = isString(afterBody?.email)
+          ? normalizeEmail(afterBody.email)
+          : "";
         // No-op when `supplied` was the INVITE_CODES backdoor (no invites row).
         if (supplied && email) await redeemInvite(env, email, supplied);
       }),

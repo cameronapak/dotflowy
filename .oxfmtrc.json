@@ -7,7 +7,8 @@
     ".wrangler/**",
     "dist/**",
     "src/routeTree.gen.ts",
-    "landing/src/routeTree.gen.ts"
+    "landing/src/routeTree.gen.ts",
+    "lunora/_generated/**"
   ],
   "sortTailwindcss": {
     "stylesheet": "./src/styles.css",

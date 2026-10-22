@@ -162,6 +162,7 @@ export function buildVisibleRows(
   ) => {
     for (const child of childrenOf(index, contentParentId)) {
       const mirrored = mirrorsEnabled && child.mirrorOf != null;
+      // SAFETY: mirrored is true only when child.mirrorOf != null (checked in the same expression), so the field is a string here.
       const contentId = mirrored ? (child.mirrorOf as string) : child.id;
       const key = crossed ? path.concat(child.id).join(PATH_SEP) : child.id;
       // Content node: the mirror's source, or the node itself. A non-mirror reads
@@ -184,12 +185,13 @@ export function buildVisibleRows(
         continue;
       }
       // content is defined here (non-mirror → child; mirror → resolved source).
+      // SAFETY: the broken-mirror branch above continued, so content is a defined Node on every path that reaches here.
       const c = content as Node;
       // Visibility prunes read CONTENT (a mirror of a completed task hides under
-      // hide-completed; a tag filter matches the source's text). Identical to the
-      // old `isHidden(child)` / `filter.has(child.id)` when content === child.
+      // hide-completed). Query-filter sets address render paths, so a child
+      // revealed under one mirror does not also render under a closed source.
       if (isHidden(c)) continue;
-      if (filter && !filter.visibleIds.has(contentId)) continue;
+      if (filter && !filter.visibleIds.has(key)) continue;
 
       // Cycle net: this mirror's source is already an expanded ancestor. Cap it
       // (non-expandable; the UI shows a badge + jump-to-source) instead of looping.

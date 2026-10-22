@@ -1,8 +1,12 @@
-// Backlinks chrome (ADR 0032) -- CORE, not a plugin seam: it joins the mirror
-// "appears in N places" family (one grammar for "this node's edges"), and core
-// chrome may depend on the core-known `[[id]]` format (src/data/node-links.ts)
-// but never on the node-links plugin. No `title:below` seam is invented for it
-// (ADR 0031's bar: a seam is extracted when a second consumer proves it).
+// Backlinks chrome (ADR 0032 + ADR 0056) -- CORE, not a plugin seam: it joins
+// the mirror "appears in N places" family (one grammar for "this node's edges"),
+// and core chrome may depend on the core-known `[[id]]` / date-token formats
+// but never on the node-links plugin. Day-key lookup reads daily-index
+// (`useScaffoldKey`) the same way `/today` and OutlineEditor already do --
+// daily is a bundled first-party plugin, not a Lane-B peer. On a zoomed day,
+// node-link referrers and date-token mentions share ONE list (index-by-key;
+// mentions never mint). No `title:below` seam is invented for it (ADR 0031's
+// bar: a seam is extracted when a second consumer proves it).
 //
 // Shape is Notion's, not Roam's: a quiet "{n} backlinks" line under the zoomed
 // title, rendering NOTHING at zero, opening a mirror-places-style jump list on
@@ -16,8 +20,11 @@ import { useState } from "react";
 
 import type { Node } from "../data/tree";
 
+import { collectBacklinkReferrerIds } from "../data/backlinks";
+import { isValidDateKey } from "../data/date-links";
 import { flattenNodeText } from "../data/node-links";
 import { useBacklinkCount, useTreeIndex } from "../data/tree-store";
+import { useScaffoldKey } from "../plugins/daily/daily-index";
 import { requestFlashAfterNav } from "./flash-node";
 import { Crumbs, crumbsFor } from "./mirror-places";
 import {
@@ -28,6 +35,12 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 
+/** Day key for unified date-mention backlinks, or null on non-day zoom roots. */
+function useDayBacklinkKey(nodeId: string): string | null {
+  const key = useScaffoldKey(nodeId);
+  return key && isValidDateKey(key) ? key : null;
+}
+
 /**
  * The "{n} backlinks" affordance for the zoomed node. Mounted by OutlineEditor
  * directly under the ZoomedTitle; subscribes to a primitive count (the reverse
@@ -35,7 +48,8 @@ import {
  * renders null -- zero chrome, zero dialog -- while nothing links here.
  */
 export function Backlinks({ nodeId }: { nodeId: string }) {
-  const count = useBacklinkCount(nodeId);
+  const dayKey = useDayBacklinkKey(nodeId);
+  const count = useBacklinkCount(nodeId, dayKey);
   const [open, setOpen] = useState(false);
 
   if (count === 0) return null;
@@ -51,7 +65,11 @@ export function Backlinks({ nodeId }: { nodeId: string }) {
         {count} backlink{count === 1 ? "" : "s"}
       </button>
       {open && (
-        <BacklinksDialog nodeId={nodeId} onClose={() => setOpen(false)} />
+        <BacklinksDialog
+          nodeId={nodeId}
+          dayKey={dayKey}
+          onClose={() => setOpen(false)}
+        />
       )}
     </>
   );
@@ -69,15 +87,17 @@ export function Backlinks({ nodeId }: { nodeId: string }) {
  */
 function BacklinksDialog({
   nodeId,
+  dayKey,
   onClose,
 }: {
   nodeId: string;
+  dayKey: string | null;
   onClose: () => void;
 }) {
   const index = useTreeIndex();
   const navigate = useNavigate();
 
-  const referrers: Node[] = (index.linksByTarget.get(nodeId) ?? [])
+  const referrers: Node[] = collectBacklinkReferrerIds(index, nodeId, dayKey)
     .map((id) => index.byId.get(id))
     .filter((n): n is Node => n != null);
 
@@ -101,7 +121,7 @@ function BacklinksDialog({
             {referrers.length} backlink{referrers.length === 1 ? "" : "s"}
           </DialogTitle>
           <DialogDescription className="text-left">
-            Nodes whose text links here.
+            Nodes whose text links here or mentions this date.
           </DialogDescription>
         </DialogHeader>
         <ul className="max-h-[60vh] min-w-0 scroll-fade overflow-y-auto overscroll-contain px-2 pb-2">

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
+import { queryOperators } from "../plugins/filter-operators";
 import { buildFilterOperatorMap, buildQueryFilter } from "./filter-query";
-import { buildTreeIndex, makeNode } from "./tree";
+import { buildTreeIndex, createNode } from "./tree";
 import {
   buildVisibleRows,
   contentIdForKey,
@@ -23,10 +24,10 @@ describe("buildVisibleRows — mirror-free parity (the default path)", () => {
   //   a2
   // B
   const tree = [
-    makeNode({ id: "A", prevSiblingId: null }),
-    makeNode({ id: "B", prevSiblingId: "A" }),
-    makeNode({ id: "a1", parentId: "A", prevSiblingId: null }),
-    makeNode({ id: "a2", parentId: "A", prevSiblingId: "a1" }),
+    createNode({ id: "A", prevSiblingId: null }),
+    createNode({ id: "B", prevSiblingId: "A" }),
+    createNode({ id: "a1", parentId: "A", prevSiblingId: null }),
+    createNode({ id: "a2", parentId: "A", prevSiblingId: "a1" }),
   ];
   const index = buildTreeIndex(tree);
 
@@ -40,21 +41,16 @@ describe("buildVisibleRows — mirror-free parity (the default path)", () => {
       expect(r.capped).toBe(false);
       expect(r.broken).toBe(false);
     }
-  });
-
-  test("depth + fade inheritance unchanged", () => {
-    const rows = buildVisibleRows(index, null, show);
-    expect(rows.find((r) => r.id === "a1")?.depth).toBe(1);
-    expect(rows.find((r) => r.id === "A")?.depth).toBe(0);
+    expect(rows.map((r) => r.depth)).toEqual([0, 1, 1, 0]);
   });
 
   test("a node carrying mirrorOf is treated as normal while the flag is OFF", () => {
     // Same node set, but B mirrors A. With mirrors disabled (default arg) B is an
     // ordinary leaf — no source windowing, no resolution. Byte-identical to today.
     const withMirror = [
-      makeNode({ id: "A", prevSiblingId: null }),
-      makeNode({ id: "B", prevSiblingId: "A", mirrorOf: "A" }),
-      makeNode({ id: "a1", parentId: "A", prevSiblingId: null }),
+      createNode({ id: "A", prevSiblingId: null }),
+      createNode({ id: "B", prevSiblingId: "A", mirrorOf: "A" }),
+      createNode({ id: "a1", parentId: "A", prevSiblingId: null }),
     ];
     const i2 = buildTreeIndex(withMirror);
     const rows = buildVisibleRows(i2, null, show); // mirrorsEnabled defaults false
@@ -73,67 +69,73 @@ describe("buildVisibleRows — mirrors enabled (ADR 0022)", () => {
   // P
   //   M -> A   (a mirror of A, windowing a1/a2)
   const tree = [
-    makeNode({ id: "A", prevSiblingId: null }),
-    makeNode({ id: "P", prevSiblingId: "A" }),
-    makeNode({ id: "a1", parentId: "A", prevSiblingId: null }),
-    makeNode({ id: "a2", parentId: "A", prevSiblingId: "a1" }),
-    makeNode({ id: "M", parentId: "P", prevSiblingId: null, mirrorOf: "A" }),
+    createNode({ id: "A", prevSiblingId: null }),
+    createNode({ id: "P", prevSiblingId: "A" }),
+    createNode({ id: "a1", parentId: "A", prevSiblingId: null }),
+    createNode({ id: "a2", parentId: "A", prevSiblingId: "a1" }),
+    createNode({ id: "M", parentId: "P", prevSiblingId: null, mirrorOf: "A" }),
   ];
   const index = buildTreeIndex(tree);
 
-  test("a mirror windows the source's children", () => {
+  test("a mirror windows source content with distinct literal row paths and depths", () => {
     const rows = buildVisibleRows(index, null, show, null, true);
-    expect(rows.map((r) => r.id)).toEqual([
-      "A",
-      "a1",
-      "a2",
-      "P",
-      "M",
-      "a1",
-      "a2",
+    expect(
+      rows.map((r) => [
+        r.id,
+        r.key,
+        r.contentId,
+        r.depth,
+        r.isMirror,
+        r.capped,
+        r.broken,
+      ]),
+    ).toEqual([
+      ["A", "A", "A", 0, false, false, false],
+      ["a1", "a1", "a1", 1, false, false, false],
+      ["a2", "a2", "a2", 1, false, false, false],
+      ["P", "P", "P", 0, false, false, false],
+      ["M", "M", "A", 1, true, false, false],
+      ["a1", "M\u0001a1", "a1", 2, false, false, false],
+      ["a2", "M\u0001a2", "a2", 2, false, false, false],
     ]);
-
-    const m = rows.find((r) => r.id === "M")!;
-    expect(m.isMirror).toBe(true);
-    expect(m.contentId).toBe("A"); // reads the source's content
-    expect(m.key).toBe("M"); // top-level mirror: bare id (no mirror crossed yet)
-    expect(m.capped).toBe(false);
-    expect(m.broken).toBe(false);
-  });
-
-  test("source descendants get unique path keys under the mirror, bare ids under the source", () => {
-    const rows = buildVisibleRows(index, null, show, null, true);
-    // Two rows share id 'a1' (real + mirrored) but their keys are distinct.
-    const a1Rows = rows.filter((r) => r.id === "a1");
-    expect(a1Rows).toHaveLength(2);
-    const keys = a1Rows.map((r) => r.key);
-    expect(keys[0]).toBe("a1"); // under the real source: bare id (today's identity)
-    expect(keys[1]).not.toBe("a1"); // under the mirror: a compound path key
-    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length); // all keys unique
-    // The mirrored copies still read their own (real) content.
-    for (const r of a1Rows) expect(r.contentId).toBe("a1");
+    expect(new Set(rows.map((r) => r.key)).size).toBe(7);
   });
 
   test("two mirrors of the same source keep distinct keys", () => {
     // P holds two mirrors of A back to back.
     const t2 = [
-      makeNode({ id: "A", prevSiblingId: null }),
-      makeNode({ id: "P", prevSiblingId: "A" }),
-      makeNode({ id: "a1", parentId: "A", prevSiblingId: null }),
-      makeNode({ id: "M1", parentId: "P", prevSiblingId: null, mirrorOf: "A" }),
-      makeNode({ id: "M2", parentId: "P", prevSiblingId: "M1", mirrorOf: "A" }),
+      createNode({ id: "A", prevSiblingId: null }),
+      createNode({ id: "P", prevSiblingId: "A" }),
+      createNode({ id: "a1", parentId: "A", prevSiblingId: null }),
+      createNode({
+        id: "M1",
+        parentId: "P",
+        prevSiblingId: null,
+        mirrorOf: "A",
+      }),
+      createNode({
+        id: "M2",
+        parentId: "P",
+        prevSiblingId: "M1",
+        mirrorOf: "A",
+      }),
     ];
     const rows = buildVisibleRows(buildTreeIndex(t2), null, show, null, true);
-    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length);
+    expect(rows.filter((r) => r.id === "a1").map((r) => r.key)).toEqual([
+      "a1",
+      "M1\u0001a1",
+      "M2\u0001a1",
+    ]);
+    expect(new Set(rows.map((r) => r.key)).size).toBe(7);
   });
 
   test("collapse is LOCAL to the instance — a collapsed mirror hides the source subtree", () => {
     const t2 = [
-      makeNode({ id: "A", prevSiblingId: null }),
-      makeNode({ id: "P", prevSiblingId: "A" }),
-      makeNode({ id: "a1", parentId: "A", prevSiblingId: null }),
+      createNode({ id: "A", prevSiblingId: null }),
+      createNode({ id: "P", prevSiblingId: "A" }),
+      createNode({ id: "a1", parentId: "A", prevSiblingId: null }),
       // The mirror itself is collapsed; the source A is NOT.
-      makeNode({
+      createNode({
         id: "M",
         parentId: "P",
         prevSiblingId: null,
@@ -150,9 +152,9 @@ describe("buildVisibleRows — mirrors enabled (ADR 0022)", () => {
   test("visibility prunes follow the SOURCE's completed (content), not the instance", () => {
     // Source A is completed; the mirror node M itself is not.
     const t2 = [
-      makeNode({ id: "A", prevSiblingId: null, completed: true }),
-      makeNode({ id: "P", prevSiblingId: "A" }),
-      makeNode({
+      createNode({ id: "A", prevSiblingId: null, completed: true }),
+      createNode({ id: "P", prevSiblingId: "A" }),
+      createNode({
         id: "M",
         parentId: "P",
         prevSiblingId: null,
@@ -178,8 +180,13 @@ describe("buildVisibleRows — cycle + broken guards", () => {
   test("a mirror whose source is an ancestor caps instead of looping", () => {
     // A contains a mirror of A — an immediate cycle.
     const t = [
-      makeNode({ id: "A", prevSiblingId: null }),
-      makeNode({ id: "M", parentId: "A", prevSiblingId: null, mirrorOf: "A" }),
+      createNode({ id: "A", prevSiblingId: null }),
+      createNode({
+        id: "M",
+        parentId: "A",
+        prevSiblingId: null,
+        mirrorOf: "A",
+      }),
     ];
     const rows = buildVisibleRows(buildTreeIndex(t), null, show, null, true);
     const m = rows.find((r) => r.id === "M")!;
@@ -192,9 +199,14 @@ describe("buildVisibleRows — cycle + broken guards", () => {
   test("a deep cycle (mirror of an ancestor several levels up) still caps", () => {
     // A > b > M(->A): M's source A is an expanded ancestor.
     const t = [
-      makeNode({ id: "A", prevSiblingId: null }),
-      makeNode({ id: "b", parentId: "A", prevSiblingId: null }),
-      makeNode({ id: "M", parentId: "b", prevSiblingId: null, mirrorOf: "A" }),
+      createNode({ id: "A", prevSiblingId: null }),
+      createNode({ id: "b", parentId: "A", prevSiblingId: null }),
+      createNode({
+        id: "M",
+        parentId: "b",
+        prevSiblingId: null,
+        mirrorOf: "A",
+      }),
     ];
     const rows = buildVisibleRows(buildTreeIndex(t), null, show, null, true);
     expect(rows.find((r) => r.id === "M")?.capped).toBe(true);
@@ -202,7 +214,7 @@ describe("buildVisibleRows — cycle + broken guards", () => {
   });
 
   test("a mirror whose source is missing renders a broken leaf, never throws", () => {
-    const t = [makeNode({ id: "M", prevSiblingId: null, mirrorOf: "ghost" })];
+    const t = [createNode({ id: "M", prevSiblingId: null, mirrorOf: "ghost" })];
     const rows = buildVisibleRows(buildTreeIndex(t), null, show, null, true);
     const m = rows.find((r) => r.id === "M")!;
     expect(m.broken).toBe(true);
@@ -217,10 +229,10 @@ describe("row-key helpers (the Stage 2 identity keystone, ADR 0022)", () => {
   // P
   //   M -> A   (windows a1)
   const tree = [
-    makeNode({ id: "A", prevSiblingId: null }),
-    makeNode({ id: "P", prevSiblingId: "A" }),
-    makeNode({ id: "a1", parentId: "A", prevSiblingId: null }),
-    makeNode({ id: "M", parentId: "P", prevSiblingId: null, mirrorOf: "A" }),
+    createNode({ id: "A", prevSiblingId: null }),
+    createNode({ id: "P", prevSiblingId: "A" }),
+    createNode({ id: "a1", parentId: "A", prevSiblingId: null }),
+    createNode({ id: "M", parentId: "P", prevSiblingId: null, mirrorOf: "A" }),
   ];
   const index = buildTreeIndex(tree);
 
@@ -243,13 +255,6 @@ describe("row-key helpers (the Stage 2 identity keystone, ADR 0022)", () => {
     ]);
   });
 
-  test("rowKeyFor matches the address buildVisibleRows actually emits", () => {
-    const rows = buildVisibleRows(index, null, show, null, true);
-    // a1 appears under the real source (bare id) and under the mirror (path key).
-    const windowed = rows.find((r) => r.id === "a1" && r.key !== "a1")!;
-    expect(windowed.key).toBe(rowKeyFor("M", "a1"));
-  });
-
   test("contentIdForKey resolves a mirror to its source, a real node to itself", () => {
     // The mirror row's key resolves to the SOURCE's content id.
     expect(contentIdForKey(index, "M")).toBe("A");
@@ -260,51 +265,20 @@ describe("row-key helpers (the Stage 2 identity keystone, ADR 0022)", () => {
     // Unknown node falls back to the raw instance id, never throws.
     expect(contentIdForKey(index, "ghost")).toBe("ghost");
   });
-
-  test("INVARIANT: helpers agree with every row buildVisibleRows emits", () => {
-    const rows = buildVisibleRows(index, null, show, null, true);
-    for (const r of rows) {
-      // The key always points back at the row's own instance id...
-      expect(instanceIdForKey(r.key)).toBe(r.id);
-      // ...and resolves to the same content id the walk computed.
-      expect(contentIdForKey(index, r.key)).toBe(r.contentId);
-    }
-  });
-
-  test("INVARIANT: key === id for a mirror-free tree (flag-off parity budget)", () => {
-    const plain = buildTreeIndex([
-      makeNode({ id: "A", prevSiblingId: null }),
-      makeNode({ id: "a1", parentId: "A", prevSiblingId: null }),
-      makeNode({ id: "a2", parentId: "A", prevSiblingId: "a1" }),
-    ]);
-    const rows = buildVisibleRows(plain, null, show, null, true);
-    for (const r of rows) {
-      expect(r.key).toBe(r.id);
-      expect(instanceIdForKey(r.key)).toBe(r.id);
-      expect(contentIdForKey(plain, r.key)).toBe(r.id);
-    }
-  });
 });
 
-describe("parentKeyOf (Stage 2c focus composition)", () => {
-  test("a bare key has no parent (top level / pre-mirror)", () => {
-    expect(parentKeyOf("a1")).toBeNull();
-  });
-
-  test("drops the last segment of a compound key", () => {
-    expect(parentKeyOf(rowKeyFor("M", "a1"))).toBe("M");
-    expect(parentKeyOf(rowKeyFor(rowKeyFor("M", "a1"), "leaf"))).toBe(
-      rowKeyFor("M", "a1"),
-    );
-  });
-
-  test("inverse of rowKeyFor: recompose a sibling under the same parent", () => {
-    const child = rowKeyFor("M", "a1");
-    // A sibling of `child` shares its parent prefix.
-    expect(rowKeyFor(parentKeyOf(child), "a2")).toBe(rowKeyFor("M", "a2"));
-    // For a bare key the sibling stays bare (today's identity).
-    expect(rowKeyFor(parentKeyOf("a1"), "a2")).toBe("a2");
-  });
+test("parentKeyOf drops the last segment, so siblings recompose under the same parent", () => {
+  // A bare key has no parent (top level / pre-mirror).
+  expect(parentKeyOf("a1")).toBeNull();
+  expect(parentKeyOf(rowKeyFor("M", "a1"))).toBe("M");
+  expect(parentKeyOf(rowKeyFor(rowKeyFor("M", "a1"), "leaf"))).toBe(
+    rowKeyFor("M", "a1"),
+  );
+  // A sibling of a compound key shares its parent prefix; a bare key's stays bare.
+  expect(rowKeyFor(parentKeyOf(rowKeyFor("M", "a1")), "a2")).toBe(
+    rowKeyFor("M", "a2"),
+  );
+  expect(rowKeyFor(parentKeyOf("a1"), "a2")).toBe("a2");
 });
 
 describe("focusKeyAfterEdit (land focus in the editing instance, ADR 0022 2c)", () => {
@@ -314,11 +288,11 @@ describe("focusKeyAfterEdit (land focus in the editing instance, ADR 0022 2c)", 
   // P
   //   M -> A   (windows a1, a2)
   const tree = [
-    makeNode({ id: "A", prevSiblingId: null }),
-    makeNode({ id: "P", prevSiblingId: "A" }),
-    makeNode({ id: "a1", parentId: "A", prevSiblingId: null }),
-    makeNode({ id: "a2", parentId: "A", prevSiblingId: "a1" }),
-    makeNode({ id: "M", parentId: "P", prevSiblingId: null, mirrorOf: "A" }),
+    createNode({ id: "A", prevSiblingId: null }),
+    createNode({ id: "P", prevSiblingId: "A" }),
+    createNode({ id: "a1", parentId: "A", prevSiblingId: null }),
+    createNode({ id: "a2", parentId: "A", prevSiblingId: "a1" }),
+    createNode({ id: "M", parentId: "P", prevSiblingId: null, mirrorOf: "A" }),
   ];
   const rows = buildVisibleRows(buildTreeIndex(tree), null, show, null, true);
 
@@ -343,7 +317,7 @@ describe("focusKeyAfterEdit (land focus in the editing instance, ADR 0022 2c)", 
     const withChild = buildVisibleRows(
       buildTreeIndex([
         ...tree,
-        makeNode({ id: "n", parentId: "A", prevSiblingId: "a2" }),
+        createNode({ id: "n", parentId: "A", prevSiblingId: "a2" }),
       ]),
       null,
       show,
@@ -370,13 +344,18 @@ describe("caret nav under an active ?q= filter (render parity, ADR 0047)", () =>
   // P2 (collapsed, no tag -- context ancestor; filter force-descends to D)
   //   D #go
   const tree = [
-    makeNode({ id: "A", prevSiblingId: null, text: "alpha #go" }),
-    makeNode({ id: "P", prevSiblingId: "A", text: "parent" }),
-    makeNode({ id: "K", parentId: "P", prevSiblingId: null, text: "kid #go" }),
-    makeNode({ id: "B", prevSiblingId: "P", text: "bravo" }),
-    makeNode({ id: "C", prevSiblingId: "B", text: "charlie #go" }),
-    makeNode({ id: "P2", prevSiblingId: "C", text: "papa", collapsed: true }),
-    makeNode({
+    createNode({ id: "A", prevSiblingId: null, text: "alpha #go" }),
+    createNode({ id: "P", prevSiblingId: "A", text: "parent" }),
+    createNode({
+      id: "K",
+      parentId: "P",
+      prevSiblingId: null,
+      text: "kid #go",
+    }),
+    createNode({ id: "B", prevSiblingId: "P", text: "bravo" }),
+    createNode({ id: "C", prevSiblingId: "B", text: "charlie #go" }),
+    createNode({ id: "P2", prevSiblingId: "C", text: "papa", collapsed: true }),
+    createNode({
       id: "D",
       parentId: "P2",
       prevSiblingId: null,
@@ -392,27 +371,18 @@ describe("caret nav under an active ?q= filter (render parity, ADR 0047)", () =>
     buildFilterOperatorMap([]),
   )!;
 
-  test("fixture sanity: the filter renders A, P, K, C, P2, D and drops B", () => {
+  test("filtered caret navigation follows rendered order, including dimmed and revealed context", () => {
     const rows = buildVisibleRows(index, null, show, filter);
     expect(rows.map((r) => r.id)).toEqual(["A", "P", "K", "C", "P2", "D"]);
-  });
-
-  test("Down skips a filtered-out row instead of handing back an unmounted one", () => {
     // Unfiltered, K's down-neighbor is B; B isn't rendered under the filter, so
     // returning it pins focus (the filtered-nav bug). Render parity says C.
     expect(findVisibleNeighbor(index, null, "K", "down", show, filter)).toBe(
       "C",
     );
     expect(findVisibleNeighbor(index, null, "C", "up", show, filter)).toBe("K");
-  });
-
-  test("nav lands on dimmed ancestor context rows (they're rendered + editable)", () => {
     expect(findVisibleNeighbor(index, null, "A", "down", show, filter)).toBe(
       "P",
     );
-  });
-
-  test("a row revealed under a collapsed context ancestor is reachable", () => {
     // D renders (filter force-descends P2) but isn't in the unfiltered walk at
     // all -- indexOf would be -1 and every arrow from D a no-op.
     expect(findVisibleNeighbor(index, null, "P2", "down", show, filter)).toBe(
@@ -437,13 +407,18 @@ describe("caret nav under an active ?q= filter (render parity, ADR 0047)", () =>
     // M #go is collapsed with an untagged child: pass 2 skips collapsed
     // matches, so the child isn't in visibleIds and the walk must end at M.
     const t2 = [
-      makeNode({
+      createNode({
         id: "M",
         prevSiblingId: null,
         text: "m #go",
         collapsed: true,
       }),
-      makeNode({ id: "m1", parentId: "M", prevSiblingId: null, text: "inner" }),
+      createNode({
+        id: "m1",
+        parentId: "M",
+        prevSiblingId: null,
+        text: "inner",
+      }),
     ];
     const i2 = buildTreeIndex(t2);
     const f2 = buildQueryFilter(
@@ -460,4 +435,122 @@ describe("caret nav under an active ?q= filter (render parity, ADR 0047)", () =>
     expect(findVisibleNeighbor(index, null, "K", "down", show)).toBe("B");
     expect(lastVisibleDescendant(index, "P2", show)).toBe("P2");
   });
+});
+
+test("mirror-only filtering gates render and caret navigation by instance ID", () => {
+  const index = buildTreeIndex([
+    createNode({ id: "source", text: "Task #dotflowy", isTask: true }),
+    createNode({ id: "child", parentId: "source", text: "child" }),
+    createNode({ id: "today", prevSiblingId: "source", text: "Today" }),
+    createNode({ id: "mirror", parentId: "today", mirrorOf: "source" }),
+  ]);
+  const filter = buildQueryFilter(
+    index,
+    null,
+    "is:todo is:mirror",
+    show,
+    queryOperators,
+  );
+  expect(
+    buildVisibleRows(index, null, show, filter, true).map((row) => row.id),
+  ).toEqual(["today", "mirror", "child"]);
+  expect(
+    findVisibleNeighbor(index, null, "today", "down", show, filter, true),
+  ).toBe("mirror");
+  expect(
+    findVisibleNeighbor(index, null, "mirror", "down", show, filter, true),
+  ).toBe(rowKeyFor("mirror", "child"));
+});
+
+test("filtered descendant revelation respects each source and mirror's collapse state", () => {
+  for (const sourceCollapsed of [true, false]) {
+    const index = buildTreeIndex([
+      createNode({
+        id: "source",
+        text: "Project #project",
+        collapsed: sourceCollapsed,
+      }),
+      createNode({
+        id: "child",
+        parentId: "source",
+        text: "Nonmatching child",
+      }),
+      createNode({
+        id: "mirror",
+        prevSiblingId: "source",
+        mirrorOf: "source",
+        collapsed: !sourceCollapsed,
+      }),
+    ]);
+    const filter = buildQueryFilter(
+      index,
+      null,
+      "#project",
+      show,
+      queryOperators,
+    );
+    const keys = buildVisibleRows(index, null, show, filter, true).map(
+      (row) => row.key,
+    );
+    expect(keys).toEqual(
+      sourceCollapsed
+        ? ["source", "mirror", rowKeyFor("mirror", "child")]
+        : ["source", "child", "mirror"],
+    );
+    expect(
+      findVisibleNeighbor(index, null, "source", "down", show, filter, true),
+    ).toBe(sourceCollapsed ? "mirror" : "child");
+    expect(filter?.matchIds).toEqual(
+      new Set(
+        sourceCollapsed
+          ? ["source", "mirror", rowKeyFor("mirror", "child")]
+          : ["source", "child", "mirror"],
+      ),
+    );
+  }
+});
+
+test("nested mirrors keep revealed children separate from dimmed context on another path", () => {
+  const index = buildTreeIndex([
+    createNode({ id: "source", text: "Project #project", collapsed: true }),
+    createNode({ id: "child", parentId: "source", text: "Child #child" }),
+    createNode({
+      id: "container",
+      prevSiblingId: "source",
+      text: "Container #project",
+    }),
+    createNode({
+      id: "nested",
+      parentId: "container",
+      mirrorOf: "source",
+      collapsed: true,
+    }),
+    createNode({
+      id: "outer",
+      prevSiblingId: "container",
+      mirrorOf: "container",
+    }),
+  ]);
+  const filter = buildQueryFilter(
+    index,
+    null,
+    "#child OR is:mirror",
+    show,
+    queryOperators,
+  );
+  const nestedKey = rowKeyFor("outer", "nested");
+  expect(
+    buildVisibleRows(index, null, show, filter, true).map((row) => row.key),
+  ).toEqual([
+    "source",
+    "child",
+    "container",
+    "nested",
+    rowKeyFor("nested", "child"),
+    "outer",
+    nestedKey,
+    rowKeyFor(nestedKey, "child"),
+  ]);
+  expect(filter?.matchIds.has("container")).toBe(false);
+  expect(filter?.matchIds.has(nestedKey)).toBe(true);
 });

@@ -63,10 +63,16 @@ export function batchExceedsNodeLimit(
  * delete of X (existed) without debiting its reinsert (still present at probe
  * time), under-counting `after` and letting a free user at the cap grow +1.
  */
+/** Net node-count effect of one batch: new inserts vs. real deletes. */
+export interface NetGrowth {
+  inserts: number;
+  deletes: number;
+}
+
 export function countNetGrowth(
   ops: ReadonlyArray<ChangeOp>,
   exists: (id: string) => boolean,
-): { inserts: number; deletes: number } {
+): NetGrowth {
   const lastIsDelete = new Map<string, boolean>();
   for (const op of ops) {
     const id = op.op === "delete" ? op.key : op.value.id;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 import type { VisibleRow } from "./visible-order";
 
+import { hasWindow } from "../env";
 import {
   getSelectionState,
   subscribeSelection,
@@ -46,6 +47,7 @@ function computeFillMap(
   data: SelectionData | null,
 ): Map<string, SelectionFill> {
   const map = new Map<string, SelectionFill>();
+  // SAFETY: the selection schema stores rootIds as an array of strings; this is a readonly-to-mutable variance cast only.
   const rootIds = data?.rootIds as readonly string[] | undefined;
   if (!rootIds || rootIds.length === 0) return map;
   const rootSet = new Set(rootIds);
@@ -85,7 +87,7 @@ function recompute() {
 }
 
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   subscribeSelection(recompute);
 }
@@ -109,6 +111,25 @@ function subscribe(cb: () => void): () => void {
   listeners.add(cb);
   return () => {
     listeners.delete(cb);
+  };
+}
+
+/** Event-time snapshot for pointer drag. A grabbed row anywhere inside the
+ * selected slab carries the selected ROOT ids, while `rowKeys` names every
+ * rendered row that should dim during the gesture. Null means the grabbed row
+ * is outside the active selection and remains an ordinary single-node drag. */
+export function getSelectionDragSet(
+  grabbedKey: string,
+): { rootIds: string[]; rowKeys: string[] } | null {
+  ensureStarted();
+  if (!fillMap.has(grabbedKey)) return null;
+  const rootIds = getSelectionState()?.rootIds;
+  if (!rootIds || rootIds.length === 0) return null;
+  // SAFETY: SelectionData's schema-owned readonly array is copied before it
+  // crosses into mutable drag state.
+  return {
+    rootIds: [...rootIds],
+    rowKeys: [...fillMap.keys()],
   };
 }
 

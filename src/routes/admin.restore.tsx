@@ -21,6 +21,16 @@ interface RestoreResult {
   targetBookmark: string;
 }
 
+/** The POST /api/admin/restore request body: one identifier plus one
+ *  restore point, both optional here only because they are filled in below. */
+interface RestoreRequestBody {
+  email?: string;
+  userId?: string;
+  bookmark?: string;
+  /** Null when the time field parses to nothing; sent as-is. */
+  at?: number | null;
+}
+
 export const Route = createFileRoute("/admin/restore")({
   component: AdminRestore,
 });
@@ -57,9 +67,12 @@ function AdminRestore() {
   async function runRestore() {
     setSubmitting(true);
     setError(null);
-    // Send email or user id by shape ("@" => email); the endpoint keys the DO on
-    // the resolved user id either way. Bookmark (undo) takes precedence over time.
-    const body: Record<string, unknown> = trimmedId.includes("@")
+    // The restore request body: exactly one identifier (email or user id by
+    // shape, "@" => email) plus exactly one restore point (bookmark or time;
+    // bookmark, the undo path, takes precedence -- `runRestore` sends only the
+    // bookmark when both are set). The endpoint keys the DO on the resolved
+    // user id either way.
+    const body: RestoreRequestBody = trimmedId.includes("@")
       ? { email: trimmedId }
       : { userId: trimmedId };
     if (hasBookmark) body.bookmark = trimmedBookmark;
@@ -75,11 +88,13 @@ function AdminRestore() {
         setDenied(true);
         return;
       }
+      // SAFETY: the endpoint returns RestoreResult on 200 or { error } otherwise
       const data = (await res.json()) as RestoreResult | { error?: string };
       if (!res.ok) {
         setError(("error" in data && data.error) || "Restore failed.");
         return;
       }
+      // SAFETY: the error branch returned above, so data is the RestoreResult
       setResult(data as RestoreResult);
       setConfirming(false);
     } catch {

@@ -50,6 +50,7 @@ import {
 import {
   forwardRef,
   Fragment,
+  type CSSProperties,
   type ReactNode,
   useCallback,
   useEffect,
@@ -71,8 +72,14 @@ import type {
 } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
-import { capture, drop } from "../data/history";
-import { hasLink } from "../data/links";
+import { loadEditorFeatures, useEditorFeatures } from "../data/editor-features";
+import {
+  capture,
+  drop,
+  finishHistoryScope,
+  trackPendingCapture,
+} from "../data/history";
+import { getLiveNodes } from "../data/live-nodes";
 import {
   appendChild,
   moveNode,
@@ -84,34 +91,46 @@ import {
 } from "../data/mutations";
 import { isNodesLimitError } from "../data/nodes-client-effect";
 import { appRuntime } from "../data/runtime";
-import { runStructural } from "../data/structural";
+import { notifySaveFailed } from "../data/save-failure";
+import { runStructural, runStructuralTracked } from "../data/structural";
 import {
+  buildTreeIndex,
   childrenOf,
   createId,
-  makeNode,
+  createNode,
   type Node,
   type TreeIndex,
 } from "../data/tree";
 import { getTreeIndex, useNode } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
+import { hasWindow } from "../env";
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 import {
+  afterPaste,
   getCaptureDestination,
+  hasFoldingToken,
   keymapSpecs,
-  slotsAt,
+  usePluginChrome,
 } from "../plugins/registry";
+import {
+  captureTextHistory,
+  runHistoryRestoreE,
+  takeTextHistory,
+} from "./history-restore";
 import {
   decorate,
   getCaretOffset,
+  setSelectionOffsets,
   readSource,
   revealLinkAtCaret,
+  useEditorFeatureDecoration,
   watchCaretReveal,
 } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import {
   buildTargetCandidates,
-  TARGET_SEARCH_OPTIONS,
+  targetSearchOptions,
 } from "./node-target-search";
 import {
   copySourceSelection,
@@ -119,7 +138,9 @@ import {
   pasteIntoBullet,
 } from "./paste";
 import { setQuickAddOpener } from "./quick-add-opener";
+import { useNativeFormatInput } from "./selection-format";
 import { useSlashMenu } from "./slash-menu";
+import { typingSuggestionsHeight } from "./typing-suggestions";
 import {
   Command,
   CommandGroup,
@@ -129,7 +150,12 @@ import {
 } from "./ui/command";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { Kbd, KbdGroup } from "./ui/kbd";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import {
+  ResponsivePopover as Popover,
+  ResponsivePopoverContent as PopoverContent,
+  ResponsivePopoverTrigger as PopoverTrigger,
+} from "./ui/responsive-popover";
+import { type MarkerPair, toggleWrapSelection } from "./wrap";
 
 /** A concrete destination a target pick yields: the parent node id (null = top
  *  level) plus its label. The overlay wraps it into a lazy {@link
@@ -151,6 +177,8 @@ const STRUCTURAL_COMMAND_IDS = new Set([
   "delete",
   "send-to-today",
   "mirror-to-today",
+  "lock",
+  "unlock",
 ]);
 function quickAddCommandFilter(spec: CommandSpec): boolean {
   return !STRUCTURAL_COMMAND_IDS.has(spec.id);
@@ -159,7 +187,7 @@ function quickAddCommandFilter(spec: CommandSpec): boolean {
 // A stable placeholder node for the interval BEFORE the first keystroke (the
 // node is born on first input). Slash/menu `available` checks read it; command
 // `run`s never fire against it (picks happen after born, a later render).
-const PLACEHOLDER_NODE: Node = makeNode({
+const PLACEHOLDER_NODE: Node = createNode({
   id: "__quick_add_draft__",
   text: "",
 });
@@ -170,12 +198,13 @@ export interface MiniEditorHandle {
   focus(): void;
   clear(): void;
   readText(): string;
+  restore(text: string, caret?: { start: number; end: number } | null): void;
 }
 
 /** The contentEditable capture surface for ONE node. A curated, text-authoring
- *  fork of `OutlineEditor`'s `ZoomedTitle` (AGENTS.md "a node renders in TWO
- *  paths" -- now three): it calls the SAME shared decorate/caret/slash/menu
- *  primitives, but wires NO structural nav and a filtered `/` palette. `onText`
+ *  fork of `OutlineEditor`'s `ZoomedTitle` (docs/plugins.md "A node renders in three
+ *  places"): it calls the SAME shared decorate/caret/slash/menu primitives,
+ *  but wires NO structural nav and a filtered `/` palette. `onText`
  *  is born-aware (creates the node on the first non-empty input, possibly async
  *  while the daily claim settles -- the DOM already holds the typed char, so the
  *  keystroke never blocks).
@@ -184,7 +213,7 @@ export interface MiniEditorHandle {
  *  `ZoomedTitle`'s contentEditable wiring (onInput/onPaste/onCopy/onCut/onFocus/
  *  onBlur/onKeyDown + the slash/menus engines + the caret-reveal watcher + the
  *  `*:before-text` node slots -- the THIRD render path for a node's decorations,
- *  AGENTS.md "a node renders in TWO paths"). The duplication is accepted rather
+ *  docs/plugins.md "A node renders in three places"). The duplication is accepted rather
  *  than extracting a shared hook (that would touch the outline's hot path for one
  *  consumer). When you change caret/decorate/menu/slot behavior in ZoomedTitle,
  *  mirror it here (and vice versa). Two DELIBERATE divergences from the title:
@@ -200,20 +229,44 @@ const MiniNodeEditor = forwardRef<
     node: Node;
     getCtx: () => PluginContext;
     onText: (text: string) => void;
+    onAfterPaste: typeof afterPaste;
     /** Enter: commit the single node & close the overlay (toast if off-page). */
     onCommit: () => void;
     /** Cmd+Enter: commit & keep going -- clear the editor, overlay stays open. */
     onCommitNext: () => void;
     onEscape: () => void;
+    onHistory: (kind: "undo" | "redo") => void;
   }
 >(function MiniNodeEditor(
-  { node, getCtx, onText, onCommit, onCommitNext, onEscape },
+  {
+    node,
+    getCtx,
+    onText,
+    onAfterPaste,
+    onCommit,
+    onCommitNext,
+    onEscape,
+    onHistory,
+  },
   handle,
 ) {
   const ref = useRef<HTMLSpanElement | null>(null);
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const caretWatchRef = useRef<(() => void) | null>(null);
+  useEditorFeatureDecoration(ref, composingRef);
+  const { slotsByPosition } = usePluginChrome();
+  const ownsFormatEditable = useCallback(
+    (el: HTMLElement) => ref.current === el,
+    [],
+  );
+  const toggleNativeMarker = useCallback(
+    (marker: MarkerPair) => {
+      toggleWrapSelection(node.id, marker, (_id, text) => onText(text), true);
+    },
+    [node.id, onText],
+  );
+  useNativeFormatInput(ownsFormatEditable, toggleNativeMarker);
 
   useImperativeHandle(
     handle,
@@ -225,6 +278,18 @@ const MiniNodeEditor = forwardRef<
         syncedRef.current = "";
       },
       readText: () => (ref.current ? readSource(ref.current) : ""),
+      restore: (text, caret) => {
+        const el = ref.current;
+        if (!el) return;
+        decorate(el, text, caret?.start ?? text.length, true);
+        syncedRef.current = text;
+        el.focus();
+        setSelectionOffsets(
+          el,
+          caret?.start ?? text.length,
+          caret?.end ?? text.length,
+        );
+      },
     }),
     [],
   );
@@ -265,6 +330,7 @@ const MiniNodeEditor = forwardRef<
       ...keymapSpecs
         .filter((k) => k.hotkey !== "Mod+Enter")
         .map((k) => ({
+          // SAFETY: KeymapSpec.hotkey is documented as a react-hotkeys combo string
           hotkey: k.hotkey as UseHotkeyDefinition["hotkey"],
           callback: () => k.run(node.id, getCtx()),
         })),
@@ -282,11 +348,14 @@ const MiniNodeEditor = forwardRef<
   // sets no checkbox yet -- it appears the instant the node is real (ADR 0049).
   const born = node.id !== PLACEHOLDER_NODE.id;
   const beforeTextSlots: readonly SlotSpec[] = born
-    ? slotsAt("title:before-text")
+    ? (slotsByPosition.get("title:before-text") ?? [])
     : [];
 
   return (
-    <div className="quick-add-editor">
+    <div
+      className="quick-add-editor"
+      data-typing-menu-open={slash.isOpen || menus.isOpen ? "" : undefined}
+    >
       {beforeTextSlots.map((slot) => (
         <Fragment key={slot.id}>{slot.render(node, getCtx)}</Fragment>
       ))}
@@ -299,6 +368,8 @@ const MiniNodeEditor = forwardRef<
         role="textbox"
         aria-label="Quick add"
         aria-multiline="true"
+        data-history-key={node.id}
+        data-history-node-id={node.id}
         data-placeholder="Capture a thought…"
         onInput={(e) => {
           const el = e.currentTarget;
@@ -326,10 +397,17 @@ const MiniNodeEditor = forwardRef<
           const el = e.currentTarget;
           // `structural=null`: a multi-line paste joins with spaces rather than
           // creating a subtree -- the capture stays a single node (ADR 0049;
-          // markdown-tree paste is the outline's). `onText` borns the node from
-          // the pasted text; unfurl (afterPaste) writes back only once the node
-          // has a real id (a paste into an already-born capture).
-          const next = pasteIntoBullet(e, el, node.id, getCtx, onText, null);
+          // markdown-tree paste is the outline's). Post-paste work waits for
+          // this draft's real, persisted ID, even if capture closes meanwhile.
+          const next = pasteIntoBullet(
+            e,
+            el,
+            node.id,
+            getCtx,
+            onText,
+            null,
+            onAfterPaste,
+          );
           if (next !== null) syncedRef.current = next;
         }}
         onCopy={(e) => copySourceSelection(e, e.currentTarget)}
@@ -339,30 +417,43 @@ const MiniNodeEditor = forwardRef<
           if (next !== null) syncedRef.current = next;
         }}
         onFocus={(e) => {
+          if (e.target !== e.currentTarget) return;
           const el = e.currentTarget;
           caretWatchRef.current?.();
           caretWatchRef.current = watchCaretReveal(
             el,
             () => composingRef.current,
           );
-          if (!hasLink(readSource(el))) return;
+          if (!hasFoldingToken(readSource(el))) return;
           revealLinkAtCaret(el, (t) => {
             syncedRef.current = t;
           });
         }}
         onBlur={(e) => {
+          if (e.target !== e.currentTarget) return;
           slash.close();
           menus.close();
           const el = e.currentTarget;
           caretWatchRef.current?.();
           caretWatchRef.current = null;
+          if (
+            e.relatedTarget instanceof HTMLElement &&
+            el.contains(e.relatedTarget)
+          )
+            return;
           const text = readSource(el);
-          if (hasLink(text)) {
+          if (hasFoldingToken(text)) {
             decorate(el, text, null, false);
             syncedRef.current = text;
           }
         }}
         onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+            e.preventDefault();
+            e.stopPropagation();
+            onHistory(e.shiftKey ? "redo" : "undo");
+            return;
+          }
           if (menus.handleKeyDown(e)) return;
           slash.handleKeyDown(e);
         }}
@@ -394,6 +485,7 @@ function CaptureTargetPicker({
   onPick: (target: PickTarget) => void;
   onCancel: () => void;
 }) {
+  const { aliasProviders } = usePluginChrome();
   const [query, setQuery] = useState("");
   const candidates = useMemo(
     () =>
@@ -404,8 +496,8 @@ function CaptureTargetPicker({
     [index, excludeId],
   );
   const fuse = useMemo(
-    () => new Fuse(candidates, TARGET_SEARCH_OPTIONS),
-    [candidates],
+    () => new Fuse(candidates, targetSearchOptions(aliasProviders)),
+    [candidates, aliasProviders],
   );
   const q = query.trim();
   const results = q
@@ -416,7 +508,7 @@ function CaptureTargetPicker({
   const label = (n: Node) => n.text.trim() || "Untitled";
 
   return (
-    <Command shouldFilter={false}>
+    <Command shouldFilter={false} className="max-md:[&_[cmdk-item]]:min-h-11">
       <CommandInput
         autoFocus
         value={query}
@@ -489,7 +581,7 @@ function DestinationButton({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover title="Capture destination" open={open} onOpenChange={setOpen}>
       <PopoverTrigger className={triggerClassName} title={title} {...dataProps}>
         {children}
       </PopoverTrigger>
@@ -559,6 +651,10 @@ interface Capture {
  *  mutable overlay state, so concurrent drafts and a slow resolve can't corrupt
  *  each other. */
 interface DraftState {
+  scope: string;
+  finished: boolean;
+  lastId: string | null;
+  birthHistory: ReturnType<typeof takeTextHistory> | null;
   /** The settled node id, or null until born resolves. */
   id: string | null;
   /** The latest typed text (read by an in-flight born at CREATE time, so it
@@ -583,6 +679,10 @@ interface DraftState {
 
 function makeDraft(resolveParent: () => Promise<string | null>): DraftState {
   return {
+    scope: createId(),
+    finished: false,
+    lastId: null,
+    birthHistory: null,
     id: null,
     text: "",
     promise: null,
@@ -592,40 +692,8 @@ function makeDraft(resolveParent: () => Promise<string | null>): DraftState {
   };
 }
 
-// --- Deferred-resolve test seam (ADR 0049) ---------------------------------
-//
-// `seedOutline`'s Map mock resolves the daily claim in a microtask, so the
-// in-flight-born window (clear/retarget/slash while borning) never actually
-// happens under e2e -- the exact blind spot that hid a cluster of async-lifecycle
-// bugs. This DEV-only gate lets a spec HOLD the destination resolve open, drive
-// the interfering actions, then release -- exercising the real races. No-op (and
-// tree-shaken) in production.
-let resolveGate: Promise<void> | null = null;
-let releaseResolveGate: (() => void) | null = null;
-
-function awaitResolveGate(): Promise<void> {
-  return resolveGate ?? Promise.resolve();
-}
-
-if (import.meta.env.DEV && typeof window !== "undefined") {
-  const w = window as unknown as {
-    __quickAddHoldResolve?: () => void;
-    __quickAddReleaseResolve?: () => void;
-  };
-  w.__quickAddHoldResolve = () => {
-    if (resolveGate) return;
-    resolveGate = new Promise<void>((r) => {
-      releaseResolveGate = r;
-    });
-  };
-  w.__quickAddReleaseResolve = () => {
-    releaseResolveGate?.();
-    resolveGate = null;
-    releaseResolveGate = null;
-  };
-}
-
 function QuickAddOverlay({ onClose }: { onClose: () => void }) {
+  const { daily } = useEditorFeatures();
   const editorRef = useRef<MiniEditorHandle | null>(null);
   // The off-page toast's "Go there" zooms to the destination (ADR 0049
   // amendment). Quick-add is mounted in `__root.tsx`, inside the router, so the
@@ -634,7 +702,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   // Position signal (ADR 0030): lift the panel above the software keyboard on a
   // coarse pointer; a fine pointer centers it and ignores the offset.
   const coarse = useCoarsePointer();
-  const keyboardOffset = useKeyboardViewport();
+  const { height, offsetTop } = useKeyboardViewport();
+  const keyboardOffset = hasWindow()
+    ? Math.max(0, window.innerHeight - (height + offsetTop))
+    : 0;
 
   // The destination for the CURRENT draft (resets to the default per node). The
   // default is the LAZY provider (label known now, node created only at born) --
@@ -653,6 +724,23 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   // finishes against its OWN object.
   const draftRef = useRef<DraftState | null>(null);
   draftRef.current ??= makeDraft(destRef.current.resolve);
+  useEffect(() => {
+    const previous = defaultRef.current;
+    const next = getCaptureDestination();
+    defaultRef.current = next;
+    const draft = draftRef.current!;
+    // Change only an untouched default. A chosen target or already-started
+    // capture keeps its location; the next capture uses the new default.
+    if (
+      !draft.id &&
+      !draft.promise &&
+      draft.resolveParent === previous.resolve
+    ) {
+      draft.resolveParent = next.resolve;
+      destRef.current = next;
+      setDest(next);
+    }
+  }, [daily]);
   // `draftId` mirrors the CURRENT draft's settled id, for rendering its node.
   const [draftId, setDraftId] = useState<string | null>(null);
 
@@ -681,16 +769,19 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   // undo point when nothing actually moved (re-picking the same parent), via the
   // move-dialog drop-on-no-op pattern -- SAFE here because the capture we just
   // pushed is guaranteed the stack top (relocate is atomic, nothing between).
-  const relocate = useCallback((id: string, parentId: string | null) => {
-    const index = getTreeIndex();
-    const kids = childrenOf(index, parentId);
-    const after = kids.length ? kids[kids.length - 1]!.id : null;
-    const moved = runStructural(() => {
-      capture(index, id);
-      return moveNode(index, id, parentId, after);
-    });
-    if (!moved) drop();
-  }, []);
+  const relocate = useCallback(
+    (id: string, parentId: string | null, scope?: string) => {
+      const index = getTreeIndex();
+      const kids = childrenOf(index, parentId);
+      const after = kids.length ? kids[kids.length - 1]!.id : null;
+      const moved = runStructural(() => {
+        capture(index, id, null, { label: "move", scope });
+        return moveNode(index, id, parentId, after);
+      });
+      if (!moved) drop();
+    },
+    [],
+  );
 
   // Kick off a draft's born. Serialized through `createChainRef` so the CREATE
   // steps run in submission order (chronological log). Resolves the draft's
@@ -705,7 +796,6 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     const prev = createChainRef.current;
     const p = (async (): Promise<string | null> => {
       await prev; // preserve create order across drafts (bug 6)
-      await awaitResolveGate(); // deferred-resolve test seam
       if (d.id) return d.id;
       // The destination provider (Seam L) REJECTS when it named a target it
       // couldn't mint (F2) -- a failure, NOT the legit `null` = "top level". Abort
@@ -742,16 +832,35 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       // and be lost. Coalescing into one batch removes the race (ADR 0009).
       const intents = d.intents;
       d.intents = [];
-      runStructural(() => {
-        capture(index, target);
+      const { persisted } = runStructuralTracked(() => {
+        capture(index, null, d.birthHistory?.tag ?? null, {
+          label: "capture",
+          scope: d.scope,
+          location: d.birthHistory?.location ?? {
+            rootId: getViewRootId(),
+            rowKey: null,
+            caret: null,
+            selection: null,
+          },
+        });
         appendChild(target, after, d.text, newId);
         for (const intent of intents) intent(newId);
       });
       d.id = newId;
+      d.lastId = newId;
+      if (d.finished) finishHistoryScope(d.scope);
       if (mountedRef.current && draftRef.current === d) setDraftId(newId);
+      try {
+        await persisted;
+      } catch (error) {
+        notifySaveFailed(error);
+        d.id = null;
+        return null;
+      }
       return newId;
     })();
     d.promise = p;
+    trackPendingCapture(p);
     createChainRef.current = p.then(
       () => {},
       () => {},
@@ -773,10 +882,13 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       const d = draftRef.current!;
       d.text = text;
       if (d.id) {
+        if (getTreeIndex().byId.get(d.id)?.text === text) return;
+        captureTextHistory(d.id, d.scope);
         setText(d.id, text);
         return;
       }
       if (text.trim() === "") return;
+      d.birthHistory ??= takeTextHistory(PLACEHOLDER_NODE.id);
       void startBorn(d);
     },
     [startBorn],
@@ -790,6 +902,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     (apply: (id: string) => void) => {
       const d = draftRef.current!;
       if (d.id) {
+        capture(getTreeIndex(), d.id, null, { label: "kind", scope: d.scope });
         apply(d.id);
         return;
       }
@@ -810,21 +923,48 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     if (!n || n.text.trim() === "") {
       const id = d.id;
       runStructural(() => {
-        capture(index, null);
+        capture(index, null, null, { label: "capture", scope: d.scope });
         removeNode(index, id);
       });
     }
     d.id = null;
   }, []);
 
+  const finishDraft = useCallback((d: DraftState) => {
+    d.finished = true;
+    finishHistoryScope(d.scope, buildTreeIndex(getLiveNodes()));
+  }, []);
+
+  const replayDraft = useCallback(
+    (kind: "undo" | "redo") =>
+      Effect.gen(function* () {
+        const d = draftRef.current!;
+        const birth = d.promise;
+        if (birth) yield* Effect.promise(() => birth);
+        if (draftRef.current !== d || !mountedRef.current) return;
+        const plan = yield* runHistoryRestoreE(kind, d.id, () => {}, d.scope);
+        if (!plan) return;
+        if (draftRef.current !== d || !mountedRef.current) return;
+        const restored = d.lastId ? getTreeIndex().byId.get(d.lastId) : null;
+        d.id = restored?.id ?? null;
+        d.text = restored?.text ?? "";
+        if (!d.id) d.promise = null;
+        setDraftId(d.id);
+        editorRef.current?.restore(d.text, plan.location?.caret);
+      }),
+    [],
+  );
+
   // Start a FRESH draft for the next capture: destination back to the DEFAULT
-  // (bug 2 -- read defaultRef directly, not destRef, which setDest hasn't flushed
-  // yet), editor cleared and refocused. The just-committed draft lives on until
+  // (read the live provider, not destRef, which setDest hasn't flushed yet),
+  // editor cleared and refocused. The just-committed draft lives on until
   // its own born settles (referenced by the caller), untouched by this.
   const resetDraft = useCallback(() => {
-    draftRef.current = makeDraft(defaultRef.current.resolve);
+    const destination = getCaptureDestination();
+    defaultRef.current = destination;
+    draftRef.current = makeDraft(destination.resolve);
     setDraftId(null);
-    setDest(defaultRef.current);
+    setDest(destination);
     editorRef.current?.clear();
     editorRef.current?.focus();
   }, []);
@@ -842,6 +982,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     resetDraft();
     if (text.trim() === "") {
       discardDraftIfEmpty(d);
+      finishDraft(d);
       return;
     }
     // `startBorn` only creates a node when the draft's text is non-empty, so a
@@ -851,9 +992,14 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       if (!id || !mountedRef.current) return;
       setCaptures((c) => [...c, { id, label }]);
     };
-    if (d.id) file(d.id);
-    else void startBorn(d).then(file);
-  }, [discardDraftIfEmpty, resetDraft, startBorn]);
+    if (d.id) {
+      file(d.id);
+      finishDraft(d);
+    } else {
+      d.finished = true;
+      void startBorn(d).then(file);
+    }
+  }, [discardDraftIfEmpty, finishDraft, resetDraft, startBorn]);
 
   const close = useCallback(() => {
     // A non-empty draft is already committed to its destination; only an empty
@@ -863,9 +1009,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     const d = draftRef.current!;
     if (!d.id && d.text.trim() !== "") void startBorn(d);
     discardDraftIfEmpty(d);
+    finishDraft(d);
     setCaptures([]);
     onClose();
-  }, [discardDraftIfEmpty, startBorn, onClose]);
+  }, [discardDraftIfEmpty, finishDraft, startBorn, onClose]);
 
   // Enter = commit & CLOSE (ADR 0049 amendment). Files the SINGLE current draft,
   // then dismisses the overlay. When the destination isn't the view you're on
@@ -920,7 +1067,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       const d = draftRef.current!;
       d.resolveParent = async () => target.parentId;
       d.desiredParent = { value: target.parentId };
-      if (d.id) relocate(d.id, target.parentId);
+      if (d.id) relocate(d.id, target.parentId, d.scope);
       requestAnimationFrame(() => editorRef.current?.focus());
     },
     [relocate],
@@ -954,10 +1101,16 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       onMoveUp: noop,
       onMoveDown: noop,
       onDeleteNode: noop,
+      // Structural nav is suppressed by construction here, and a capture draft
+      // has no "bullet above" to join into -- the mini editor binds no Backspace
+      // at all, so nothing can reach this (the three-path trap, ADR 0049).
+      onJoinPrevious: noop,
       onToggleCompleted: (_id, completed) =>
         runNodeIntent((id) => toggleCompleted(id, completed)),
       onSetTask: (_id, isTask) => runNodeIntent((id) => setIsTask(id, isTask)),
-      onSetKind: (_id, kind) => runNodeIntent((id) => setKind(id, kind)),
+      onSetKind: (_id, kind, text) =>
+        runNodeIntent((id) => setKind(id, kind, text)),
+      onSetLocked: noop,
       onRequestMove: noop,
       onRequestMirror: noop,
       onToggleCollapsed: noop,
@@ -994,6 +1147,29 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     [commands],
   );
 
+  const onAfterPaste: typeof afterPaste = (input, ctx) => {
+    const draft = draftRef.current!;
+    void (draft.promise ?? startBorn(draft)).then((id) => {
+      if (!id) return;
+      afterPaste(
+        { ...input, nodeId: id },
+        {
+          ...ctx,
+          mutations: {
+            ...ctx.mutations,
+            // Never route a late result through commitText: the user may have
+            // already started another capture or closed this overlay.
+            onTextChange: (nodeId, text) => {
+              if (!getTreeIndex().byId.has(nodeId)) return;
+              setText(nodeId, text);
+              if (draft.id === nodeId) draft.text = text;
+            },
+          },
+        },
+      );
+    });
+  };
+
   const index = getTreeIndex();
 
   // The destination glyph (Today = sun, Top level = home) leads the trailing
@@ -1004,6 +1180,21 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     ) : dest.label === "Top level" ? (
       <HomeIcon className="size-3.5 text-muted-foreground" />
     ) : null;
+
+  const captureStyle: CSSProperties & {
+    "--capture-viewport-top": string;
+    "--capture-viewport-height": string;
+    "--capture-suggestions-height": string;
+  } = {
+    "--capture-viewport-top": `${offsetTop}px`,
+    "--capture-viewport-height": `${height}px`,
+    "--capture-suggestions-height": `${typingSuggestionsHeight(height)}px`,
+  };
+  if (coarse) {
+    captureStyle.bottom = `calc(1rem + ${keyboardOffset}px)`;
+    captureStyle.marginBottom =
+      keyboardOffset === 0 ? "env(safe-area-inset-bottom)" : undefined;
+  }
 
   // The shadcn Dialog owns focus-trap, Escape, backdrop, and a11y (ADR 0049 now
   // adopts the Cmd+K command-center frame). `onOpenChange(false)` routes both the
@@ -1027,20 +1218,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
           // `sm:max-w-lg` (not a bare `max-w-*`): the DialogContent base carries
           // `sm:max-w-sm`, which outlives any unprefixed max-width at that
           // breakpoint -- the wider capture surface must override it in kind.
-          "flex max-h-[85vh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-xl! p-0 sm:max-w-lg",
+          "quick-add-popup inset-x-0! mx-auto flex max-h-[85vh] w-[calc(100%-2rem)] translate-none! transform-none! flex-col gap-0 overflow-hidden rounded-xl! p-0 sm:max-w-lg",
           coarse ? "top-auto bottom-4 translate-y-0" : "top-1/3 translate-y-0",
         )}
-        style={
-          coarse
-            ? {
-                transform: `translateY(-${keyboardOffset}px)`,
-                marginBottom:
-                  keyboardOffset === 0
-                    ? "env(safe-area-inset-bottom)"
-                    : undefined,
-              }
-            : undefined
-        }
+        style={captureStyle}
       >
         {/* Escape guard: a caret menu (slash / # / [[) or the target picker owns
             Escape to close ITSELF, but Base UI's Dialog listens for Escape on
@@ -1075,9 +1256,13 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
                   node={node}
                   getCtx={getCtx}
                   onText={commitText}
+                  onAfterPaste={onAfterPaste}
                   onCommit={commitAndClose}
                   onCommitNext={commitAndNext}
                   onEscape={close}
+                  onHistory={(kind) => {
+                    appRuntime.runFork(replayDraft(kind));
+                  }}
                 />
               </div>
             </div>
@@ -1163,6 +1348,7 @@ function useContentEditableFocused(): boolean {
   const [editing, setEditing] = useState(false);
   useEffect(() => {
     const update = () => {
+      // SAFETY: document.activeElement is an Element or null, elements here are HTMLElements
       const el = document.activeElement as HTMLElement | null;
       setEditing(!!el?.isContentEditable);
     };
@@ -1202,7 +1388,10 @@ function QuickAddFab({ onOpen }: { onOpen: () => void }) {
         "border border-border/60 bg-background/70 text-foreground shadow-lg backdrop-blur-xl",
         "ring-1 ring-black/5 transition-transform duration-100 ease-out active:scale-[0.94] dark:ring-white/10",
       )}
-      style={{ marginBottom: "env(safe-area-inset-bottom)" }}
+      style={{
+        marginBottom: "env(safe-area-inset-bottom)",
+        marginRight: "env(safe-area-inset-right)",
+      }}
     >
       <PlusIcon className="size-6" />
     </button>
@@ -1225,11 +1414,24 @@ export function QuickAdd() {
   );
   const openRef = useRef(open);
   openRef.current = open;
+  const requestOpen = useCallback(() => {
+    void Effect.runPromise(
+      Effect.tryPromise(() => loadEditorFeatures()).pipe(
+        Effect.match({
+          onSuccess: () => setOpen(true),
+          onFailure: () =>
+            toast.error(
+              "Couldn't load your feature settings. Try again in Settings.",
+            ),
+        }),
+      ),
+    );
+  }, []);
 
   useEffect(() => {
-    setQuickAddOpener(() => setOpen(true));
+    setQuickAddOpener(requestOpen);
     return () => setQuickAddOpener(null);
-  }, []);
+  }, [requestOpen]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -1242,23 +1444,24 @@ export function QuickAdd() {
       if (e.key !== "q" && e.key !== "Q") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (openRef.current) return;
+      // SAFETY: document.activeElement is an Element or null, elements here are HTMLElements
       const el = document.activeElement as HTMLElement | null;
       if (el?.isContentEditable) return;
       const tag = el?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (document.querySelector('[role="dialog"]')) return;
       e.preventDefault();
-      setOpen(true);
+      requestOpen();
     }
     window.addEventListener("keydown", onKey, { capture: true });
     return () =>
       window.removeEventListener("keydown", onKey, { capture: true });
-  }, []);
+  }, [requestOpen]);
 
   if (!mounted) return null;
   return (
     <>
-      {!open && <QuickAddFab onOpen={() => setOpen(true)} />}
+      {!open && <QuickAddFab onOpen={requestOpen} />}
       {open && <QuickAddOverlay onClose={() => setOpen(false)} />}
     </>
   );

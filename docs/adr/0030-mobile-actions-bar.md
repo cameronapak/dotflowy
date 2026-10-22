@@ -9,7 +9,9 @@ grouped: `[outdent ⇤][indent ⇥] | [undo ↺][redo ↻] | [complete ☑][/]`.
 structural + history actions that on desktop are keyboard shortcuts (`Tab`/`Shift+Tab`, `Mod+Z`/`Mod+Shift+Z`,
 `Mod+Enter`) plus the `/` command palette — none of which a software keyboard exposes. Shipped compiled
 default ON behind an `isMobileBar()` localStorage escape-hatch flag (the ADR 0019 shape); the flag was
-deleted once dogfooded (2026-07-12) — the bar now mounts unconditionally and self-gates on pointer type.
+deleted once dogfooded (2026-07-12) — the bar now mounts unconditionally and self-gates on pointer type. A text
+selection inside one bullet swaps these buttons for the formatting set
+([ADR 0069](./0069-touch-selection-formatting.md)).
 
 **Signal assignment (the load-bearing decision).** Three orthogonal browser signals drive three orthogonal
 behaviors, and keeping them separate is what makes the bar robust:
@@ -22,10 +24,12 @@ behaviors, and keeping them separate is what makes the bar robust:
   state) and hides on blur. This is not cosmetic: it guarantees every button has a valid target by
   construction — `findFocusedId()` is non-null whenever the bar is visible, so each zero-arg action can
   resolve the node it operates on with no ambiguity and no "nothing selected" state to design around.
-- **Position = visual viewport.** A `useKeyboardViewport` hook reads `window.visualViewport` (rAF-throttled)
-  and translates the bar up by `innerHeight - (visualViewport.height + visualViewport.offsetTop)` so it rides
-  above the software keyboard. When the viewport isn't shrunk (hardware keyboard / iPad) that gap is 0 and the
-  bar falls back to `bottom:0` + `env(safe-area-inset-bottom)`.
+- **Position = visual viewport.** `useKeyboardViewport` uses Adobe's `useViewportSize` from
+  `@react-aria/utils` for keyboard-aware height and tracks `visualViewport.offsetTop` on rAF-throttled
+  resize/scroll events. A fixed, pointer-transparent frame fits that visible band, with the interactive
+  capsule at its bottom. This preserves the editor's window scrolling and virtualization. Position follows
+  viewport changes without a second CSS animation; pinch zoom updates are ignored. When the visible band
+  reaches the layout viewport's bottom, the frame adds `env(safe-area-inset-bottom)`.
 
 **Why pure `visualViewport`, not `env(keyboard-inset-*)`.** The `env(keyboard-inset-*)` CSS environment
 variables are Chromium-only; iOS Safari (the primary target) needs the JS `visualViewport` path regardless.
@@ -92,8 +96,8 @@ API first.
 - **Per-node reactive button state (enable/disable, checked).** Re-fights the ADR 0014 per-node render budget;
   row-level feedback already tells the user what happened.
 
-**Not e2e-testable → manual iPhone checklist in the PR:** keyboard-relative positioning, `visualViewport`
-tracking, iOS contentEditable focus-preservation under `preventDefault`, and how the glass capsule reads
-stacked above the system accessory pill — Playwright can't drive a real software keyboard or `visualViewport`
-resize, nor render the iOS accessory bar. The e2e suite (`e2e/mobile-actions-bar.spec.ts`) covers the rest:
-coarse-only mount, focus/blur visibility, and each button's action wiring.
+**Manual iPhone checklist in the PR:** real keyboard animation, iOS contentEditable focus-preservation under
+`preventDefault`, and how the glass capsule reads stacked above the system accessory pill. Playwright can't
+drive a real software keyboard or render the iOS accessory bar. The e2e suite (`e2e/mobile-actions-bar.spec.ts`)
+checks geometry with synthetic visual-viewport resize/scroll events, including keyboard close, pinch zoom,
+and the no-API fallback, alongside coarse-only mount, focus/blur visibility, and each button's action wiring.

@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { Schema } from "effect";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { NodesPatchBody } from "../worker/wire";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 interface PatchUpdate {
   id: string;
@@ -58,13 +60,15 @@ test("heals a shattered sibling chain on load so every node is reorderable", asy
   page.on("request", (req) => {
     if (req.url().includes("/api/nodes") && req.method() === "PATCH") {
       updates.push(
-        ...(req.postDataJSON() as { updates: PatchUpdate[] }).updates,
+        ...Schema.decodeUnknownSync(NodesPatchBody)(req.postDataJSON()).updates,
       );
     }
   });
 
   await seedOutline(page, seed);
-  await page.goto("/");
+  // The heal runs once the outline loads. Wait for that within the test budget,
+  // not the poll's 5s budget: a cold dev server can still be compiling.
+  await openSeededOutline(page, { anchorId: "A" });
 
   // Applying the heal's pointer corrections must yield clean, fully-reachable
   // chains under every parent.

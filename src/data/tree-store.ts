@@ -4,7 +4,10 @@ import { useCallback, useRef, useSyncExternalStore } from "react";
 
 import type { QueryFilter } from "./filter-query";
 
+import { hasWindow } from "../env";
+import { collectBacklinkReferrerIds } from "./backlinks";
 import { isSyncReady, nodesCollection, subscribeSyncReady } from "./collection";
+import { parseDateLinkKeys } from "./date-links";
 import { isMirrorsEnabled } from "./flags";
 import { parseNodeLinks } from "./node-links";
 import { parseTags } from "./tags";
@@ -12,6 +15,8 @@ import {
   buildTreeIndex,
   buildTrail,
   childrenOf,
+  computeLockedContentIds,
+  isNodeLocked,
   orderChildIds,
   parentKeyOf,
   type Node,
@@ -52,7 +57,9 @@ let index: TreeIndex = {
   byId: new Map(),
   childrenByParent: new Map(),
   mirrorsBySource: new Map(),
+  lockedContentIds: new Set(),
   linksByTarget: new Map(),
+  dateMentionsByKey: new Map(),
   tagCorpus: new Map(),
 };
 const listeners = new Set<() => void>();
@@ -98,9 +105,8 @@ function notify() {
  * re-deriving on every change; we just scope the re-sort to touched parents.
  * Field-only edits touch no parent, so they re-sort nothing and stay O(1).
  *
- * NOTE: this kills the index-rebuild O(n). The remaining O(visible) per-keystroke
- * cost is the `useVisibleChildIds` getSnapshot fan-out across *mounted* parents
- * -- that's what Phase B's windowing cuts, not this.
+ * Child-list snapshots share structureRev's visibility invalidation contract;
+ * unchanged structure never rescans a wide parent's children on a keystroke.
  */
 function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   const dirty = new Set<string>(); // parents whose child order may have changed
@@ -115,17 +121,25 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // batches today, but tracked independently so the reverse index stays correct
   // (and its Map identity is refreshed) even on a bare field edit that flips it.
   let mirrorsChanged = false;
+  // A direct lock flip changes effective state for its full rendered subtree.
+  // Recompute once after the batch, never once per mounted row.
+  let locksChanged = false;
   // Outbound-link transitions (ADR 0032): a text edit that completes or deletes
   // a `[[id]]` token. Tracked like mirrorsChanged so the backlink reverse index
   // refreshes on a bare field edit; parseNodeLinks bails on link-free text, so
   // the keystroke hot path pays two `includes` scans of the edited node's text.
   let linksChanged = false;
+  // Date-mention transitions (ADR 0056): same discipline as linksChanged for
+  // `[[YYYY-MM-DD]]` tokens → dateMentionsByKey. parseDateLinkKeys bails on
+  // `[[`-free text (shared early-out with parseNodeLinks).
+  let dateMentionsChanged = false;
   // Tag-corpus transitions (the tags.ts split): a text edit that adds/removes a
   // `#tag`. Tracked the same way as linksChanged; parseTags bails on tag-free
   // text so a tag-free keystroke pays the same cheap `includes` scan.
   let tagsChanged = false;
   for (const change of changes) {
     if (change.type === "delete") {
+      // SAFETY: this collection's keys are node ids (getKey: node.id), so a delete change key is a string.
       const prev = index.byId.get(change.key as string);
       if (!prev) continue;
       index.byId.delete(prev.id);
@@ -139,6 +153,10 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
       for (const target of parseNodeLinks(prev.text)) {
         removeLink(target, prev.id);
         linksChanged = true;
+      }
+      for (const dateKey of parseDateLinkKeys(prev.text)) {
+        removeDateMention(dateKey, prev.id);
+        dateMentionsChanged = true;
       }
       for (const tag of parseTags(prev.text)) {
         removeTagOccurrence(tag);
@@ -163,6 +181,22 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
           if (!before.includes(t)) {
             addLink(t, next.id);
             linksChanged = true;
+          }
+        }
+      }
+      const datesBefore = prev ? parseDateLinkKeys(prev.text) : [];
+      const datesAfter = parseDateLinkKeys(next.text);
+      if (datesBefore.length > 0 || datesAfter.length > 0) {
+        for (const k of datesBefore) {
+          if (!datesAfter.includes(k)) {
+            removeDateMention(k, next.id);
+            dateMentionsChanged = true;
+          }
+        }
+        for (const k of datesAfter) {
+          if (!datesBefore.includes(k)) {
+            addDateMention(k, next.id);
+            dateMentionsChanged = true;
           }
         }
       }
@@ -195,6 +229,7 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
       if (next.mirrorOf) addMirror(next.mirrorOf, next.id);
       mirrorsChanged = true;
     }
+    if ((prev?.locked ?? false) !== next.locked) locksChanged = true;
     if (!prev) {
       // Insert (also the safe fallback for an update to a row we haven't seen).
       const key = parentKeyOf(next);
@@ -237,6 +272,10 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // reactivity flows through `useNode` (node-object identity), not Map identity,
   // and whole-collection readers are inert while a bullet is being edited.
   const structural = dirty.size > 0;
+  const lockedContentIds =
+    structural || mirrorsChanged || locksChanged
+      ? computeLockedContentIds(index)
+      : index.lockedContentIds;
   index = {
     byId: structural ? new Map(index.byId) : index.byId,
     childrenByParent: structural
@@ -249,6 +288,7 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
       structural || mirrorsChanged
         ? new Map(index.mirrorsBySource)
         : index.mirrorsBySource,
+    lockedContentIds,
     // Same discipline for the backlink reverse index (ADR 0032): fresh on a
     // structural change or when a text edit flipped an outbound link. A plain
     // (link-free) keystroke keeps the reference.
@@ -256,6 +296,11 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
       structural || linksChanged
         ? new Map(index.linksByTarget)
         : index.linksByTarget,
+    // Same discipline for date mentions (ADR 0056).
+    dateMentionsByKey:
+      structural || dateMentionsChanged
+        ? new Map(index.dateMentionsByKey)
+        : index.dateMentionsByKey,
     // Same discipline for the tag corpus: fresh on a structural change or when a
     // text edit added/removed a tag. A tag-free keystroke keeps the reference.
     tagCorpus:
@@ -264,16 +309,17 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // Bump the flat-list signal on a structural change OR a visibility flip; a
   // pure text/isTask edit leaves it untouched (the typing hot path). See
   // useVisibleRows.
-  if (dirty.size > 0 || visibilityChanged) structureRev++;
+  if (dirty.size > 0 || visibilityChanged || mirrorsChanged) structureRev++;
   notify();
 }
 
 /** Append an id to a parent's child list (the dirty re-sort fixes its position).
- *  Guards against a duplicate from a redelivered change. */
+ *  applyChanges calls this only for an absent id or a changed parent. A
+ *  redelivered insert already has a byId entry, so it cannot append twice. */
 function addChildId(key: string, id: string) {
   const ids = index.childrenByParent.get(key);
   if (ids) {
-    if (!ids.includes(id)) ids.push(id);
+    ids.push(id);
   } else {
     index.childrenByParent.set(key, [id]);
   }
@@ -330,6 +376,26 @@ function removeLink(targetId: string, referrerId: string) {
   if (ids.length === 0) index.linksByTarget.delete(targetId);
 }
 
+/** Register a referring node under a date key in the date-mention reverse
+ *  index (ADR 0056). Guards against a duplicate from a redelivered change. */
+function addDateMention(dateKey: string, referrerId: string) {
+  const ids = index.dateMentionsByKey.get(dateKey);
+  if (ids) {
+    if (!ids.includes(referrerId)) ids.push(referrerId);
+  } else {
+    index.dateMentionsByKey.set(dateKey, [referrerId]);
+  }
+}
+
+/** Drop a referrer from a date key's mention bucket; prune when it empties. */
+function removeDateMention(dateKey: string, referrerId: string) {
+  const ids = index.dateMentionsByKey.get(dateKey);
+  if (!ids) return;
+  const i = ids.indexOf(referrerId);
+  if (i !== -1) ids.splice(i, 1);
+  if (ids.length === 0) index.dateMentionsByKey.delete(dateKey);
+}
+
 /** Register one occurrence of `tag` in the maintained corpus (the tags.ts
  *  split): first-seen casing wins the entry's display `tag`, same rule
  *  `collectAllTags` applies in a full rebuild. */
@@ -358,7 +424,7 @@ function removeTagOccurrence(tag: string) {
  * socket) -- see ADR 0004.
  */
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   nodesCollection.subscribeChanges((changes) => applyChanges(changes), {
     includeInitialState: true,
@@ -406,6 +472,12 @@ export function useNode(id: string): Node | undefined {
   return useSyncExternalStore(subscribeTree, getSnapshot, () => undefined);
 }
 
+/** Subscribe to effective lock state for one content node. */
+export function useIsLocked(id: string): boolean {
+  const getSnapshot = useCallback(() => isNodeLocked(getTreeIndex(), id), [id]);
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => false);
+}
+
 /** A no-op store subscription, for hooks switched off by a session-fixed flag:
  *  no listener is registered and it never notifies, so the snapshot stays at its
  *  disabled value for the session. */
@@ -437,16 +509,19 @@ export function useMirrorCount(id: string, enabled = true): number {
 }
 
 /**
- * Subscribe to how many nodes LINK to `id` (ADR 0032) -- the number behind the
- * zoomed view's "{n} backlinks" line. Deduped by referring node (the reverse
- * index stores each referrer once regardless of how many times its text repeats
- * the token). A primitive snapshot, so the one mounted consumer (the zoomed
- * title's chrome) re-renders only when the count actually changes.
+ * Subscribe to how many nodes link/mention `id` (ADR 0032 + ADR 0056) -- the
+ * number behind the zoomed view's "{n} backlinks" line. When `dayKey` is a
+ * local `YYYY-MM-DD`, date-token mentions of that day join node-link referrers
+ * (deduped; self + mirror instances excluded). A primitive snapshot, so the
+ * one mounted consumer re-renders only when the count actually changes.
  */
-export function useBacklinkCount(id: string): number {
+export function useBacklinkCount(
+  id: string,
+  dayKey: string | null = null,
+): number {
   const getSnapshot = useCallback(
-    () => getTreeIndex().linksByTarget.get(id)?.length ?? 0,
-    [id],
+    () => collectBacklinkReferrerIds(getTreeIndex(), id, dayKey).length,
+    [id, dayKey],
   );
   return useSyncExternalStore(subscribeTree, getSnapshot, () => 0);
 }
@@ -469,14 +544,36 @@ export function useVisibleChildIds(
   // Cache the last (key, ids) so getSnapshot returns a referentially stable
   // array while the structure is unchanged. Starts null -- the first call
   // always populates, so there is no sentinel key to collide with.
-  const cache = useRef<{ key: string; ids: string[] } | null>(null);
+  const cache = useRef<{
+    rev: number;
+    parentId: string | null;
+    isHidden: (node: Node) => boolean;
+    key: string;
+    ids: string[];
+  } | null>(null);
   const getSnapshot = useCallback(() => {
+    const rev = getStructureRev();
+    const prev = cache.current;
+    // Same visibility contract as useVisibleRows: structural/mirror changes,
+    // collapse/completion, and a new predicate all invalidate this read.
+    if (
+      prev &&
+      prev.rev === rev &&
+      prev.parentId === parentId &&
+      prev.isHidden === isHidden
+    )
+      return prev.ids;
     const kids = childrenOf(getTreeIndex(), parentId);
     const ids: string[] = [];
     for (const n of kids) if (!isHidden(n)) ids.push(n.id);
     const key = ids.join("\n");
-    if (!cache.current || cache.current.key !== key)
-      cache.current = { key, ids };
+    cache.current = {
+      rev,
+      parentId,
+      isHidden,
+      key,
+      ids: prev?.key === key ? prev.ids : ids,
+    };
     return cache.current.ids;
   }, [parentId, isHidden]);
   return useSyncExternalStore(subscribeTree, getSnapshot, () => EMPTY_IDS);

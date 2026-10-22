@@ -18,32 +18,84 @@ import type { Node } from "./schema";
 /**
  * Order one parent's children by following the `prevSiblingId` chain from the
  * head. Nodes orphaned by a broken pointer (a fan — two siblings sharing one
- * prev; a dangle — a pointer to a missing/foreign id) are appended in arrival
- * order rather than dropped: a visible, movable bullet beats a vanished one.
+ * prev; a dangle — a pointer to a missing/foreign id) are still kept — a
+ * visible, movable bullet beats a vanished one.
+ *
+ * After the primary walk from `null`, remaining orphans are stitched by
+ * following *their* `prevSiblingId` links as subchains (arrival order only as a
+ * last resort). A fan that leaves a paste block off the winning head must not
+ * scramble that block into collection order — that is what made Lunora
+ * multi-paragraph paste look "scattered" after refresh on a corrupted
+ * top-level chain.
+ *
  * The iteration cap makes a cyclic chain terminate. Pass the children of a
  * single parent; a list of 0 or 1 is returned unchanged.
  */
 export function orderSiblings(unordered: Node[]): Node[] {
   if (unordered.length <= 1) return unordered;
 
-  const byPrev = new Map<string | null, Node>();
-  for (const n of unordered) byPrev.set(n.prevSiblingId, n);
+  // Multimap: fans keep every claimant (Map.set would drop all but the last).
+  const byPrev = new Map<string | null, Node[]>();
+  for (const n of unordered) {
+    const key = n.prevSiblingId ?? null;
+    const list = byPrev.get(key);
+    if (list) list.push(n);
+    else byPrev.set(key, [n]);
+  }
 
   const ordered: Node[] = [];
-  const idsInChain = new Set<string>();
-  let cursor: string | null = null;
-  // Guard against cycles / corruption with an iteration cap.
+  const seen = new Set<string>();
+
+  const walkFrom = (startPrev: string | null): void => {
+    let cursor: string | null = startPrev;
+    let guard = unordered.length + 1;
+    while (guard-- > 0) {
+      const claimants = byPrev.get(cursor);
+      if (!claimants) break;
+      const next = claimants.find((n) => !seen.has(n.id));
+      if (!next) break;
+      ordered.push(next);
+      seen.add(next.id);
+      cursor = next.id;
+    }
+  };
+
+  // Primary walk from the true head (null). On a fan of heads, arrival order
+  // among null-prev claimants picks the winner — stable for a given input list.
+  walkFrom(null);
+
+  // Stitch orphan subchains: extend from the current tip when possible, else
+  // start a local head (prev missing / already placed / not among remaining).
   let guard = unordered.length + 1;
-  while (guard-- > 0) {
-    const next = byPrev.get(cursor);
-    if (!next) break;
-    ordered.push(next);
-    idsInChain.add(next.id);
-    cursor = next.id;
+  while (seen.size < unordered.length && guard-- > 0) {
+    const before = ordered.length;
+    const tip = ordered.length > 0 ? ordered[ordered.length - 1]!.id : null;
+    if (tip !== null) walkFrom(tip);
+    if (ordered.length > before) continue;
+
+    const remaining = unordered.filter((n) => !seen.has(n.id));
+    if (remaining.length === 0) break;
+    const remainingIds = new Set(remaining.map((n) => n.id));
+    const localHead =
+      remaining.find((n) => {
+        const prev = n.prevSiblingId;
+        return prev == null || !remainingIds.has(prev);
+      }) ?? remaining[0]!;
+
+    if (localHead.prevSiblingId && seen.has(localHead.prevSiblingId)) {
+      walkFrom(localHead.prevSiblingId);
+      if (ordered.length > before) continue;
+    }
+
+    if (!seen.has(localHead.id)) {
+      ordered.push(localHead);
+      seen.add(localHead.id);
+      walkFrom(localHead.id);
+    }
   }
 
   for (const n of unordered) {
-    if (!idsInChain.has(n.id)) ordered.push(n);
+    if (!seen.has(n.id)) ordered.push(n);
   }
 
   return ordered;

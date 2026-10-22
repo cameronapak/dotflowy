@@ -36,6 +36,7 @@ export function caretFromPoint(
     const pos = document.caretPositionFromPoint(x, y);
     return pos ? { node: pos.offsetNode, offset: pos.offset } : null;
   }
+  // SAFETY: legacy WebKit API absent from the Document typings, same shape as the standard one
   const legacy = (
     document as Document & {
       caretRangeFromPoint?: (x: number, y: number) => Range | null;

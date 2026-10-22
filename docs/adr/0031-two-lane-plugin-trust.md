@@ -70,3 +70,18 @@ server is Lane B. **The gate is the PR, not the logo.**
 - The **panel host is net-new surface** and the largest build downstream of this ADR.
 - **Two open items gate Lane B:** MCP Apps spec maturity, and theme-token feeding into the
   iframe. Until both are verified, Lane B stays a design, not a build.
+
+## October 8 amendment: reviewed Embed bodies
+
+ADR 0016 adds `row:body` and `title:body` slots below source text for the reviewed
+Embeds plugin and its paste choice. These are block surfaces, not trailing
+decorations, so the inline space budget does not apply. Core bounds their width,
+keeps them outside contentEditable, and measures the whole row. Quick-add has no
+body host. Core preserves an Embed's usable source link without the plugin.
+
+This permits allowlisted official cross-origin provider frames on the outline
+after account consent. It does not permit arbitrary oEmbed HTML, third-party
+scripts in the authenticated document, runtime plugins, or Lane-B MCP Apps in
+nodes. Server-side extraction and URL validation produce iframe descriptors;
+the compiled-in plugin constructs the frame. X remains gated on clarification
+of its conflicting published iframe guidance.

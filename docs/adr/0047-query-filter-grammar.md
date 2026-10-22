@@ -22,14 +22,14 @@ Filtering by tag exists (`?q=#a #b`, click-driven, AND-only) but nothing else is
 
 9. **Explicit non-goals**, each with a reason, not just scope-trimming:
    - ~~**Saved searches**~~ — _promoted 2026-07-11:_ designed in [ADR 0048](./0048-saved-filter-queries.md).
-   - **MCP parity** — `search_nodes` stays substring-only; the parser's purity is the recorded constraint that makes "Worker imports the grammar like it imports `tree.ts`" a clean follow-up, after its spoiler-redaction interaction (ADR 0043) gets its own pass.
+   - ~~**MCP parity**~~ — _promoted 2026-10-02:_ [ADR 0063](./0063-dql-search-parity.md) shares this grammar through MCP and CLI, with redaction before matching and bounded pagination.
    - **`created:`/`changed:`** — the only axis needing Node timestamps (wire-schema + DO migration + fixtures + `withNodeDefaults`); its own ADR when wanted.
    - **`A > B` nested search** — real parser complexity; zoom-scoping covers the common case.
    - **Date search, `text:bold`, `is:backlinks`** — natural-language date parsing wants design time; nobody filters by italic; "is a backlink" vs "has backlinks" is ambiguous.
 
 ## Consequences
 
-- Text edits do not live-re-prune the filter: the visible-rows list rebuilds on `structureRev` changes only (ADR 0019), so a node edited to no longer match stays visible until the next structural change. Kept deliberately — the node you're editing must not vanish under your caret, and this is today's tag-filter behavior.
+- _Amended 2026-10-03:_ Text edits re-prune the filter live, but the focused row stays visible until blur even if it stops matching. Its ancestors remain as context, without revealing additional descendants. Retention uses the render key, so other instances of mirrored content still filter live. The node you're editing must not vanish under your caret.
 - `?q=` becomes public grammar. Every syntax decision here is one-way once users share URLs; that is why `OR` and quoting ship day one rather than being retrofitted.
 - The filter must stay exposed through `getViewFilter()` (view-state.ts) for event-time reads — structural paste's hidden-landing rule (ADR 0044) depends on it.
 - _Amended 2026-07-12:_ **caret/focus walks share the render's filtered rows.** `findVisibleNeighbor` and `lastVisibleDescendant` take the active `QueryFilter`, and every event-time caller (arrow nav, delete-focus, selection caret exits) passes `getViewFilter()` — reversing the original "caret nav walks the unfiltered visible tree" call, which made arrows silently no-op while filtering (the computed neighbor was a row the filter had pruned out of the DOM). Nav covers **all** rendered rows: matches, revealed descendants, and dimmed ancestor context (they're editable; the caret lands wherever the eye sees a row). `focusKeyFor` deliberately stays unfiltered — it runs pre-re-render inside `runStructural` (the filter is stale) and derives a key from candidates rather than a sequence, so a superset walk is strictly safer.

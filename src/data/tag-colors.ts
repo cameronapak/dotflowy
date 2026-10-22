@@ -3,6 +3,7 @@ import { createCollection } from "@tanstack/react-db";
 import { Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
+import { hasWindow } from "../env";
 import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from "./kv-api";
 import { queryClient } from "./query-client";
 import { normalizeTag } from "./tags";
@@ -87,12 +88,16 @@ const TAG_COLOR_SET = new Set<string>(TAG_COLORS);
  *  (identical oklch) when the highlight plugin adopted the shared `--tag-*`
  *  vars; persisted kv rows may still carry "amber", so resolve it rather than
  *  silently dropping the user's chosen color. */
-const LEGACY_COLOR_ALIAS: Record<string, TagColor> = { amber: "yellow" };
+interface LegacyColorAliasMap {
+  [name: string]: TagColor;
+}
+const LEGACY_COLOR_ALIAS: LegacyColorAliasMap = { amber: "yellow" };
 
 /** The current palette color for a stored value, applying legacy aliases;
  *  null when the value isn't a (known or aliased) palette color. */
 function resolveTagColor(color: string): TagColor | null {
   const c = LEGACY_COLOR_ALIAS[color] ?? color;
+  // SAFETY: TAG_COLOR_SET contains exactly the TagColor palette, so membership proves the string literal.
   return TAG_COLOR_SET.has(c) ? (c as TagColor) : null;
 }
 
@@ -144,6 +149,7 @@ export function setTagColor(tag: string, color: TagColor) {
 /** Clear a tag's color -- back to the neutral outlined default ("Auto"). */
 export function clearTagColor(tag: string) {
   const key = normalizeTag(tag);
+  if (!key) return;
   if (tagColorsCollection.toArray.some((r) => r.tag === key)) {
     tagColorsCollection.delete(key);
   }
@@ -176,13 +182,17 @@ let rows: TagColorRow[] = EMPTY;
 const listeners = new Set<() => void>();
 let started = false;
 
-function rebuild() {
-  rows = tagColorsCollection.toArray;
+function rebuildFrom(source: TagColorRow[]) {
+  rows = source;
   for (const l of listeners) l();
 }
 
+function rebuild() {
+  rebuildFrom(tagColorsCollection.toArray);
+}
+
 function ensureStarted() {
-  if (started || typeof window === "undefined") return;
+  if (started || !hasWindow()) return;
   started = true;
   tagColorsCollection.subscribeChanges(() => rebuild(), {
     includeInitialState: true,

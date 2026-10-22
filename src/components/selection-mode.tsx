@@ -21,9 +21,13 @@ import {
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 
-import type { PluginContext } from "../plugins/types";
+import type { CommandSpec, PluginContext } from "../plugins/types";
 
-import { paragraphCommand } from "../data/core-commands";
+import {
+  lockCommand,
+  paragraphCommand,
+  unlockCommand,
+} from "../data/core-commands";
 import { isMirrorsEnabled } from "../data/flags";
 import { capture, drop } from "../data/history";
 import { outlineToMarkdown } from "../data/markdown";
@@ -44,7 +48,11 @@ import {
   useSelectionRootIds,
 } from "../data/selection-state";
 import { runStructural } from "../data/structural";
-import { countSubtreeNodes, orphanedMirrorsBy } from "../data/tree";
+import {
+  countSubtreeNodes,
+  orphanedMirrorsBy,
+  subtreeContainsLocked,
+} from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import {
   getViewFilter,
@@ -55,7 +63,7 @@ import {
   findVisibleNeighbor,
   lastVisibleDescendant,
 } from "../data/visible-order";
-import { isProtected, selectionCommandSpecs } from "../plugins/registry";
+import { isProtected, usePluginChrome } from "../plugins/registry";
 import { placeCaretAtEnd } from "./caret-place";
 import {
   DELETE_CONFIRM_THRESHOLD,
@@ -133,6 +141,13 @@ function makeSelectionOps({
     const ids = getSelectionRootIds();
     if (ids.length === 0) return;
     const index = getTreeIndex();
+    if (subtreeContainsLocked(index, ids)) {
+      for (const id of ids) rejectRow(rowOf(id));
+      toast.error("Unlock the protected subtree before deleting it.", {
+        id: "node-locked-delete",
+      });
+      return;
+    }
     const protectedIds = ids.filter((id) => isProtected(id));
     const deletable = ids.filter((id) => !isProtected(id));
     if (protectedIds.length > 0) {
@@ -201,7 +216,7 @@ function makeSelectionOps({
       mirrorsOn,
     );
     runStructural(() => {
-      capture(getTreeIndex(), deletable[0]!);
+      capture(getTreeIndex(), deletable[0]!, null, { label: "delete" });
       removeManyNodes(deletable);
     });
     pendingFocus.current = above ?? below ?? rootId;
@@ -236,7 +251,7 @@ function makeSelectionOps({
     const ids = getSelectionRootIds();
     if (ids.length === 0) return;
     runStructural(() => {
-      capture(getTreeIndex(), ids[0]!);
+      capture(getTreeIndex(), ids[0]!, null, { label: "indent" });
       if (indentManyNodes(ids, isMirrorsEnabled())) refreshSelection();
       else drop();
     });
@@ -252,7 +267,7 @@ function makeSelectionOps({
     if (!state || state.parentId === null || state.parentId === getViewRootId())
       return;
     runStructural(() => {
-      capture(getTreeIndex(), ids[0]!);
+      capture(getTreeIndex(), ids[0]!, null, { label: "outdent" });
       if (outdentManyNodes(ids)) refreshSelection();
       else drop();
     });
@@ -331,10 +346,7 @@ function makeSelectionOps({
  * state, so the only effect dep is `active` (toggles the listeners) plus the
  * stable `ops`.
  */
-export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs): {
-  active: boolean;
-  ops: SelectionOps;
-} {
+export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
   // refs is a stable useState Map and pendingFocus a stable ref -- so ops keeps
   // its identity and the listener effect below only re-subscribes when `active`
   // flips, never per render. (getCtx is only for the menu's plugin commands.)
@@ -417,8 +429,14 @@ export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs): {
     // (whose buttons run a command). A bullet click also focuses it, which
     // clears via onFocus; this covers clicks on empty space too.
     const onDown = (e: MouseEvent) => {
+      // SAFETY: a window mousedown target is a DOM element
       const target = e.target as HTMLElement | null;
       if (target?.closest('[role="listbox"]')) return;
+      // Keep the selected slab alive while its bullet arms pointer drag. A
+      // successful external drop clears it; pointer cancel and failed drops do
+      // not. A plain dot click zooms and the new editor mount clears it.
+      if (target?.closest<HTMLElement>(".bullet")?.closest("li[data-selected]"))
+        return;
       clearSelection();
     };
     window.addEventListener("keydown", onKey, true);
@@ -462,6 +480,7 @@ export function SelectionActionsMenu({
   ops: SelectionOps;
   getCtx: () => PluginContext;
 }) {
+  const { selectionCommandSpecs } = usePluginChrome();
   const active = useIsSelectionActive();
   const rootIds = useSelectionRootIds();
   const [hover, setHover] = useState(0);
@@ -514,7 +533,9 @@ export function SelectionActionsMenu({
   }, [active, focusId, rootIds, refs, update]);
 
   const items =
-    active && rootIds.length ? buildItems(rootIds, ops, getCtx) : null;
+    active && rootIds.length
+      ? buildItems(rootIds, ops, getCtx, selectionCommandSpecs)
+      : null;
   if (!active || !focusId || !items) return null;
 
   const onSelect = (i: number) => {
@@ -543,6 +564,7 @@ function buildItems(
   rootIds: string[],
   ops: SelectionOps,
   getCtx: () => PluginContext,
+  selectionCommandSpecs: CommandSpec[],
 ): SelItem[] {
   const index = getTreeIndex();
   const core: SelItem[] = [
@@ -575,11 +597,16 @@ function buildItems(
   // Commands that opted in via `runMany` -- the plugins' (To-do, Send to Today)
   // plus core's `/paragraph` (ADR 0045) -- kept only when they apply to at least
   // one selected node (To-do hides when all are already tasks).
-  const pluginItems: SelItem[] = [...selectionCommandSpecs, paragraphCommand]
+  const pluginItems: SelItem[] = [
+    ...selectionCommandSpecs,
+    paragraphCommand,
+    lockCommand,
+    unlockCommand,
+  ]
     .filter((c) =>
       rootIds.some((id) => {
         const n = index.byId.get(id);
-        return !!n && c.available(n);
+        return !!n && c.available(n, getCtx());
       }),
     )
     .map((c) => ({

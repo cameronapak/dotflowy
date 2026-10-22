@@ -26,6 +26,9 @@ import type { Node } from "./tree";
  */
 
 let rootId: string | null = null;
+// In a view stream (ADR 0070) every section is its own root for commands: the
+// section holding the caret or pointer. Null outside a stream.
+let sectionRootId: string | null = null;
 let isHidden: (node: Node) => boolean = () => false;
 let filter: QueryFilter | null = null;
 
@@ -33,7 +36,17 @@ let filter: QueryFilter | null = null;
  *  closures, drag, hotkeys). Render reads must use the `rootId` prop instead so
  *  they stay reactive. */
 export function getViewRootId(): string | null {
-  return rootId;
+  return sectionRootId ?? rootId;
+}
+
+/**
+ * Point event-time commands at one section of a view stream (ADR 0070). Each
+ * section is a zoom root of its own, so outdent limits, sibling ranges, drag
+ * targets, and the caret walk all read the section the user is working in.
+ * Pass null to fall back to the route's zoom root.
+ */
+export function setViewSectionRoot(next: string | null): void {
+  sectionRootId = next;
 }
 
 /** The current composed visibility prune (Seam-G; hide-completed today), read
@@ -67,6 +80,13 @@ export function useSyncViewState(
     rootId = nextRootId;
     isHidden = nextIsHidden;
   }, [nextRootId, nextIsHidden]);
+  // A new zoom view starts outside any stream section.
+  useEffect(() => {
+    sectionRootId = null;
+    return () => {
+      sectionRootId = null;
+    };
+  }, [nextRootId]);
 }
 
 /** The filter is derived further down the editor than `useSyncViewState`'s

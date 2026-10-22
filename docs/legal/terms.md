@@ -1,6 +1,6 @@
 # Dotflowy Terms of Service
 
-**Effective date:** July 11, 2026
+**Effective date:** July 11, 2026 · **Last updated:** October 15, 2026
 
 Dotflowy is operated by **FAITH TOOLS SOFTWARE SOLUTIONS, LLC**, an Oklahoma limited liability company ("we," "us"). These terms are an agreement between you and FAITH TOOLS SOFTWARE SOLUTIONS, LLC covering your use of Dotflowy (the app at app.dotflowy.com, the dotflowy.com website, and the Dotflowy API and MCP endpoints — together, "the Service").
 
@@ -46,29 +46,33 @@ Use Dotflowy lawfully and don't break it for others. Specifically, don't:
 
 You may connect AI agents to your account via MCP. Agents act with the access you grant them: what an agent reads, writes, or deletes in your outline is treated as your activity, so authorize agents you trust and revoke access you no longer want. Spoiler-marked text is redacted from agent reads as a courtesy, not a security boundary — see the Privacy Policy.
 
-## 7. Cancellation and termination
+## 7. Embedded content and the live demo
+
+If you turn on external embeds, Dotflowy shows content from YouTube, Vimeo, Spotify, and X inside your outline. That content comes from those providers, not from us, and their own terms and privacy policies govern it. The live demo on dotflowy.com is a sample outline that runs in your browser: it isn't an account, and nothing you type in it is saved.
+
+## 8. Cancellation and termination
 
 You can delete your account yourself, in the app, at any time. Deletion removes your account and your outline as described in the Privacy Policy.
 
 We may suspend or terminate accounts that violate these terms. If we ever discontinue Dotflowy, we'll give you at least 30 days' notice and keep export available through that period.
 
-## 8. Disclaimers
+## 9. Disclaimers
 
 The Service is provided **"as is" and "as available,"** without warranties of any kind, express or implied, including merchantability, fitness for a particular purpose, and non-infringement. We don't warrant that the Service will be uninterrupted or error-free. Our data-protection practices, including the recovery window we maintain, are described in the Privacy Policy; they are practices, not a guarantee against all loss — please keep exports of anything you can't afford to lose.
 
-## 9. Limitation of liability
+## 10. Limitation of liability
 
 To the maximum extent permitted by law, FAITH TOOLS SOFTWARE SOLUTIONS, LLC's total liability for any claims arising out of or relating to the Service is limited to the greater of **the amount you paid us in the 12 months before the claim** or **$50**. We are not liable for indirect, incidental, special, consequential, or punitive damages, or for lost profits or lost data. Some jurisdictions don't allow certain limitations, so parts of this section may not apply to you.
 
-## 10. Changes to these terms
+## 11. Changes to these terms
 
 We may update these terms. For material changes we'll notify you (by email or in the app) at least 14 days before they take effect. Continuing to use the Service after a change takes effect means you accept the updated terms. The current version always lives at this page.
 
-## 11. General
+## 12. General
 
 These terms are governed by the laws of the **State of Oklahoma, USA**, without regard to conflict-of-law rules, and disputes will be resolved in the state or federal courts located in Oklahoma. Before filing anything, email us — we'd rather fix the problem. We may assign these terms to a successor entity (for example, in a reorganization or acquisition); you may not assign them. If any part of these terms is found unenforceable, the rest remains in effect. These terms plus the Privacy Policy are the entire agreement between us about the Service.
 
-## 12. Contact
+## 13. Contact
 
 **FAITH TOOLS SOFTWARE SOLUTIONS, LLC** — Edmond, Oklahoma, USA
 [support@dotflowy.com](mailto:support@dotflowy.com)

@@ -26,6 +26,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/plugins/kit";
 import type { Node } from "../../data/tree";
 
 import { definePlugin } from "../types";
+import { PROVENANCE_FILTER_OPERATORS } from "./filter-operators";
 
 /** A compact "when", for the hover attribution. Set-once at creation, so this is
  *  read at render time against the wall clock — good enough for a tooltip. */
@@ -100,12 +101,5 @@ export default definePlugin({
   // (`origin` non-null), an axis Workflowy can't offer. Provenance owns the
   // field, so it owns the operator; it joins the `is` key alongside the core
   // kind values and todos' `is:complete` without collision.
-  filterOperators: [
-    {
-      key: "is",
-      values: ["agent"],
-      description: "Filter to agent-created nodes",
-      predicate: (node) => node.origin != null,
-    },
-  ],
+  filterOperators: PROVENANCE_FILTER_OPERATORS,
 });

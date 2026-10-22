@@ -36,6 +36,7 @@ function InputGroupAddon({
       data-align={align}
       className={cn(inputGroupAddonVariants({ align }), className)}
       onClick={(e) => {
+        // SAFETY: React SyntheticEvent target is the element the handler is attached through
         if ((e.target as HTMLElement).closest("button")) {
           return;
         }
@@ -43,6 +44,7 @@ function InputGroupAddon({
       }}
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
+        // SAFETY: React SyntheticEvent target is the element the handler is attached through
         if ((e.target as HTMLElement).closest("button")) return;
         e.currentTarget.parentElement?.querySelector("input")?.focus();
       }}

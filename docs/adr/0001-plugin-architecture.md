@@ -5,7 +5,7 @@ registry in `src/plugins/`, _not_ runtime-loaded. `code`, `links`, `tags`, `todo
 `route-bible` are themselves plugins, so the core carries no feature-specific branches. A plugin
 registers into a fixed, finite set of **seams** (inline tokens, delegated clicks, `/` commands,
 keymap, row/header slots, view transforms, caret menus, paste/autoformat, side-collections, search
-providers). The live seam map and current owners are the Plugins section of `AGENTS.md`; this is
+providers). The live seam map and current owners are [`docs/plugins.md`](../plugins.md); this is
 the design rationale.
 
 **Two-tier data ownership is the load-bearing rule.** The decider: _does any core view-transform

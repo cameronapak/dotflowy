@@ -22,21 +22,30 @@ import type { NodeKind } from "../src/data/schema";
 import type { ChangeOp, Node } from "../src/data/wire-schema";
 
 import {
+  DEFAULT_WEEK_START,
   dayKeyToScaffoldChain,
+  localDateKey,
   scaffoldLabel,
   sortedInsertAfterId,
+  type WeekStart,
 } from "../src/data/date-links";
+import {
+  nodeMatches,
+  parseFilterQuery,
+  walkQueryNodes,
+} from "../src/data/filter-query";
 import { redactSpoilers } from "../src/data/spoiler";
 import {
   type TreeIndex,
   buildTreeIndex,
-  buildTrail,
   childrenOf,
-  makeNode,
+  createNode,
+  isNodeLocked,
   orphanedMirrorsBy,
   trueSourceOf,
   wouldMirrorCycle,
 } from "../src/data/tree";
+import { queryOperators } from "../src/plugins/filter-operators";
 
 export { buildTreeIndex, trueSourceOf };
 export type { TreeIndex };
@@ -119,7 +128,7 @@ export class EmptyForest extends Data.TaggedError("EmptyForest")<
 
 // --- Node construction --------------------------------------------------------
 
-/** A complete wire node with caller-supplied identity + clock. `makeNode` owns
+/** A complete wire node with caller-supplied identity + clock. `createNode` owns
  *  the defaults; the explicit timestamps override its `Date.now()` reads. */
 function newNode(args: {
   id: string;
@@ -138,14 +147,14 @@ function newNode(args: {
   timestamp: number;
 }): Node {
   const kind = args.kind ?? null;
-  return makeNode({
+  return createNode({
     id: args.id,
     parentId: args.parentId,
     prevSiblingId: args.prevSiblingId,
     text: args.text,
     // The kind exclusivity invariant, enforced at the trust boundary exactly as
     // the client funnels enforce it (`setKind` clears `isTask`).
-    isTask: kind === "paragraph" ? false : (args.isTask ?? false),
+    isTask: kind !== null ? false : (args.isTask ?? false),
     kind,
     mirrorOf: args.mirrorOf ?? null,
     origin: args.origin ?? null,
@@ -265,7 +274,7 @@ export function planUpdateNode(
   // discover (ADR 0045).
   if (changes.kind !== undefined) {
     patchFor(contentId).kind = changes.kind;
-    if (changes.kind === "paragraph") patchFor(contentId).isTask = false;
+    if (changes.kind !== null) patchFor(contentId).isTask = false;
   }
 
   const ops: ChangeOp[] = [];
@@ -530,6 +539,7 @@ export function planReparent(
   }
 
   for (const id of nodeIds) {
+    // SAFETY: working is a Map<string, MutNode> of Schema-decoded Nodes, so its values are Nodes.
     const idx = buildTreeIndex([...working.values()] as Node[]);
     applyMoveInPlace(working, idx, id, parentId, after);
     after = id;
@@ -601,6 +611,30 @@ export function guardForestSize(
  * loop `planAddNode` (which re-reads the stale last-sibling each call and would
  * give every new root the same predecessor, tearing the chain).
  */
+/** A planner's emitted batch plus the ids of the inserted forest's roots. */
+interface ForestPlan {
+  ops: ChangeOp[];
+  rootIds: string[];
+}
+
+/** Where a sorted insert anchors: the previous sibling plus the follower the
+ *  new key displaces (null = head of the sibling run). */
+interface InsertAnchor {
+  prevSiblingId: string | null;
+  follower: Node | null;
+}
+
+/** planEnsureDaily's result: just the emitted batch (the day id is known). */
+interface DailyPlan {
+  ops: ChangeOp[];
+}
+
+/** planAddToDaily's result: the batch plus the created node's id. */
+interface DailyNodePlan {
+  ops: ChangeOp[];
+  nodeId: string;
+}
+
 function emitForest(
   nodes: readonly SubtreeInput[],
   parentId: string | null,
@@ -608,7 +642,7 @@ function emitForest(
   origin: string | null | undefined,
   timestamp: number,
   newId: () => string,
-): { ops: ChangeOp[]; rootIds: string[] } {
+): ForestPlan {
   const ops: ChangeOp[] = [];
   const walk = (
     siblings: readonly SubtreeInput[],
@@ -712,10 +746,10 @@ export function planAddSubtree(
 // side-collection maps `container` -> the "Daily" container node and every
 // scaffold key -> its node. Since issue #271 a day no longer hangs directly off
 // the container: it lives in a calendar hierarchy `Daily > YYYY > Month > Week >
-// Day` (year "2026", month "July", week "Week 29" — ISO 8601, Monday start,
-// atomic weeks whose Thursday decides the owning month AND year). The scaffold
-// keys join the same kv beside `container`, bare + shape-disambiguated
-// (`2026`, `2026-07`, `2026-W29`, `2026-07-16`); all the calendar math lives in
+// Day` (year "2026", month "July", week "Jul 13–19"). Calendar weeks start on
+// the account's Sunday/Monday preference, and their fourth day decides the owning
+// month and year. The scaffold keys join the same kv beside `container`
+// (`2026`, `2026-07`, `week:2026-07-13`, `2026-07-16`); all calendar math lives in
 // the dependency-free `src/data/date-links.ts` (imported above), so this Worker
 // twin and the client can't drift.
 //
@@ -764,6 +798,7 @@ const MONTHS = [
  *  user locale; fixed English matches the app's chrome). */
 export function formatDayText(dateKey: string): string {
   if (!isValidDateKey(dateKey)) return dateKey;
+  // SAFETY: isValidDateKey just confirmed YYYY-MM-DD, so split("-") yields exactly three parts.
   const [y, mo, d] = dateKey.split("-").map(Number) as [number, number, number];
   const date = new Date(Date.UTC(y, mo - 1, d, 12));
   return `${WEEKDAYS[date.getUTCDay()]}, ${MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()}`;
@@ -777,6 +812,7 @@ export function formatDayText(dateKey: string): string {
  */
 export function isValidDateKey(dateKey: string): boolean {
   if (!DATE_KEY_PATTERN.test(dateKey)) return false;
+  // SAFETY: the pattern test above confirmed YYYY-MM-DD, so split("-") yields exactly three parts.
   const [y, mo, d] = dateKey.split("-").map(Number) as [number, number, number];
   const date = new Date(Date.UTC(y, mo - 1, d, 12));
   return (
@@ -804,6 +840,7 @@ export interface DailyScaffold {
   weekId?: string;
   dayId: string;
   keyByNodeId: ReadonlyMap<string, string>;
+  weekStart?: WeekStart;
 }
 
 /**
@@ -822,7 +859,7 @@ function planSortedInsert(
   parentId: string,
   newKey: string,
   keyByNodeId: ReadonlyMap<string, string>,
-): { prevSiblingId: string | null; follower: Node | null } {
+): InsertAnchor {
   const siblings = childrenOf(index, parentId);
   const afterId = sortedInsertAfterId(
     siblings.map((s) => ({ id: s.id, key: keyByNodeId.get(s.id) ?? null })),
@@ -888,7 +925,7 @@ function emitSortedInsert(
 export function planEnsureDaily(
   index: TreeIndex,
   args: { dateKey: string; timestamp: number } & DailyScaffold,
-): { ops: ChangeOp[] } {
+): DailyPlan {
   const {
     dateKey,
     containerId,
@@ -928,7 +965,10 @@ export function planEnsureDaily(
   }
 
   // A new day: derive its calendar chain (the ONE Thursday-rule waterfall).
-  const chain = dayKeyToScaffoldChain(dateKey);
+  const chain = dayKeyToScaffoldChain(
+    dateKey,
+    args.weekStart ?? DEFAULT_WEEK_START,
+  );
 
   // Defensive fallback (unreachable for a validated dateKey with claimed ids): a
   // key that can't be placed on the calendar — or a caller that didn't claim the
@@ -1008,7 +1048,7 @@ export function planAddToDaily(
     origin?: string | null;
     timestamp: number;
   } & DailyScaffold,
-): { ops: ChangeOp[]; nodeId: string } {
+): DailyNodePlan {
   const { ops } = planEnsureDaily(index, args);
   // A pre-existing day may have children; a just-planned one can't.
   const siblings = index.byId.has(args.dayId)
@@ -1135,6 +1175,7 @@ export interface OutlineLine {
   text: string;
   isTask: boolean;
   completed: boolean;
+  locked: boolean;
   /** `"paragraph"` when this node is prose rather than a list item (ADR 0045). */
   kind: NodeKind;
   /** Set when this row is a mirror instance (points at its true source). */
@@ -1187,8 +1228,9 @@ export function flattenSubtree(
       // so the agent must see the same node the user does: an illegal pair from a
       // raw PATCH or a stale client reads as a paragraph with no checkbox, never
       // as a `- [ ]` to-do the app never draws.
-      isTask: content.kind === "paragraph" ? false : content.isTask,
+      isTask: content.kind === null ? content.isTask : false,
       completed: content.completed,
+      locked: isNodeLocked(index, contentId),
       kind: content.kind,
       mirrorOf: node.mirrorOf,
       capped,
@@ -1231,10 +1273,11 @@ export function formatOutlineLines(lines: ReadonlyArray<OutlineLine>): string {
       const indent = "  ".repeat(l.depth);
       const check = l.isTask ? (l.completed ? "[x] " : "[ ] ") : "";
       const meta: string[] = [`id: ${l.id}`];
-      if (l.kind === "paragraph") meta.push("paragraph");
+      if (l.kind) meta.push(l.kind);
       if (l.mirrorOf) meta.push(`mirror of ${l.mirrorOf}`);
       if (l.capped) meta.push("cycle capped");
       if (!l.isTask && l.completed) meta.push("completed");
+      if (l.locked) meta.push("locked");
       return `${indent}- ${check}${l.text || "(empty)"} (${meta.join(", ")})`;
     })
     .join("\n");
@@ -1245,34 +1288,47 @@ export interface SearchHit {
   text: string;
   /** `"paragraph"` when the hit is prose rather than a list item (ADR 0045). */
   kind: NodeKind;
-  /** Ancestor texts from the top of the outline down to (not including) the hit. */
+  isTask: boolean;
+  completed: boolean;
+  locked: boolean;
+  mirrorOf: string | null;
+  /** First ancestor path within the searched view, excluding the hit. */
   path: string[];
 }
 
-/** Case-insensitive substring search over node text, capped at `limit` hits in
- *  snapshot order, each with its breadcrumb trail for orientation. */
+/** DQL over spoiler-redacted content, in outline preorder. Each node ID appears
+ * once, mirrors follow source content, and scope includes its root (ADR 0063).
+ * The offset counts matches, not nodes. Payload allocation stays page-bounded. */
 export function searchNodes(
   index: TreeIndex,
   query: string,
   limit: number,
+  rootId: string | null = null,
+  offset = 0,
+  today = localDateKey(),
 ): SearchHit[] {
-  const q = query.trim().toLowerCase();
+  const parsed = parseFilterQuery(query);
   const hits: SearchHit[] = [];
-  if (!q) return hits;
-  for (const node of index.byId.values()) {
-    // MCP egress: match against the REDACTED text, so a term that lives only
-    // inside a spoiler yields ZERO hits -- the interior is invisible to agent
-    // search, not merely masked in the result (ADR 0043). Redact the output
-    // text AND every ancestor `path` crumb (an ancestor bullet can hold a
-    // spoiler too).
-    if (!redactSpoilers(node.text).toLowerCase().includes(q)) continue;
+  if (parsed.groups.length === 0 || limit <= 0) return hits;
+  // Redact the entire index BEFORE evaluating any condition, including tags,
+  // links, highlights, and content resolved through a mirror (ADR 0043).
+  const safeIndex = redactSpoilerIndex(index);
+  let skipped = 0;
+  for (const { node, path } of walkQueryNodes(safeIndex, rootId, {
+    includeRoot: true,
+    deduplicate: true,
+  })) {
+    if (!nodeMatches(parsed, node, safeIndex, queryOperators, today)) continue;
+    if (skipped++ < offset) continue;
     hits.push({
       id: node.id,
-      text: redactSpoilers(node.text),
+      text: node.text,
       kind: node.kind,
-      path: buildTrail(index, node.id)
-        .slice(0, -1)
-        .map((n) => redactSpoilers(n.text)),
+      isTask: node.kind === null && node.isTask,
+      completed: node.completed,
+      locked: isNodeLocked(safeIndex, node.id),
+      mirrorOf: node.mirrorOf,
+      path: path.map((ancestor) => ancestor.text),
     });
     if (hits.length >= limit) break;
   }

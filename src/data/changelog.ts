@@ -61,7 +61,7 @@ const FRONTMATTER_PATTERN =
 /** `"dotflowy": minor` — the package name is irrelevant here (single-package repo). */
 const BUMP_LINE_PATTERN = /:[ \t]*(major|minor|patch)[ \t]*$/;
 
-const rank: Record<Bump, number> = { major: 0, minor: 1, patch: 2 };
+const rank = { major: 0, minor: 1, patch: 2 } satisfies Record<Bump, number>;
 
 /**
  * Parse one changeset fragment.
@@ -86,6 +86,7 @@ export function parseFragment(source: string): ChangelogEntry | null | Error {
   for (const line of lines) {
     const hit = BUMP_LINE_PATTERN.exec(line);
     if (hit) {
+      // SAFETY: BUMP_LINE_PATTERN's capture group only matches the literal alternatives major|minor|patch, which are exactly the Bump values.
       bump = hit[1] as Bump;
       break;
     }

@@ -1,8 +1,40 @@
+import { Effect, Latch } from "effect";
+
 import type { Node } from "./schema";
 import type { TreeIndex } from "./tree";
 
-import { nodesCollection } from "./collection";
+import { isSyncReady, nodesCollection, nodesLoadError } from "./collection";
+import { appRuntime } from "./runtime";
 import { instanceIdForKey } from "./visible-order";
+
+export interface HistoryLocation {
+  rootId: string | null;
+  rowKey: string | null;
+  caret: { start: number; end: number } | null;
+  selection: { anchorId: string; focusId: string } | null;
+}
+
+export type HistoryLabel =
+  | "edit"
+  | "typing"
+  | "create"
+  | "delete"
+  | "move"
+  | "indent"
+  | "outdent"
+  | "join"
+  | "completion"
+  | "kind"
+  | "lock"
+  | "mirror"
+  | "paste"
+  | "import"
+  | "capture";
+
+let readLocation: ((focusId: string | null) => HistoryLocation) | null = null;
+export function setHistoryLocationReader(reader: typeof readLocation): void {
+  readLocation = reader;
+}
 
 /**
  * Undo/redo history for the outline.
@@ -13,8 +45,8 @@ import { instanceIdForKey } from "./visible-order";
  * ones). TanStack DB has no built-in undo -- its rollback only covers failed
  * sync -- so we own this. Snapshots beat inverse-patches here because the
  * sibling-relinking mutations are intricate and a snapshot can't drift out of
- * sync with them. The outline is small (a personal doc), so copying the whole
- * node set per action is cheap; we still cap the stack to bound memory.
+ * sync with them. Capture still copies the whole node set per action; the
+ * stack cap bounds the number of snapshots, not their outline-dependent size.
  *
  * Redo is the mirror image: undo pushes the pre-undo state onto a redo stack
  * before restoring, and redo pops it back (pushing the pre-redo state onto the
@@ -35,6 +67,9 @@ import { instanceIdForKey } from "./visible-order";
 
 interface Entry {
   nodes: Node[];
+  label: HistoryLabel;
+  scope: string | null;
+  location: HistoryLocation | null;
   /** Node to focus after this entry is restored (the pre-action focus). */
   focusId: string | null;
   /** Coalesces consecutive same-tag captures (e.g. a typing run) into one. */
@@ -44,10 +79,110 @@ interface Entry {
 const undoStack: Entry[] = [];
 const redoStack: Entry[] = [];
 const MAX_ENTRIES = 100;
+const listeners = new Set<() => void>();
+let pendingCaptures = 0;
+const capturesDrained = Latch.makeUnsafe(true);
+
+/** Quick-add can finish its destination claim after its editor has closed. */
+export function trackPendingCapture(promise: Promise<unknown>): void {
+  pendingCaptures++;
+  capturesDrained.closeUnsafe();
+  appRuntime.runFork(
+    Effect.promise(() => promise).pipe(
+      Effect.exit,
+      Effect.ensuring(
+        Effect.sync(() => {
+          pendingCaptures--;
+          if (!pendingCaptures) capturesDrained.openUnsafe();
+        }),
+      ),
+    ),
+  );
+}
+
+export const waitForPendingCapturesE = capturesDrained.await;
+
+let epoch = 0;
+let busy = false;
+let state = {
+  canUndo: false,
+  canRedo: false,
+  undoLabel: "Undo",
+  redoLabel: "Redo",
+  busy: false,
+};
+
+export function getHistoryState() {
+  return state;
+}
+export function subscribeHistory(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+function notify() {
+  const u = undoStack.at(-1);
+  const r = redoStack.at(-1);
+  state = {
+    canUndo: !busy && !!u,
+    canRedo: !busy && !!r,
+    undoLabel: u ? `Undo ${u.label}` : "Undo",
+    redoLabel: r ? `Redo ${r.label}` : "Redo",
+    busy,
+  };
+  for (const listener of listeners) listener();
+}
+export function setHistoryBusy(next: boolean) {
+  busy = next;
+  notify();
+}
+
+/** Clear both directions on external edits or session replacement. */
+export function clearHistory(): boolean {
+  const hadHistory = undoStack.length + redoStack.length > 0;
+  epoch++;
+  undoStack.length = redoStack.length = 0;
+  redoBackup = null;
+  lastCaptureRefused = false;
+  notify();
+  return hadHistory;
+}
+
+/** Fold contiguous draft steps; never reorder an independent outline action. */
+export function finishHistoryScope(scope: string, index?: TreeIndex): void {
+  for (let first = 0; first < undoStack.length; first++) {
+    const entry = undoStack[first]!;
+    if (entry.scope !== scope) continue;
+    let end = first + 1;
+    while (undoStack[end]?.scope === scope) end++;
+    undoStack.splice(first + 1, end - first - 1);
+    entry.scope = null;
+    entry.tag = null;
+    if (
+      index &&
+      first === undoStack.length - 1 &&
+      entry.nodes.length === index.byId.size &&
+      entry.nodes.every((node) => {
+        const live = index.byId.get(node.id);
+        return live && sameAuthoring(node, live);
+      })
+    )
+      undoStack.splice(first, 1);
+  }
+  for (let i = redoStack.length - 1; i >= 0; i--)
+    if (redoStack[i]!.scope === scope) redoStack.splice(i, 1);
+  notify();
+}
 
 // The redo stack as it stood just before the most recent `capture` cleared it,
 // so a captured-then-dropped no-op can put it back (see `drop`).
 let redoBackup: Entry[] | null = null;
+
+// Did the most recent `capture` refuse (empty index)? The command layer pairs
+// every capture with a `drop()` on the no-op arm, and that drop would otherwise
+// pop an UNRELATED older entry the refused capture never pushed. See `drop`.
+let lastCaptureRefused = false;
 
 function snapshot(index: TreeIndex): Node[] {
   // Nodes are flat records, so a shallow per-node copy is a full deep copy.
@@ -62,20 +197,53 @@ function snapshot(index: TreeIndex): Node[] {
  * pushing. Pass `text:<id>` for keystrokes so an entire typing run on one
  * bullet collapses to a single undo step; pass null for discrete structural
  * actions so each is independently undoable.
+ *
+ * An empty snapshot is valid only after successful sync and when the live
+ * collection is also empty. Refuse incomplete reads rather than classifying
+ * every live node as a delete; genuinely empty outlines can undo creation.
  */
 export function capture(
   index: TreeIndex,
   focusId: string | null = null,
   tag: string | null = null,
+  options: {
+    label?: HistoryLabel;
+    scope?: string | null;
+    location?: HistoryLocation;
+  } = {},
 ): void {
+  if (
+    index.byId.size === 0 &&
+    (!isSyncReady() || nodesLoadError() || nodesCollection.size !== 0)
+  ) {
+    lastCaptureRefused = true;
+    if (import.meta.env.DEV) {
+      console.error(
+        "[history] capture() refused an unsynced or inconsistent empty index.",
+        { focusId, tag },
+      );
+    }
+    return;
+  }
+  lastCaptureRefused = false;
+
   const top = undoStack[undoStack.length - 1];
-  if (tag !== null && top && top.tag === tag) return;
-  undoStack.push({ nodes: snapshot(index), focusId, tag });
+  if (tag !== null && top && top.tag === tag && redoStack.length === 0) return;
+  const location = options.location ?? readLocation?.(focusId) ?? null;
+  undoStack.push({
+    nodes: snapshot(index),
+    focusId: location?.rowKey ?? focusId,
+    tag,
+    scope: options.scope ?? null,
+    location,
+    label: options.label ?? (tag?.startsWith("text:") ? "typing" : "edit"),
+  });
   if (undoStack.length > MAX_ENTRIES) undoStack.shift();
   // A fresh action forks the timeline: the forward history no longer applies.
   // Stash it first so a no-op that gets dropped can restore it.
   redoBackup = redoStack.slice();
   redoStack.length = 0;
+  notify();
 }
 
 /**
@@ -84,14 +252,23 @@ export function capture(
  * don't leave a redundant entry that makes Cmd+Z look like it did nothing.
  * Also restores the redo stack the matching `capture` cleared, since a no-op
  * never actually forked the timeline.
+ *
+ * No-ops when the matching `capture` REFUSED: there is no entry of ours to pop,
+ * and popping anyway would silently eat an unrelated older undo point. A
+ * refusal never cleared `redoStack` either, so there is nothing to restore.
  */
 export function drop(): void {
+  if (lastCaptureRefused) {
+    lastCaptureRefused = false;
+    return;
+  }
   undoStack.pop();
   if (redoBackup) {
     redoStack.length = 0;
     redoStack.push(...redoBackup);
     redoBackup = null;
   }
+  notify();
 }
 
 /**
@@ -107,8 +284,12 @@ export const RESTORE_SLICE_OPS = 500;
  * slice, in order, inside ONE transaction -- a `runStructural` body for the
  * small case, one `runStructuralSliced` call for the big one -- or call
  * `revert` if the apply failed and rolled back.
+ *
  */
 export interface RestorePlan {
+  label: HistoryLabel;
+  location: HistoryLocation | null;
+  changedIds: readonly string[];
   /** Total collection writes the restore will make. */
   opCount: number;
   /** Apply closures in order; each makes at most RESTORE_SLICE_OPS writes. */
@@ -121,17 +302,19 @@ export interface RestorePlan {
   revert: () => void;
 }
 
-/**
- * Two snapshots of a node are equal when every field matches; nodes are flat
- * records, so a shallow field compare is a full compare.
- */
-function sameNode(a: Node, b: Node): boolean {
-  const ra = a as Record<string, unknown>;
-  const rb = b as Record<string, unknown>;
-  const keys = Object.keys(ra);
-  if (keys.length !== Object.keys(rb).length) return false;
-  for (const key of keys) if (ra[key] !== rb[key]) return false;
-  return true;
+/** Only authoring fields participate in undo. Browsing and metadata remain live. */
+const AUTHORING_FIELDS = [
+  "parentId",
+  "prevSiblingId",
+  "text",
+  "isTask",
+  "completed",
+  "mirrorOf",
+  "kind",
+] as const satisfies readonly (keyof Node)[];
+
+export function sameAuthoring(a: Node, b: Node): boolean {
+  return AUTHORING_FIELDS.every((key) => a[key] === b[key]);
 }
 
 /**
@@ -157,7 +340,7 @@ function planRestore(
   const upserts: Node[] = [];
   for (const [id, node] of target) {
     const live = current.get(id);
-    if (!live || !sameNode(live, node)) upserts.push(node);
+    if (!live || !sameAuthoring(live, node)) upserts.push(node);
   }
 
   let applied = 0;
@@ -165,7 +348,7 @@ function planRestore(
   for (let i = 0; i < deletes.length; i += RESTORE_SLICE_OPS) {
     const chunk = deletes.slice(i, i + RESTORE_SLICE_OPS);
     slices.push(() => {
-      for (const id of chunk) nodesCollection.delete(id);
+      nodesCollection.delete(chunk);
       applied += chunk.length;
     });
   }
@@ -174,20 +357,29 @@ function planRestore(
     slices.push(() => {
       // Insert-vs-update is decided at apply time: an earlier slice (or the
       // surrounding transaction) may already have written the row.
+      const inserts: Node[] = [];
       for (const node of chunk) {
         if (nodesCollection.has(node.id)) {
-          nodesCollection.update(node.id, (draft) =>
-            Object.assign(draft, node),
-          );
+          nodesCollection.update(node.id, (draft) => {
+            for (const key of AUTHORING_FIELDS) {
+              // Each value comes from the same field on a schema-validated row.
+              Object.assign(draft, { [key]: node[key] });
+            }
+            draft.updatedAt = Date.now();
+          });
         } else {
-          nodesCollection.insert({ ...node });
+          inserts.push({ ...node });
         }
       }
+      if (inserts.length) nodesCollection.insert(inserts);
       applied += chunk.length;
     });
   }
 
   return {
+    label: entry.label,
+    location: entry.location,
+    changedIds: [...deletes, ...upserts.map((n) => n.id)],
     opCount: deletes.length + upserts.length,
     slices,
     applied: () => applied,
@@ -212,18 +404,31 @@ function planRestore(
 export function undo(
   index: TreeIndex,
   focusId: string | null = null,
+  scope?: string,
 ): RestorePlan | null {
+  if (scope !== undefined && undoStack.at(-1)?.scope !== scope) return null;
   const entry = undoStack.pop();
   if (!entry) return null;
 
-  redoStack.push({ nodes: snapshot(index), focusId, tag: null });
+  const atEpoch = epoch;
+  redoStack.push({
+    nodes: snapshot(index),
+    focusId,
+    tag: null,
+    label: entry.label,
+    scope: entry.scope,
+    location: readLocation?.(focusId) ?? null,
+  });
   const overflow =
     redoStack.length > MAX_ENTRIES ? redoStack.shift() : undefined;
+  notify();
 
   return planRestore(index, entry, () => {
+    if (epoch !== atEpoch) return;
     redoStack.pop();
     if (overflow) redoStack.unshift(overflow);
     undoStack.push(entry);
+    notify();
   });
 }
 
@@ -235,17 +440,30 @@ export function undo(
 export function redo(
   index: TreeIndex,
   focusId: string | null = null,
+  scope?: string,
 ): RestorePlan | null {
+  if (scope !== undefined && redoStack.at(-1)?.scope !== scope) return null;
   const entry = redoStack.pop();
   if (!entry) return null;
 
-  undoStack.push({ nodes: snapshot(index), focusId, tag: null });
+  const atEpoch = epoch;
+  undoStack.push({
+    nodes: snapshot(index),
+    focusId,
+    tag: null,
+    label: entry.label,
+    scope: entry.scope,
+    location: readLocation?.(focusId) ?? null,
+  });
   const overflow =
     undoStack.length > MAX_ENTRIES ? undoStack.shift() : undefined;
+  notify();
 
   return planRestore(index, entry, () => {
+    if (epoch !== atEpoch) return;
     undoStack.pop();
     if (overflow) undoStack.unshift(overflow);
     redoStack.push(entry);
+    notify();
   });
 }

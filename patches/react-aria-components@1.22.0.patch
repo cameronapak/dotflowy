@@ -1,0 +1,66 @@
+diff --git a/dist/private/Sheet.cjs b/dist/private/Sheet.cjs
+index 85bf08be8bbbf9a816fe31376f848216896e4b2c..77ca53f0a1b77961f4e615a452bbcb4acbc3dffd 100644
+--- a/dist/private/Sheet.cjs
++++ b/dist/private/Sheet.cjs
+@@ -142,7 +142,8 @@ const $9579386d37d5da6e$export$48dbb295cbd054d8 = /*#__PURE__*/ (0, $cvivY$react
+         let rootMargin = `0px 0px ${$9579386d37d5da6e$var$calcToPx($9579386d37d5da6e$var$viewportPadding(after, axis))} 0px`;
+         let hasEntered = false;
+         let observer = new IntersectionObserver((entries)=>{
+-            let entry = entries[0];
++            // Instant entry can batch invisible and fully-visible updates.
++            for (let entry of entries) {
+             // Expose whether the sheet is resting at its fully-entered detent (all of it revealed). Apps
+             // can use `[data-expanded]` to only make the sheet's inner content scrollable once expanded,
+             // so that at a partial detent a swipe on the content expands the sheet instead (like iOS).
+@@ -154,6 +155,7 @@ const $9579386d37d5da6e$export$48dbb295cbd054d8 = /*#__PURE__*/ (0, $cvivY$react
+                 onCloseEvent();
+                 element.dispatchEvent(new CustomEvent('react-aria-sheet-close'));
+             }
++            }
+         }, {
+             threshold: [
+                 0,
+diff --git a/dist/private/Sheet.js b/dist/private/Sheet.js
+index 8cc1b03215f5d1ef74ebcb570298a7e62d30fc34..a379a00026eed2e97be077131b896f81f1bffa88 100644
+--- a/dist/private/Sheet.js
++++ b/dist/private/Sheet.js
+@@ -129,7 +129,8 @@ const $393b9725ff54df2c$export$48dbb295cbd054d8 = /*#__PURE__*/ (0, $d0bvy$forwa
+         let rootMargin = `0px 0px ${$393b9725ff54df2c$var$calcToPx($393b9725ff54df2c$var$viewportPadding(after, axis))} 0px`;
+         let hasEntered = false;
+         let observer = new IntersectionObserver((entries)=>{
+-            let entry = entries[0];
++            // Instant entry can batch invisible and fully-visible updates.
++            for (let entry of entries) {
+             // Expose whether the sheet is resting at its fully-entered detent (all of it revealed). Apps
+             // can use `[data-expanded]` to only make the sheet's inner content scrollable once expanded,
+             // so that at a partial detent a swipe on the content expands the sheet instead (like iOS).
+@@ -141,6 +142,7 @@ const $393b9725ff54df2c$export$48dbb295cbd054d8 = /*#__PURE__*/ (0, $d0bvy$forwa
+                 onCloseEvent();
+                 element.dispatchEvent(new CustomEvent('react-aria-sheet-close'));
+             }
++            }
+         }, {
+             threshold: [
+                 0,
+diff --git a/dist/private/Sheet.mjs b/dist/private/Sheet.mjs
+index 02b94be839beadb5c6fed8d1dbb9b5d89ccd30f6..7629f255d6605f7a5cccf91fea9e493811c856a0 100644
+--- a/dist/private/Sheet.mjs
++++ b/dist/private/Sheet.mjs
+@@ -128,7 +128,8 @@ const $f44b3686778108d5$export$48dbb295cbd054d8 = /*#__PURE__*/ (0, $dnWcj$forwa
+         let rootMargin = `0px 0px ${$f44b3686778108d5$var$calcToPx($f44b3686778108d5$var$viewportPadding(after, axis))} 0px`;
+         let hasEntered = false;
+         let observer = new IntersectionObserver((entries)=>{
+-            let entry = entries[0];
++            // Instant entry can batch invisible and fully-visible updates.
++            for (let entry of entries) {
+             // Expose whether the sheet is resting at its fully-entered detent (all of it revealed). Apps
+             // can use `[data-expanded]` to only make the sheet's inner content scrollable once expanded,
+             // so that at a partial detent a swipe on the content expands the sheet instead (like iOS).
+@@ -140,6 +141,7 @@ const $f44b3686778108d5$export$48dbb295cbd054d8 = /*#__PURE__*/ (0, $dnWcj$forwa
+                 onCloseEvent();
+                 element.dispatchEvent(new CustomEvent('react-aria-sheet-close'));
+             }
++            }
+         }, {
+             threshold: [
+                 0,

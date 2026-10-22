@@ -1,0 +1,46 @@
+{
+  "name": "dotflowy",
+  "version": "0.1.0",
+  "description": "Dotflowy for your terminal and scripts, with full MCP tool access.",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cameronapak/dotflowy.git",
+    "directory": "cli"
+  },
+  "bin": {
+    "dotflowy": "dist/main.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check:changeset": "bun scripts/require-changeset.ts",
+    "check:package": "bun scripts/check-package.ts",
+    "changeset": "changeset",
+    "version": "changeset version && printf '%s\n' '---' '---' > ../.changeset/cli-release.md",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "bun test test",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
+    "effect": "4.0.0"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.3",
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "2.1.0"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

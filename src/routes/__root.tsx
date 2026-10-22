@@ -1,6 +1,8 @@
 // Sentry init must run before any app code (#227). SPA mode has no client entry
 // file, so the root route module is the earliest reliable place. Keep first.
 import "../instrument.client";
+// Before anything can fetch: a `/demo` boot answers /api in the browser.
+import "../demo/install";
 import type { ReactNode } from "react";
 
 import {
@@ -11,6 +13,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 
+import { AppleShortcutDialog } from "../components/apple-shortcut-dialog";
 import { AuthScreen } from "../components/auth-screen";
 import { ChangelogDialog } from "../components/changelog-dialog";
 import { DeleteConfirmDialog } from "../components/delete-confirm-dialog";
@@ -20,6 +23,7 @@ import { MoveDialog } from "../components/move-dialog";
 import { NodeSwitcher } from "../components/node-switcher";
 import { OAuthCallbackErrorToast } from "../components/oauth-callback-error";
 import { OpmlImportDialog } from "../components/opml-import-dialog";
+import { PluginEditorAppearance } from "../components/plugin-editor-appearance";
 import { QuickAdd } from "../components/quick-add";
 import { SettingsNavRegistrar } from "../components/settings-nav-registrar";
 import { ShowCompletedProvider } from "../components/show-completed-provider";
@@ -28,6 +32,7 @@ import { TextSizeProvider } from "../components/text-size-provider";
 import { ThemeProvider } from "../components/theme-provider";
 import { Toaster } from "../components/ui/sonner";
 import { UpdateAvailableToast } from "../components/update-available";
+import { useExperimentalCaptureEnabled } from "../data/flags";
 import { hardReset, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
@@ -89,7 +94,7 @@ export const Route = createRootRoute({
       {
         name: "viewport",
         content:
-          "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
+          "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover",
       },
       { title: APP_TITLE },
       { name: "description", content: APP_DESCRIPTION },
@@ -129,6 +134,7 @@ export const Route = createRootRoute({
 const PUBLIC_ROUTES = new Set(["/reset-password", "/terms", "/privacy"]);
 
 function RootComponent() {
+  const experimentalCapture = useExperimentalCaptureEnabled();
   // Trailing-slash-tolerant: the router matches `/reset-password/` to the
   // route without normalizing location.pathname, so a naive equality would
   // render the reset page inside the gate and kill the emailed link.
@@ -157,9 +163,11 @@ function RootComponent() {
                 <DeleteConfirmDialog />
                 <HistoryRestoreDialog />
                 <ChangelogDialog />
+                {experimentalCapture && <AppleShortcutDialog />}
                 <MirrorPlaces />
                 <TagColorStyles />
                 <SpotlightController />
+                <PluginEditorAppearance />
                 {/* A distinct mechanism from the changelog (ADR 0046): the
                     changelog says WHAT changed; this says THIS TAB is stale. */}
                 <UpdateAvailableToast />

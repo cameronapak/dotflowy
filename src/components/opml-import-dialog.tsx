@@ -15,7 +15,7 @@ import {
   type OpmlImportReport,
 } from "../data/opml-import";
 import { runStructuralSliced } from "../data/structural";
-import { childrenOf, makeNode, now } from "../data/tree";
+import { childrenOf, createNode, now } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { setOpmlImportOpener } from "./opml-import-opener";
 import { Button } from "./ui/button";
@@ -38,12 +38,9 @@ import {
  *
  * The commit is the client write path, not a new endpoint: one history
  * `capture` (a single Cmd+Z removes the whole import), then ONE
- * `runStructuralSliced` transaction — every insert lands as one `POST
- * /api/nodes {ops}` → DO `applyBatch`, whose reply carries the FINAL seq of the
- * chunked changelog (>500-op batches echo as several frames) and `waitForSeq`
- * holds the optimistic overlay across all of them. Any fault rejects the
- * transaction, TanStack rolls the optimistic state back, and the dialog reports
- * "nothing was imported" — retry-safe, never a half-import.
+ * `runStructuralSliced` transaction (every insert lands as one `POST
+ * /api/nodes {ops}` → DO `applyBatch`). Faults reject the
+ * transaction, TanStack rolls back, and nothing was imported.
  *
  * The optimistic inserts are applied in ~500-node SLICES that yield to the
  * event loop between applications (multiple `mutate` calls on the one
@@ -233,7 +230,8 @@ export function OpmlImportDialog() {
     }
 
     // ONE undo point BEFORE the batch: a single Cmd+Z removes the whole import.
-    capture(index, null);
+    capture(index, null, null, { label: "import" });
+
     // The plan is insert-only, emitted depth-first pre-order with the sibling
     // chain wired by construction — replayed verbatim into the collection, in
     // yielding slices so the progress counter below actually paints. `applied`
@@ -242,7 +240,7 @@ export function OpmlImportDialog() {
     const slices: Array<() => void> = [
       () => {
         nodesCollection.insert(
-          makeNode({
+          createNode({
             id: containerId,
             prevSiblingId: lastTop,
             text: containerText(timestamp),
@@ -291,7 +289,6 @@ export function OpmlImportDialog() {
         type="file"
         accept=".opml,.xml,text/xml,text/x-opml,application/xml"
         className="hidden"
-        data-testid="opml-file-input"
         onChange={onFile}
       />
       <Dialog
@@ -302,11 +299,7 @@ export function OpmlImportDialog() {
           if (!next && !importing) setStage({ kind: "closed" });
         }}
       >
-        <DialogContent
-          className="sm:max-w-md"
-          showCloseButton={!importing}
-          data-testid="opml-import-dialog"
-        >
+        <DialogContent className="sm:max-w-md" showCloseButton={!importing}>
           {stage.kind === "summary" && (
             <SummaryStage
               data={stage.data}

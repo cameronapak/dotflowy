@@ -41,6 +41,9 @@ function stripMarkup(text: string): string {
  *  `` `**x**` `` -> `**x**` and `` `~~s~~` `` -> `~~s~~` (the code chip shields
  *  the markers -- see the module header). Markup-free text passes through
  *  untouched. */
-export function flattenInline(text: string): string {
-  return stripCodeShielded(stripLinks(flattenDateLinks(text)), stripMarkup);
+export function flattenInline(text: string, today?: string): string {
+  return stripCodeShielded(
+    stripLinks(flattenDateLinks(text, today)),
+    stripMarkup,
+  );
 }

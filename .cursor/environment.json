@@ -1,0 +1,17 @@
+{
+  "name": "Dotflowy",
+  "install": "export PATH=\"$HOME/.bun/bin:$PATH\"; command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.com/install | bash -s \"bun-v1.3.14\"; export PATH=\"$HOME/.bun/bin:$PATH\"; bun install --frozen-lockfile && bun run setup",
+  "terminals": [
+    {
+      "name": "cf:dev",
+      "command": "export PATH=\"$HOME/.bun/bin:$PATH\"; bun run cf:dev",
+      "description": "Production-like single server: builds the SPA and serves it plus the Cloudflare Worker and per-user Durable Object on http://localhost:8787, rebuilding on src/ changes. Sign in with dev@dotflowy.local / dotflowy-dev (run `bun run seed:user` once if the account is missing)."
+    }
+  ],
+  "ports": [
+    {
+      "name": "app",
+      "port": 8787
+    }
+  ]
+}

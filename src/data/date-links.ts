@@ -90,9 +90,10 @@ export function addDays(key: string, days: number): string {
 }
 
 /**
- * The chip/badge-language label for a key: Today / Yesterday / Tomorrow, else a
- * short date ("Jul 8"). Speaks the same language as the daily badge
- * (`formatDayBadge`) so a date chip and a day note's badge can't disagree.
+ * Day-note **badge** language: Today / Yesterday / Tomorrow, else a short date
+ * ("Jul 8"). Kept for Seam-F badges (`formatDayBadge`). Date chips and search
+ * flatten use {@link formatDateChipLabel} instead (ADR 0057) — "Yesterday" is
+ * badge-only; chips say "one day ago".
  */
 export function formatDateLabel(key: string, today = localDateKey()): string {
   const d = parseDateKey(key);
@@ -103,6 +104,49 @@ export function formatDateLabel(key: string, today = localDateKey()): string {
     if (diff === 0) return "Today";
     if (diff === -1) return "Yesterday";
     if (diff === 1) return "Tomorrow";
+  }
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+const CHIP_DAY_WORDS = [
+  "",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+] as const;
+
+/**
+ * Date-chip + search-flatten voice (ADR 0057): Today / Tomorrow; past
+ * `one day ago`…`six days ago` (never "Yesterday"); future `in two days`…`in
+ * six days`; beyond ±6 a short absolute (`Jul 30`, year when other-year).
+ * Hover titles stay {@link formatDateFull}. Badges keep {@link formatDateLabel}.
+ */
+export function formatDateChipLabel(
+  key: string,
+  today = localDateKey(),
+): string {
+  const d = parseDateKey(key);
+  if (!d) return key;
+  const t = parseDateKey(today);
+  if (t) {
+    const diff = Math.round((d.getTime() - t.getTime()) / 86_400_000);
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Tomorrow";
+    if (diff >= 2 && diff <= 6) return `in ${CHIP_DAY_WORDS[diff]} days`;
+    if (diff === -1) return "one day ago";
+    if (diff >= -6 && diff <= -2) {
+      return `${CHIP_DAY_WORDS[-diff]} days ago`;
+    }
+    if (d.getFullYear() !== t.getFullYear()) {
+      return d.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
   }
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
@@ -121,19 +165,150 @@ export function formatDateFull(key: string): string {
 }
 
 /**
- * Flatten every date token in `text` to its display label ("Today", "Jul 8
- * 14:00") -- the search/display projection (wired into `flattenInline`), so a
- * Cmd+K row or breadcrumb never reads a raw `[[2026-07-08]]`. A shape-matched
- * but non-calendar token stays literal (it renders literal too).
+ * Flatten every date token in `text` to its chip-voice label (ADR 0057) -- the
+ * search/display projection (wired into `flattenInline`), so a Cmd+K row or
+ * breadcrumb never reads a raw `[[2026-07-08]]`. A shape-matched but
+ * non-calendar token stays literal (it renders literal too).
  */
 export function flattenDateLinks(text: string, today = localDateKey()): string {
   if (!text.includes("[[")) return text;
   return text.replace(DATE_LINK_REGEX, (tok) => {
     const parsed = parseDateLink(tok);
     if (!parsed) return tok;
-    const label = formatDateLabel(parsed.key, today);
+    const label = formatDateChipLabel(parsed.key, today);
     return parsed.time ? `${label} ${parsed.time}` : label;
   });
+}
+
+/** English weekday names, Sunday-first (matches `Date#getDay`). */
+export const WEEKDAY_NAMES = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+] as const;
+
+/** Fuse stems for a day key's weekday (`thu`…`thursday`) — ≥3-char prefixes of
+ *  the English name so Cmd+K finds an existing day without the virtual row
+ *  (ADR 0057). Empty on a malformed key. */
+export function weekdaySearchStems(key: string): string[] {
+  const d = parseDateKey(key);
+  if (!d) return [];
+  const name = WEEKDAY_NAMES[d.getDay()]!;
+  const stems: string[] = [];
+  for (let i = 3; i <= name.length; i++) stems.push(name.slice(0, i));
+  return stems;
+}
+
+export type PeriodUnit = "week" | "month" | "year";
+export type PeriodQualifier = "next" | "last";
+
+/** Dual-resolve target for `next|last` × `week|month|year` (ADR 0057): Cmd+K
+ *  navigates the Calendar scaffold key; `[[` inserts its first day. */
+export type PeriodResolve = {
+  scaffoldKey: string;
+  scaffoldKind: PeriodUnit;
+  /** First day of that Calendar week / month / year. */
+  periodStartDay: string;
+};
+
+/**
+ * Resolve `next|last` × `week|month|year` relative to `today` via Calendar
+ * scaffold math. Null only when `today` isn't a valid day key.
+ */
+export function resolvePeriod(
+  qualifier: PeriodQualifier,
+  unit: PeriodUnit,
+  today: string,
+  weekStart: WeekStart = DEFAULT_WEEK_START,
+): PeriodResolve | null {
+  if (!isValidDateKey(today)) return null;
+  const delta = qualifier === "next" ? 1 : -1;
+  if (unit === "week") {
+    const thisWeek = dayKeyToWeekKey(today, weekStart);
+    if (!thisWeek) return null;
+    const scaffoldKey = shiftWeekKey(thisWeek, delta);
+    if (!scaffoldKey) return null;
+    const range = weekKeyToDayRange(scaffoldKey);
+    if (!range) return null;
+    return {
+      scaffoldKey,
+      scaffoldKind: "week",
+      periodStartDay: range.start,
+    };
+  }
+  if (unit === "month") {
+    const thisMonth = today.slice(0, 7);
+    const scaffoldKey = shiftMonthKey(thisMonth, delta);
+    if (!scaffoldKey) return null;
+    return {
+      scaffoldKey,
+      scaffoldKind: "month",
+      periodStartDay: `${scaffoldKey}-01`,
+    };
+  }
+  const y = Number(today.slice(0, 4));
+  const scaffoldKey = String(y + delta);
+  return {
+    scaffoldKey,
+    scaffoldKind: "year",
+    periodStartDay: `${scaffoldKey}-01-01`,
+  };
+}
+
+/**
+ * Upcoming / next / last weekday from a ≥3-char English stem (ADR 0057). Bare
+ * → upcoming (today if it matches); `next` → strictly next week when today is
+ * that weekday; `last` → previous. Null when the stem isn't a weekday prefix.
+ */
+export function resolveWeekdayStem(
+  stem: string,
+  qualifier: PeriodQualifier | null,
+  today: string,
+): string | null {
+  if (stem.length < 3 || !isValidDateKey(today)) return null;
+  const lower = stem.toLowerCase();
+  const name = WEEKDAY_NAMES.find((d) => d.startsWith(lower));
+  if (!name) return null;
+  const targetDow = WEEKDAY_NAMES.indexOf(name);
+  const d = parseDateKey(today);
+  if (!d) return null;
+  const todayDow = d.getDay();
+  if (qualifier === "last") {
+    let delta = (todayDow - targetDow + 7) % 7;
+    if (delta === 0) delta = 7;
+    return addDays(today, -delta);
+  }
+  if (qualifier === "next") {
+    let delta = (targetDow - todayDow + 7) % 7;
+    if (delta === 0) delta = 7;
+    return addDays(today, delta);
+  }
+  // Bare upcoming — today counts.
+  return addDays(today, (targetDow - todayDow + 7) % 7);
+}
+
+const EMPTY_KEYS: string[] = [];
+
+/**
+ * The unique daily-index keys `text` mentions via date tokens, in
+ * first-occurrence order (ADR 0056). Bails before any regex when `[[` is
+ * absent — same hot-path discipline as `parseNodeLinks`. Mentions never mint.
+ */
+export function parseDateLinkKeys(text: string): string[] {
+  if (!text.includes("[[")) return EMPTY_KEYS;
+  let out: string[] | null = null;
+  DATE_LINK_REGEX.lastIndex = 0;
+  for (const m of text.matchAll(DATE_LINK_REGEX)) {
+    const parsed = parseDateLink(m[0]!);
+    if (!parsed) continue;
+    if (!out) out = [parsed.key];
+    else if (!out.includes(parsed.key)) out.push(parsed.key);
+  }
+  return out ?? EMPTY_KEYS;
 }
 
 /** One row the `[[` picker offers for a date-ish query. */
@@ -146,8 +321,9 @@ export interface DateSuggestion {
  * The date rows for a `[[` picker query: today / tomorrow / yesterday on a
  * word-prefix match (>= 2 chars, the daily search-action threshold -- one char
  * would shove date rows above node matches on any "t"/"y" query), plus a fully
- * typed ISO date. No natural-language parsing (ADR 0038). Empty on a
- * non-date-ish query, which is also the caller's "should I pin dates" signal.
+ * typed ISO date. Natural-language chrono for the `[[` picker lives in
+ * client-only `parseDatePickerQuery` / `pickerDateSuggestions` (ADR 0038
+ * amend) so this module stays Worker-safe. Empty on a non-date-ish query.
  */
 export function dateSuggestions(
   query: string,
@@ -175,13 +351,13 @@ export function dateSuggestions(
 // ---------------------------------------------------------------------------
 // Daily calendar scaffold (issue #271): Daily > YYYY > Month > Week > Day.
 //
-// The scaffold keys join the daily-index kv beside the `container` sentinel,
-// bare and shape-disambiguated (no prefixes): `2026` (year), `2026-07` (month),
-// `2026-W29` (week), `2026-07-16` (day). Weeks are ISO 8601 (Monday start, ISO
-// week number); a week is ATOMIC and its THURSDAY decides both the owning month
-// AND year (ISO-consistent, equals majority-of-days) -- so the Jun 28-Jul 4
-// straddle week lives whole under July. Ordering is chronological ascending at
-// every level.
+// The scaffold keys join the daily-index kv beside the `container` sentinel:
+// `2026` (year), `2026-07` (month), `week:2026-07-12` (week, identified by its
+// start date), `2026-07-16` (day). Calendar weeks start Sunday or Monday from the
+// account preference. A week is ATOMIC and its FOURTH DAY decides both the owning
+// month and year (majority-of-days), so the preference never splits a week across
+// scaffold parents. Legacy ISO `YYYY-Www` keys remain readable only as migration
+// input. Ordering is chronological ascending at every level.
 //
 // All math here is pure and TZ-safe: keys parse via `Date.UTC` (never local-time
 // `new Date("YYYY-MM-DD")`) and every step is exact UTC-midnight arithmetic (no
@@ -195,9 +371,14 @@ const CONTAINER_KEY = "container";
 
 const YEAR_KEY_RE = /^\d{4}$/;
 const MONTH_KEY_RE = /^(\d{4})-(\d{2})$/;
-const WEEK_KEY_RE = /^(\d{4})-W(\d{2})$/;
+const WEEK_KEY_RE = /^week:(\d{4}-\d{2}-\d{2})$/;
+const LEGACY_ISO_WEEK_KEY_RE = /^(\d{4})-W(\d{2})$/;
 
 const MS_PER_DAY = 86_400_000;
+
+export const WEEK_STARTS = ["sunday", "monday"] as const;
+export type WeekStart = (typeof WEEK_STARTS)[number];
+export const DEFAULT_WEEK_START: WeekStart = "monday";
 
 /** The kind of a daily-index scaffold key, or null for an unknown string. */
 export type ScaffoldKind = "year" | "month" | "week" | "day" | "container";
@@ -232,8 +413,8 @@ function utcDayKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** The Thursday of the ISO week containing UTC date `d` (Mon-start weeks). This
- *  Thursday is what decides the ISO week-year, week number, and owning month. */
+/** The Thursday of the ISO week containing UTC date `d`, used only to decode
+ *  legacy `YYYY-Www` migration keys. */
 function isoThursday(d: Date): Date {
   const t = new Date(d.getTime());
   const dayNum = (t.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
@@ -241,11 +422,9 @@ function isoThursday(d: Date): Date {
   return t;
 }
 
-/** The Thursday (UTC Date) of a `YYYY-Www` week key, or null when malformed or
- *  the week number doesn't exist in that ISO year (a W53 in a 52-week year
- *  round-trips into the next year and is rejected). */
-function weekKeyToThursday(weekKey: string): Date | null {
-  const m = WEEK_KEY_RE.exec(weekKey);
+/** Decode a legacy ISO week key to its Thursday. */
+function legacyWeekKeyToThursday(weekKey: string): Date | null {
+  const m = LEGACY_ISO_WEEK_KEY_RE.exec(weekKey);
   if (!m) return null;
   const isoYear = Number(m[1]);
   const week = Number(m[2]);
@@ -259,36 +438,40 @@ function weekKeyToThursday(weekKey: string): Date | null {
 }
 
 /**
- * Day key -> ISO week key: `2026-07-16` -> `2026-W29`. The week-year is the year
- * containing that week's Thursday (so a late-December day can land in the NEXT
- * year's W01, and an early-January day in the PREVIOUS year's W52/W53). Week
- * number is zero-padded W01..W53. Null on a malformed / non-calendar day key.
+ * Day key -> Calendar-week key identified by its start date. The account's
+ * Sunday/Monday preference is explicit so Worker and browser calculations cannot
+ * silently diverge. Null on a malformed / non-calendar day key.
  */
-export function dayKeyToWeekKey(dayKey: string): string | null {
+export function dayKeyToWeekKey(
+  dayKey: string,
+  weekStart: WeekStart = DEFAULT_WEEK_START,
+): string | null {
   const d = dayKeyToUtc(dayKey);
   if (!d) return null;
-  const thursday = isoThursday(d);
-  const isoYear = thursday.getUTCFullYear();
-  const firstThursday = isoThursday(new Date(Date.UTC(isoYear, 0, 4)));
-  const week =
-    1 +
-    Math.round(
-      (thursday.getTime() - firstThursday.getTime()) / (7 * MS_PER_DAY),
-    );
-  return `${isoYear}-W${String(week).padStart(2, "0")}`;
+  const firstDay = weekStart === "sunday" ? 0 : 1;
+  const offset = (d.getUTCDay() - firstDay + 7) % 7;
+  return `week:${utcDayKey(new Date(d.getTime() - offset * MS_PER_DAY))}`;
 }
 
 /**
- * Week key -> owning month key via the Thursday rule: `2026-W29` -> `2026-07`.
- * The Thursday of the week decides the month (and year), so an atomic straddle
- * week lives whole under one month. Null on a malformed / nonexistent week key.
+ * Week key -> its start day. New keys carry that identity directly; legacy ISO
+ * keys decode to Monday for migration. Null on malformed/nonexistent keys.
  */
+export function weekKeyToStartDay(weekKey: string): string | null {
+  const current = WEEK_KEY_RE.exec(weekKey)?.[1];
+  if (current) return dayKeyToUtc(current) ? current : null;
+  const thursday = legacyWeekKeyToThursday(weekKey);
+  return thursday
+    ? utcDayKey(new Date(thursday.getTime() - 3 * MS_PER_DAY))
+    : null;
+}
+
+/** Week key -> owning month via the majority-of-days rule. The fourth day of
+ *  either a Sunday- or Monday-start week decides its month and year. */
 export function weekKeyToMonthKey(weekKey: string): string | null {
-  const thursday = weekKeyToThursday(weekKey);
-  if (!thursday) return null;
-  const y = thursday.getUTCFullYear();
-  const m = String(thursday.getUTCMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+  const start = weekKeyToStartDay(weekKey);
+  if (!start) return null;
+  return addDays(start, 3).slice(0, 7);
 }
 
 /** Month key -> year key: `2026-07` -> `2026`. A named helper so callers don't
@@ -301,6 +484,59 @@ export function monthKeyToYearKey(monthKey: string): string | null {
   return m[1] ?? null;
 }
 
+/** Month key shifted by whole calendar months: `shiftMonthKey("2026-07", 1)` ->
+ *  `"2026-08"`. Used by the week-strip month picker (ADR 0055). Null when the
+ *  key isn't a valid month. */
+export function shiftMonthKey(
+  monthKey: string,
+  deltaMonths: number,
+): string | null {
+  const m = MONTH_KEY_RE.exec(monthKey);
+  if (!m || !monthKeyToYearKey(monthKey)) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = new Date(Date.UTC(y, mo - 1 + deltaMonths, 1));
+  const yy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${yy}-${mm}`;
+}
+
+/** One cell in a month calendar grid (ADR 0055). `inMonth` is false
+ *  for leading/trailing days that pad complete Calendar-week rows. */
+export type MonthGridCell = { key: string; inMonth: boolean };
+
+/** Calendar cells covering `monthKey`, padded to full account Calendar weeks. */
+export function monthKeyToCalendarGrid(
+  monthKey: string,
+  weekStart: WeekStart = DEFAULT_WEEK_START,
+): MonthGridCell[] | null {
+  const m = MONTH_KEY_RE.exec(monthKey);
+  if (!m || !monthKeyToYearKey(monthKey)) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const first = new Date(y, mo - 1, 1, 12);
+  const last = new Date(y, mo, 0, 12);
+  const firstDay = weekStart === "sunday" ? 0 : 1;
+  const firstDow = (first.getDay() - firstDay + 7) % 7;
+  const start = new Date(first);
+  start.setDate(first.getDate() - firstDow);
+  const lastDow = (last.getDay() - firstDay + 7) % 7;
+  const end = new Date(last);
+  end.setDate(last.getDate() + (6 - lastDow));
+  const cells: MonthGridCell[] = [];
+  for (
+    let d = new Date(start);
+    d.getTime() <= end.getTime();
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 12)
+  ) {
+    cells.push({
+      key: localDateKey(d),
+      inMonth: d.getFullYear() === y && d.getMonth() === mo - 1,
+    });
+  }
+  return cells;
+}
+
 /**
  * Classify a daily-index key: `day` / `week` / `month` / `year`, the `container`
  * sentinel, or null for anything else (including a shape-shaped-but-invalid key
@@ -310,7 +546,8 @@ export function monthKeyToYearKey(monthKey: string): string | null {
 export function scaffoldKeyKind(key: string): ScaffoldKind | null {
   if (key === CONTAINER_KEY) return "container";
   if (KEY_RE.test(key)) return isValidDateKey(key) ? "day" : null;
-  if (WEEK_KEY_RE.test(key)) return weekKeyToThursday(key) ? "week" : null;
+  if (WEEK_KEY_RE.test(key) || LEGACY_ISO_WEEK_KEY_RE.test(key))
+    return weekKeyToStartDay(key) ? "week" : null;
   if (MONTH_KEY_RE.test(key)) return monthKeyToYearKey(key) ? "month" : null;
   if (YEAR_KEY_RE.test(key)) return "year";
   return null;
@@ -342,11 +579,10 @@ export function parentScaffoldKey(key: string): string | null {
  * lexical order IS chronological. Returns <0 / 0 / >0.
  */
 export function compareScaffoldKeys(a: string, b: string): number {
-  const wa = WEEK_KEY_RE.exec(a);
-  const wb = WEEK_KEY_RE.exec(b);
+  const wa = scaffoldKeyKind(a) === "week" ? weekKeyToStartDay(a) : null;
+  const wb = scaffoldKeyKind(b) === "week" ? weekKeyToStartDay(b) : null;
   if (wa && wb) {
-    const yearDiff = Number(wa[1]) - Number(wb[1]);
-    return yearDiff !== 0 ? yearDiff : Number(wa[2]) - Number(wb[2]);
+    return wa < wb ? -1 : wa > wb ? 1 : 0;
   }
   if (YEAR_KEY_RE.test(a) && YEAR_KEY_RE.test(b)) return Number(a) - Number(b);
   return a < b ? -1 : a > b ? 1 : 0; // month / day: lexical == chronological
@@ -374,59 +610,53 @@ export function monthLabel(monthKey: string): string {
   );
 }
 
-/** Week label: `2026-W29` -> "Week 29" (no leading zero). Falls back to the raw
- *  key on a malformed / nonexistent week key. */
+/** Calendar-week label uses its unambiguous date range, never a disputed week
+ *  number. Includes years only when the range crosses a year boundary. */
 export function weekLabel(weekKey: string): string {
-  const m = WEEK_KEY_RE.exec(weekKey);
-  if (!m || !weekKeyToThursday(weekKey)) return weekKey;
-  return `Week ${Number(m[2])}`;
+  const range = weekKeyToDayRange(weekKey);
+  if (!range) return weekKey;
+  const start = dayKeyToUtc(range.start);
+  const end = dayKeyToUtc(range.end);
+  if (!start || !end) return weekKey;
+  const month = (d: Date) =>
+    d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  const startMonth = month(start);
+  const endMonth = month(end);
+  const startDay = start.getUTCDate();
+  const endDay = end.getUTCDate();
+  if (start.getUTCFullYear() !== end.getUTCFullYear()) {
+    return `${startMonth} ${startDay}, ${start.getUTCFullYear()}–${endMonth} ${endDay}, ${end.getUTCFullYear()}`;
+  }
+  return startMonth === endMonth
+    ? `${startMonth} ${startDay}–${endDay}`
+    : `${startMonth} ${startDay}–${endMonth} ${endDay}`;
 }
 
-/** The two-digit ISO week part of a week key: `2026-W29` -> `"29"`. The single
- *  source for pulling the week number out of a week key (callers add their own
- *  `W`/label chrome). Empty string on a malformed key. */
-export function weekKeyWeekNumber(weekKey: string): string {
-  return WEEK_KEY_RE.exec(weekKey)?.[2] ?? "";
-}
-
-/** The Monday and Sunday day-keys bounding an ISO week (for the badge to format
- *  a range). `2026-W29` -> `{ monday: "2026-07-13", sunday: "2026-07-19" }`.
- *  Null on a malformed / nonexistent week key. */
+/** The start and end day keys bounding a Calendar week. */
 export function weekKeyToDayRange(
   weekKey: string,
-): { monday: string; sunday: string } | null {
-  const thursday = weekKeyToThursday(weekKey);
-  if (!thursday) return null;
-  return {
-    monday: utcDayKey(new Date(thursday.getTime() - 3 * MS_PER_DAY)),
-    sunday: utcDayKey(new Date(thursday.getTime() + 3 * MS_PER_DAY)),
-  };
+): { start: string; end: string } | null {
+  const start = weekKeyToStartDay(weekKey);
+  return start ? { start, end: addDays(start, 6) } : null;
 }
 
-/** The seven day-keys of an ISO week, Monday..Sunday in order (the week strip's
- *  source of days -- ADR 0054). `2026-W29` -> `["2026-07-13", ..., "2026-07-19"]`.
- *  Null on a malformed / nonexistent week key. Derives from {@link
- *  weekKeyToDayRange} so the strip and the hierarchy agree on the week's bounds. */
+/** The seven day keys of a Calendar week in preference order. */
 export function weekKeyToDays(weekKey: string): string[] | null {
   const range = weekKeyToDayRange(weekKey);
   if (!range) return null;
   const days: string[] = [];
-  for (let i = 0; i < 7; i++) days.push(addDays(range.monday, i));
+  for (let i = 0; i < 7; i++) days.push(addDays(range.start, i));
   return days;
 }
 
-/** The week key `deltaWeeks` ISO weeks away (the strip's chevron paging -- ADR
- *  0054). `shiftWeekKey("2026-W29", 1)` -> `"2026-W30"`, `-1` -> `"2026-W28"`.
- *  Rides the shared ISO math (Monday of the week + whole-day arithmetic + the
- *  Thursday rule) so paging can never straddle two week nodes. Null on a
- *  malformed / nonexistent week key. */
+/** The Calendar-week key `deltaWeeks` away. */
 export function shiftWeekKey(
   weekKey: string,
   deltaWeeks: number,
 ): string | null {
   const range = weekKeyToDayRange(weekKey);
   if (!range) return null;
-  return dayKeyToWeekKey(addDays(range.monday, deltaWeeks * 7));
+  return `week:${addDays(range.start, deltaWeeks * 7)}`;
 }
 
 /** The full week/month/year chain a day key nests under (issue #271): the single
@@ -438,8 +668,11 @@ export interface ScaffoldChain {
   monthKey: string;
   yearKey: string;
 }
-export function dayKeyToScaffoldChain(dayKey: string): ScaffoldChain | null {
-  const weekKey = dayKeyToWeekKey(dayKey);
+export function dayKeyToScaffoldChain(
+  dayKey: string,
+  weekStart: WeekStart = DEFAULT_WEEK_START,
+): ScaffoldChain | null {
+  const weekKey = dayKeyToWeekKey(dayKey, weekStart);
   const monthKey = weekKey ? weekKeyToMonthKey(weekKey) : null;
   const yearKey = monthKey ? monthKeyToYearKey(monthKey) : null;
   if (!weekKey || !monthKey || !yearKey) return null;
@@ -457,7 +690,7 @@ export function dayKeyToScaffoldChain(dayKey: string): ScaffoldChain | null {
 export const PROTECTED_SCAFFOLD_KINDS: ReadonlySet<ScaffoldKind> =
   new Set<ScaffoldKind>(["container", "year", "month", "week"]);
 
-/** The canonical display text for a scaffold node: "2026" / "July" / "Week 29".
+/** The canonical display text for a scaffold node: "2026" / "July" / "Jul 13–19".
  *  Falls back to the raw key for a day / container / unknown (their text is
  *  owned elsewhere -- the full date, the container name). ONE dispatch, consumed
  *  by both the client cascade and the Worker's level emission. */

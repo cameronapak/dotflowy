@@ -1,4 +1,7 @@
+import { Key01Icon, SmartPhone01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { Effect } from "effect";
 import {
   ArrowLeftIcon,
   CheckIcon,
@@ -17,14 +20,34 @@ import {
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
+import { openAppleShortcut } from "../components/apple-shortcut-opener";
+import { CaptureKeysDialog } from "../components/capture-keys-dialog";
+import { CliSetupDialog } from "../components/cli-setup-dialog";
 import { DeleteAccountDialog } from "../components/delete-account-dialog";
 import { McpConnectDialog } from "../components/mcp-connect-dialog";
 import { openOpmlImport } from "../components/opml-import-opener";
 import { useTextSize, type TextSize } from "../components/text-size-provider";
 import { useTheme } from "../components/theme-provider";
 import { Button } from "../components/ui/button";
+import { Switch } from "../components/ui/switch";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
+import {
+  retryEditorFeatures,
+  setDailyToggle,
+  setEditorFeature,
+  setEmptyDaysMode,
+  setExternalEmbeds,
+  setWeekStart,
+  useEditorFeatures,
+  type DailyToggle,
+  type EditorFeature,
+  type EmptyDaysMode,
+} from "../data/editor-features";
+import {
+  setExperimentalCaptureEnabled,
+  useExperimentalCaptureEnabled,
+} from "../data/flags";
 import { outlineToMarkdown } from "../data/markdown";
 import { useNodeCount } from "../data/node-count";
 import { exportOpml } from "../data/opml-export";
@@ -125,7 +148,7 @@ function SettingRow({
   action: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 bg-card px-4 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-4 bg-card px-4 py-3 sm:flex-nowrap">
       <div className="flex min-w-0 items-start gap-3">
         {icon && (
           <span className="mt-0.5 shrink-0 text-muted-foreground [&_svg]:size-4">
@@ -141,22 +164,103 @@ function SettingRow({
           )}
         </div>
       </div>
-      <div className="shrink-0">{action}</div>
+      <div className="ml-auto shrink-0">{action}</div>
     </div>
   );
 }
 
 /** A radio-style segmented control (theme, text size). */
+/** The Daily notes options (ADR 0070): the Day stream, how it presents Empty
+ *  days, and the week strip. Account-wide and optimistic; a failed save rolls
+ *  back and says so. */
+function DailyNotesOptions() {
+  const preferences = useEditorFeatures();
+  const [saving, setSaving] = useState(false);
+  const disabled = !preferences.ready || !preferences.daily || saving;
+  const save = (run: () => Promise<void>, label: string) => {
+    setSaving(true);
+    void run()
+      .catch(() =>
+        toast.error(
+          `Couldn't save ${label}. Your previous setting was restored.`,
+        ),
+      )
+      .finally(() => setSaving(false));
+  };
+  const toggle = (option: DailyToggle, label: string) => (enabled: boolean) =>
+    save(() => setDailyToggle(option, enabled), label);
+  return (
+    <div className="mt-4 flex flex-col gap-4 border-t pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-medium">Day stream</p>
+          <p className="text-muted-foreground">
+            Scroll from one day to the next instead of opening one day at a
+            time.
+          </p>
+        </div>
+        <div className="flex size-11 items-center justify-center">
+          <Switch
+            aria-label="Day stream"
+            checked={preferences.dayStream}
+            disabled={disabled}
+            onCheckedChange={toggle("dayStream", "the day stream")}
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-medium">Empty days</p>
+          <p className="text-muted-foreground">
+            How the day stream shows days with nothing written.
+          </p>
+        </div>
+        <Segmented<EmptyDaysMode>
+          label="Empty days"
+          value={preferences.emptyDays}
+          disabled={disabled || !preferences.dayStream}
+          onChange={(mode) =>
+            save(() => setEmptyDaysMode(mode), "how empty days show")
+          }
+          options={[
+            { value: "show", label: "Show" },
+            { value: "fold", label: "Fold" },
+            { value: "skip", label: "Skip" },
+          ]}
+        />
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-medium">Week strip</p>
+          <p className="text-muted-foreground">
+            Show the week's days above a daily note.
+          </p>
+        </div>
+        <div className="flex size-11 items-center justify-center">
+          <Switch
+            aria-label="Week strip"
+            checked={preferences.weekStrip}
+            disabled={disabled}
+            onCheckedChange={toggle("weekStrip", "the week strip")}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Segmented<T extends string>({
   value,
   onChange,
   options,
   label,
+  disabled = false,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: { value: T; label: ReactNode; title?: string }[];
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <div
@@ -172,6 +276,7 @@ function Segmented<T extends string>({
             type="button"
             role="radio"
             aria-checked={active}
+            disabled={disabled}
             title={o.title}
             onClick={() => onChange(o.value)}
             className={cn(
@@ -179,6 +284,7 @@ function Segmented<T extends string>({
               active
                 ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/10"
                 : "text-muted-foreground hover:text-foreground",
+              disabled && "cursor-not-allowed opacity-60",
             )}
           >
             {o.label}
@@ -246,6 +352,7 @@ function useSubscriptions(): Subscriptions {
           setState("error");
           return;
         }
+        // SAFETY: server rows carry the Stripe fields SubRow reads, only nullability typing differs
         setSubs((data ?? []) as SubRow[]);
         setState("ready");
       },
@@ -606,12 +713,13 @@ function AccountSection() {
  *  the free-tier nudge only shows once we KNOW the account is free. */
 function ConnectionsSection({ plan }: { plan: PlanName | null }) {
   const [connectOpen, setConnectOpen] = useState(false);
+  const [cliOpen, setCliOpen] = useState(false);
   const free = plan === "free";
 
   return (
     <Section
       title="Connections"
-      description="Read and edit your outline from AI apps over MCP — no API key, you just sign in."
+      description="Use your outline from other apps, your terminal, or scripts."
     >
       <RowGroup>
         <SettingRow
@@ -628,15 +736,98 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
             </Button>
           }
         />
+        <SettingRow
+          title="Command line (CLI)"
+          description="Use Dotflowy from your terminal or scripts."
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label="Set up command line (CLI)"
+              onClick={() => setCliOpen(true)}
+            >
+              Set up
+            </Button>
+          }
+        />
       </RowGroup>
       {free && (
         <p className="text-sm text-muted-foreground">
           Connecting AI apps requires{" "}
           <span className="font-medium text-foreground">Unlimited</span>. See
-          plan &amp; billing above to upgrade.
+          Other settings → Plan &amp; billing to upgrade.
         </p>
       )}
       <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
+      <CliSetupDialog open={cliOpen} onOpenChange={setCliOpen} />
+    </Section>
+  );
+}
+
+function ExperimentalSection() {
+  const enabled = useExperimentalCaptureEnabled();
+  const [captureOpen, setCaptureOpen] = useState(false);
+
+  return (
+    <Section
+      title="Experimental"
+      description="Opt in to features that are still being tested."
+    >
+      <RowGroup>
+        <SettingRow
+          title="External quick-add"
+          description="Try Apple Shortcuts and capture keys. Available on every plan. Off by default on this device."
+          action={
+            <Switch
+              aria-label="Enable experimental quick-add"
+              checked={enabled}
+              onCheckedChange={setExperimentalCaptureEnabled}
+            />
+          }
+        />
+        {enabled && (
+          <>
+            <SettingRow
+              icon={<HugeiconsIcon icon={SmartPhone01Icon} />}
+              title="Apple Shortcut"
+              description="Add text and links to today's note from your iPhone."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="Set up Apple Shortcut"
+                  onClick={openAppleShortcut}
+                >
+                  Set up
+                </Button>
+              }
+            />
+            <div id="capture-keys" className="scroll-mt-20">
+              <SettingRow
+                icon={<HugeiconsIcon icon={Key01Icon} />}
+                title="Capture keys"
+                description="Let shortcuts and scripts add to daily notes, without access to existing content."
+                action={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCaptureOpen(true)}
+                  >
+                    Manage
+                  </Button>
+                }
+              />
+            </div>
+          </>
+        )}
+      </RowGroup>
+      <p className="text-xs text-muted-foreground">
+        Turning this off hides setup on this device. Existing keys and shortcuts
+        keep working; revoke keys to stop their access.
+      </p>
+      {enabled && (
+        <CaptureKeysDialog open={captureOpen} onOpenChange={setCaptureOpen} />
+      )}
     </Section>
   );
 }
@@ -691,6 +882,265 @@ function DataSection() {
           }
         />
       </RowGroup>
+    </Section>
+  );
+}
+
+function EditorFeaturesSection() {
+  const preferences = useEditorFeatures();
+  const [saving, setSaving] = useState<EditorFeature | null>(null);
+  const [details, setDetails] = useState<EditorFeature | null>(null);
+  const [revokeFailed, setRevokeFailed] = useState(false);
+  const saveConsent = (enabled: boolean) => {
+    setRevokeFailed(false);
+    void setExternalEmbeds(enabled).catch(() => {
+      setRevokeFailed(!enabled);
+      toast.error(
+        enabled
+          ? "Couldn't allow external embeds. External content remains off in this tab."
+          : "Couldn't save the revocation. External embeds remain off in this tab; retry to update your account.",
+      );
+    });
+  };
+  const features = [
+    {
+      id: "bible",
+      name: "Bible references",
+      description: "Turn Scripture references into interactive passage chips.",
+    },
+    {
+      id: "daily",
+      name: "Daily notes",
+      description: "A place for each day, with Today and calendar navigation.",
+    },
+    {
+      id: "embeds",
+      name: "Embeds",
+      description: "Show supported external resources as embed nodes.",
+    },
+  ] as const;
+
+  return (
+    <Section
+      title="Editor features"
+      description="Choose the extras you want in your outline."
+    >
+      <RowGroup>
+        {features.map((feature) => (
+          <div key={feature.id}>
+            <SettingRow
+              title={feature.name}
+              description={
+                <>
+                  {feature.description}
+                  {!preferences[feature.id] && (
+                    <span className="mt-1 block text-xs">
+                      Off.{" "}
+                      {feature.id === "bible"
+                        ? "References stay as plain text."
+                        : feature.id === "daily"
+                          ? "Your existing notes stay in your outline."
+                          : "Embed nodes stay as usable links."}
+                    </span>
+                  )}
+                </>
+              }
+              action={
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`${feature.name} Details`}
+                    aria-expanded={details === feature.id}
+                    aria-controls={`${feature.id}-details`}
+                    onClick={() =>
+                      setDetails(details === feature.id ? null : feature.id)
+                    }
+                  >
+                    Details
+                  </Button>
+                  <div className="flex size-11 items-center justify-center">
+                    <Switch
+                      aria-label={feature.name}
+                      aria-describedby={`${feature.id}-details`}
+                      checked={preferences[feature.id]}
+                      disabled={!preferences.ready || saving !== null}
+                      onCheckedChange={(enabled) => {
+                        setSaving(feature.id);
+                        void Effect.runPromise(
+                          Effect.tryPromise(() =>
+                            setEditorFeature(feature.id, enabled),
+                          ).pipe(
+                            Effect.catch(() =>
+                              Effect.sync(() =>
+                                toast.error(
+                                  `Couldn't save ${feature.name.toLowerCase()}. Your previous setting was restored.`,
+                                ),
+                              ),
+                            ),
+                            Effect.ensuring(Effect.sync(() => setSaving(null))),
+                          ),
+                        );
+                      }}
+                    />
+                  </div>
+                </div>
+              }
+            />
+            <div
+              id={`${feature.id}-details`}
+              hidden={details !== feature.id}
+              className="border-t bg-muted/30 p-4 text-sm"
+            >
+              <p className="font-medium">
+                {feature.name} is {preferences[feature.id] ? "on" : "off"}.
+              </p>
+              <h3 className="mt-3 font-medium">When off</h3>
+              <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-muted-foreground">
+                {feature.id === "bible" ? (
+                  <>
+                    <li>Scripture references remain as the text you wrote.</li>
+                    <li>
+                      Passage chips and Bible-specific controls stop appearing.
+                    </li>
+                  </>
+                ) : feature.id === "daily" ? (
+                  <>
+                    <li>
+                      Today, calendar navigation, date chips, and daily commands
+                      stop appearing.
+                    </li>
+                    <li>Quick-add saves to the top level instead of Today.</li>
+                    <li>
+                      Existing notes remain accessible. Daily folders stay
+                      protected from deletion.
+                    </li>
+                    <li>Explicit CLI and MCP daily commands still work.</li>
+                  </>
+                ) : (
+                  <>
+                    <li>
+                      Embed nodes, their source URLs, and child notes remain.
+                    </li>
+                    <li>
+                      External previews stop appearing; links stay usable.
+                    </li>
+                  </>
+                )}
+              </ul>
+              <p className="mt-3 text-muted-foreground">
+                Turning this feature off never deletes your notes. Turn it back
+                on to use it with the same content.
+              </p>
+              {feature.id === "daily" ? (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                  <div>
+                    <p className="font-medium">Week starts on</p>
+                    <p className="text-muted-foreground">
+                      Changes your Daily calendar and reorganizes its weeks.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2" aria-live="polite">
+                    {preferences.weekStartSaving ? (
+                      <Loader2Icon
+                        className="size-4 animate-spin text-muted-foreground"
+                        aria-label="Reorganizing Daily calendar"
+                      />
+                    ) : null}
+                    <Segmented
+                      label="Week starts on"
+                      value={preferences.weekStart}
+                      disabled={
+                        !preferences.ready || preferences.weekStartSaving
+                      }
+                      onChange={(weekStart) => {
+                        void setWeekStart(weekStart)
+                          .then(() =>
+                            toast.success(
+                              `Weeks now start on ${weekStart === "sunday" ? "Sunday" : "Monday"}`,
+                            ),
+                          )
+                          .catch(() =>
+                            toast.error(
+                              "Couldn't change when weeks start. Nothing was moved.",
+                            ),
+                          );
+                      }}
+                      options={[
+                        { value: "sunday", label: "Sunday" },
+                        { value: "monday", label: "Monday" },
+                      ]}
+                    />
+                  </div>
+                </div>
+              ) : null}
+              {feature.id === "daily" ? <DailyNotesOptions /> : null}
+            </div>
+          </div>
+        ))}
+        <SettingRow
+          title="Allow external embeds"
+          description="Automatically load supported providers on all devices signed in to your account. This sends requests to those providers, which may use cookies or tracking."
+          action={
+            <div className="flex size-11 items-center justify-center">
+              <Switch
+                aria-label="Allow external embeds"
+                checked={preferences.externalEmbeds}
+                disabled={
+                  !preferences.ready || preferences.externalEmbedsSaving
+                }
+                onCheckedChange={saveConsent}
+              />
+            </div>
+          }
+        />
+      </RowGroup>
+      {revokeFailed && (
+        <div role="alert" className="text-sm text-muted-foreground">
+          Account permission could not be revoked. Other devices may still load
+          embeds.
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={preferences.externalEmbedsSaving}
+            onClick={() => saveConsent(false)}
+          >
+            Retry revocation
+          </Button>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Turning a feature off never deletes your notes. These settings follow
+        your account across devices.
+      </p>
+      {!preferences.ready && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {preferences.error ? (
+            <>
+              Couldn't load your feature settings.{" "}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  void Effect.runPromise(
+                    Effect.tryPromise(() => retryEditorFeatures()).pipe(
+                      Effect.catch(() =>
+                        Effect.sync(() =>
+                          toast.error("Couldn't load your feature settings."),
+                        ),
+                      ),
+                    ),
+                  );
+                }}
+              >
+                Retry
+              </Button>
+            </>
+          ) : (
+            "Loading your feature settings…"
+          )}
+        </p>
+      )}
     </Section>
   );
 }
@@ -766,17 +1216,25 @@ function SettingsPage() {
       </header>
 
       <div className="mx-auto flex max-w-2xl flex-col gap-10 px-4 py-8 sm:px-6">
-        <Section
-          title="Plan & billing"
-          description="Your plan, usage, and payment."
-        >
-          <PlanBilling {...subscriptions} />
-        </Section>
-
-        <AccountSection />
         <ConnectionsSection plan={plan} />
-        <DataSection />
+        <EditorFeaturesSection />
         <AppearanceSection />
+        <ExperimentalSection />
+        <details className="border-t pt-4">
+          <summary className="cursor-pointer text-sm text-muted-foreground">
+            Other settings
+          </summary>
+          <div className="mt-6 flex flex-col gap-10">
+            <Section
+              title="Plan & billing"
+              description="Your plan, usage, and payment."
+            >
+              <PlanBilling {...subscriptions} />
+            </Section>
+            <AccountSection />
+            <DataSection />
+          </div>
+        </details>
       </div>
     </main>
   );

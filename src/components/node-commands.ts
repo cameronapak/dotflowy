@@ -21,12 +21,24 @@ export interface NodeCommands {
   onMoveDown: (id: string) => void;
   // Delete a bullet and its entire subtree, then focus a neighbor.
   onDeleteNode: (id: string) => void;
+  // Backspace at the start of a bullet that HAS text: merge it into the row
+  // visibly above (the inverse of onEnter's mid-split). Takes the INSTANCE id,
+  // like onDeleteNode -- the row disappears, and position is local to where it
+  // sits (ADR 0022); the text lands on the TARGET's content id. Bullet-only:
+  // the zoomed title and the quick-add mini editor don't bind Backspace at all
+  // (the three-path trap), and joining a zoom root into a node outside the view
+  // is incoherent. Refuses -- with a shake, and a toast when the reason isn't
+  // on screen -- rather than reparenting children or merging across anything
+  // hidden.
+  onJoinPrevious: (id: string) => void;
   onToggleCompleted: (id: string, completed: boolean) => void;
   // Set whether a bullet is a task (checkbox shown/hidden). Clears `kind`.
   onSetTask: (id: string, isTask: boolean) => void;
   // Set the node's kind: "paragraph" (paragraph glyph, prose) or null (plain bullet).
   // Clears `isTask` -- the kinds are mutually exclusive (ADR 0045).
-  onSetKind: (id: string, kind: NodeKind) => void;
+  onSetKind: (id: string, kind: NodeKind, text?: string) => void;
+  // Set direct owner lock intent on the node's true source (ADR 0067).
+  onSetLocked: (id: string, locked: boolean) => void;
   // Open the `/move` destination picker for this bullet.
   onRequestMove: (id: string) => void;
   // Open the `/mirror` destination picker for this bullet (ADR 0022): same

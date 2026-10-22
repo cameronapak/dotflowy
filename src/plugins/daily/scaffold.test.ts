@@ -1,104 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { dayKeyToWeekKey, scaffoldKeyKind } from "../../data/date-links";
-import { buildTreeIndex, makeNode } from "../../data/tree";
-import {
-  formatWeekRange,
-  formatWeekRelative,
-  planDailyMigration,
-  sortedInsertAfterId,
-  type ScaffoldSibling,
-} from "./scaffold";
-
-describe("sortedInsertAfterId (chronological ascending, same-kind only)", () => {
-  test("no children -> insert at start (null)", () => {
-    expect(sortedInsertAfterId([], "2026-07-16")).toBeNull();
-  });
-
-  test("no same-kind sibling -> append at the end (keep bullets on top)", () => {
-    const siblings: ScaffoldSibling[] = [
-      { id: "b1", key: null },
-      { id: "b2", key: null },
-    ];
-    expect(sortedInsertAfterId(siblings, "2026-07-16")).toBe("b2");
-  });
-
-  test("smaller than every same-kind sibling, none leading -> head", () => {
-    const siblings: ScaffoldSibling[] = [
-      { id: "d2", key: "2026-07-08" },
-      { id: "d3", key: "2026-07-16" },
-    ];
-    expect(sortedInsertAfterId(siblings, "2026-07-01")).toBeNull();
-  });
-
-  test("smaller than every same-kind sibling, a bullet leads -> after the bullet", () => {
-    const siblings: ScaffoldSibling[] = [
-      { id: "b", key: null },
-      { id: "d2", key: "2026-07-08" },
-      { id: "d3", key: "2026-07-16" },
-    ];
-    expect(sortedInsertAfterId(siblings, "2026-07-01")).toBe("b");
-  });
-
-  test("middle insert lands after the greatest earlier day", () => {
-    const siblings: ScaffoldSibling[] = [
-      { id: "d1", key: "2026-07-01" },
-      { id: "d2", key: "2026-07-08" },
-      { id: "d3", key: "2026-07-20" },
-    ];
-    expect(sortedInsertAfterId(siblings, "2026-07-16")).toBe("d2");
-  });
-
-  test("larger than every same-kind sibling -> after the last day", () => {
-    const siblings: ScaffoldSibling[] = [
-      { id: "d1", key: "2026-07-01" },
-      { id: "d2", key: "2026-07-08" },
-    ];
-    expect(sortedInsertAfterId(siblings, "2026-07-20")).toBe("d2");
-  });
-
-  test("weeks order by ISO year then week number", () => {
-    const siblings: ScaffoldSibling[] = [
-      { id: "wA", key: "2025-W52" },
-      { id: "wB", key: "2026-W02" },
-    ];
-    // 2026-W01 sits between 2025-W52 and 2026-W02.
-    expect(sortedInsertAfterId(siblings, "2026-W01")).toBe("wA");
-  });
-
-  test("only same-kind siblings count (a week among months appends)", () => {
-    const siblings: ScaffoldSibling[] = [
-      { id: "m1", key: "2026-01" },
-      { id: "m2", key: "2026-07" },
-    ];
-    expect(sortedInsertAfterId(siblings, "2026-W29")).toBe("m2");
-  });
-});
-
-describe("formatWeekRange", () => {
-  test("within one month -> 'Jul 13 – 19'", () => {
-    expect(formatWeekRange("2026-W29")).toBe("Jul 13 – 19");
-  });
-
-  test("across a month boundary -> 'Dec 29 – Jan 4'", () => {
-    expect(formatWeekRange("2026-W01")).toBe("Dec 29 – Jan 4");
-  });
-
-  test("nonexistent week -> the raw label", () => {
-    expect(formatWeekRange("2025-W53")).toBe("2025-W53");
-  });
-});
-
-describe("formatWeekRelative", () => {
-  const today = "2026-07-16"; // ISO 2026-W29
-
-  test("this week / last week, null beyond", () => {
-    expect(formatWeekRelative("2026-W29", today)).toBe("This week");
-    expect(formatWeekRelative("2026-W28", today)).toBe("Last week");
-    expect(formatWeekRelative("2026-W27", today)).toBeNull();
-    expect(formatWeekRelative("2026-W30", today)).toBeNull();
-  });
-});
+import { buildTreeIndex, createNode } from "../../data/tree";
+import { isOrphanMappedDay, planDailyMigration } from "./scaffold";
 
 describe("planDailyMigration", () => {
   /** Build a keyOf() over an explicit id -> key map. */
@@ -111,10 +14,10 @@ describe("planDailyMigration", () => {
 
   test("flat days -> needed, ascending days, parents-first scaffold keys", () => {
     const nodes = [
-      makeNode({ id: "c", text: "Daily" }),
-      makeNode({ id: "d1", parentId: "c" }), // 2026-07-16
-      makeNode({ id: "d2", parentId: "c" }), // 2026-07-08
-      makeNode({ id: "d3", parentId: "c" }), // 2025-12-30 (ISO week-year 2026)
+      createNode({ id: "c", text: "Daily" }),
+      createNode({ id: "d1", parentId: "c" }), // 2026-07-16
+      createNode({ id: "d2", parentId: "c" }), // 2026-07-08
+      createNode({ id: "d3", parentId: "c" }), // 2025-12-30; fourth day is in 2026
     ];
     const map = {
       c: "container",
@@ -130,43 +33,37 @@ describe("planDailyMigration", () => {
     );
 
     expect(plan.needed).toBe(true);
-    // Days ascending by date.
-    expect(plan.days.map((d) => d.dayKey)).toEqual([
-      "2025-12-30",
-      "2026-07-08",
-      "2026-07-16",
+    // Days ascending by date, each carrying its owning week.
+    expect(plan.days).toEqual([
+      { nodeId: "d3", dayKey: "2025-12-30", weekKey: "week:2025-12-29" },
+      { nodeId: "d2", dayKey: "2026-07-08", weekKey: "week:2026-07-06" },
+      { nodeId: "d1", dayKey: "2026-07-16", weekKey: "week:2026-07-13" },
     ]);
-    // Each day carries its owning week.
-    for (const d of plan.days) {
-      expect(d.weekKey).toBe(dayKeyToWeekKey(d.dayKey)!);
-    }
-    // Scaffold keys are parents-first: all years, then months, then weeks.
-    const ranks = plan.scaffoldKeys.map(
-      (k) => ({ year: 0, month: 1, week: 2 })[scaffoldKeyKind(k) as string],
-    );
-    for (let i = 1; i < ranks.length; i++) {
-      expect(ranks[i]!).toBeGreaterThanOrEqual(ranks[i - 1]!);
-    }
-    // The distinct expected keys (2025-12-30's Thursday is 2026-01-01, so it
-    // rolls into ISO year 2026).
-    const years = plan.scaffoldKeys.filter(
-      (k) => scaffoldKeyKind(k) === "year",
-    );
-    const months = plan.scaffoldKeys.filter(
-      (k) => scaffoldKeyKind(k) === "month",
-    );
-    expect(years).toEqual(["2026"]);
-    expect(months).toEqual(["2026-01", "2026-07"]);
+    // Scaffold keys are parents-first: years, then months, then weeks.
+    // 2025-12-30's fourth day is 2026-01-01, so it rolls into year 2026.
+    expect(plan.scaffoldKeys).toEqual([
+      "2026",
+      "2026-01",
+      "2026-07",
+      "week:2025-12-29",
+      "week:2026-07-06",
+      "week:2026-07-13",
+    ]);
   });
 
   test("fully nested days -> not needed (idempotent re-entry)", () => {
     const nodes = [
-      makeNode({ id: "c", text: "Daily" }),
-      makeNode({ id: "y", parentId: "c" }),
-      makeNode({ id: "w", parentId: "y" }),
-      makeNode({ id: "d1", parentId: "w" }),
+      createNode({ id: "c", text: "Daily" }),
+      createNode({ id: "y", parentId: "c" }),
+      createNode({ id: "w", parentId: "y" }),
+      createNode({ id: "d1", parentId: "w" }),
     ];
-    const map = { c: "container", y: "2026", w: "2026-W29", d1: "2026-07-16" };
+    const map = {
+      c: "container",
+      y: "2026",
+      w: "week:2026-07-13",
+      d1: "2026-07-16",
+    };
     const plan = planDailyMigration(
       buildTreeIndex(nodes),
       "c",
@@ -179,7 +76,7 @@ describe("planDailyMigration", () => {
   });
 
   test("brand-new empty account -> nothing to do", () => {
-    const nodes = [makeNode({ id: "c", text: "Daily" })];
+    const nodes = [createNode({ id: "c", text: "Daily" })];
     const plan = planDailyMigration(
       buildTreeIndex(nodes),
       "c",
@@ -195,10 +92,10 @@ describe("planDailyMigration", () => {
     // The user dragged a mapped day out of the Daily scaffold, under a plain
     // note. It must NOT migrate -- only days still inside the scaffold do.
     const nodes = [
-      makeNode({ id: "c", text: "Daily" }),
-      makeNode({ id: "note", text: "Project" }), // a normal top-level bullet
-      makeNode({ id: "moved", parentId: "note" }), // 2026-07-16, relocated here
-      makeNode({ id: "flat", parentId: "c" }), // 2026-07-08, still flat
+      createNode({ id: "c", text: "Daily" }),
+      createNode({ id: "note", text: "Project" }), // a normal top-level bullet
+      createNode({ id: "moved", parentId: "note" }), // 2026-07-16, relocated here
+      createNode({ id: "flat", parentId: "c" }), // 2026-07-08, still flat
     ];
     const map = {
       c: "container",
@@ -219,18 +116,18 @@ describe("planDailyMigration", () => {
 
   test("a day already nested under a week is in scope (no-op move heals re-entry)", () => {
     const nodes = [
-      makeNode({ id: "c", text: "Daily" }),
-      makeNode({ id: "y", parentId: "c" }),
-      makeNode({ id: "m", parentId: "y" }),
-      makeNode({ id: "w", parentId: "m" }),
-      makeNode({ id: "nested", parentId: "w" }), // 2026-07-16, correctly placed
-      makeNode({ id: "flat", parentId: "c" }), // 2026-07-08, still flat
+      createNode({ id: "c", text: "Daily" }),
+      createNode({ id: "y", parentId: "c" }),
+      createNode({ id: "m", parentId: "y" }),
+      createNode({ id: "w", parentId: "m" }),
+      createNode({ id: "nested", parentId: "w" }), // 2026-07-16, correctly placed
+      createNode({ id: "flat", parentId: "c" }), // 2026-07-08, still flat
     ];
     const map = {
       c: "container",
       y: "2026",
       m: "2026-07",
-      w: "2026-W29",
+      w: "week:2026-07-13",
       nested: "2026-07-16",
       flat: "2026-07-08",
     };
@@ -245,6 +142,59 @@ describe("planDailyMigration", () => {
     expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["flat", "nested"]);
   });
 
+  test("orphan mapped day (dangling parent) is in scope and needed", () => {
+    // After a partial upgraded-sync cutover the day nodes can survive while their
+    // week parents are gone — parentId dangles. inScaffoldScope alone would skip
+    // them forever; orphans must reattach.
+    const nodes = [
+      createNode({ id: "c", text: "Daily" }),
+      createNode({ id: "d1", parentId: "deleted-week" }), // 2026-07-16
+      createNode({ id: "d2", parentId: null }), // 2026-07-08, top-level stray
+    ];
+    const map = {
+      c: "container",
+      d1: "2026-07-16",
+      d2: "2026-07-08",
+    };
+    const index = buildTreeIndex(nodes);
+    expect(isOrphanMappedDay(index, nodes[1]!)).toBe(true);
+    expect(isOrphanMappedDay(index, nodes[2]!)).toBe(true);
+    const plan = planDailyMigration(index, "c", dayRows(map), keyOf(map));
+    expect(plan.needed).toBe(true);
+    expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["d1", "d2"]);
+    expect(plan.scaffoldKeys).toContain("week:2026-07-06");
+    expect(plan.scaffoldKeys).toContain("week:2026-07-13");
+  });
+
+  test("day under the wrong week is needed (reattach), correct week is not", () => {
+    const nodes = [
+      createNode({ id: "c", text: "Daily" }),
+      createNode({ id: "y", parentId: "c" }),
+      createNode({ id: "m", parentId: "y" }),
+      createNode({ id: "w29", parentId: "m" }),
+      createNode({ id: "w28", parentId: "m" }),
+      createNode({ id: "wrong", parentId: "w29" }), // belongs in week:2026-07-06
+      createNode({ id: "right", parentId: "w29" }), // belongs in week:2026-07-13
+    ];
+    const map = {
+      c: "container",
+      y: "2026",
+      m: "2026-07",
+      w29: "week:2026-07-13",
+      w28: "week:2026-07-06",
+      wrong: "2026-07-08",
+      right: "2026-07-16",
+    };
+    const plan = planDailyMigration(
+      buildTreeIndex(nodes),
+      "c",
+      dayRows(map),
+      keyOf(map),
+    );
+    expect(plan.needed).toBe(true);
+    expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["right", "wrong"]);
+  });
+
   test("a day under a scaffold subtree relocated OUTSIDE Daily is left alone (finding 5)", () => {
     // The user dragged a whole year/week subtree (protection blocks delete/blank,
     // NOT move) out of the Daily container, under a plain note. The day still
@@ -253,17 +203,17 @@ describe("planDailyMigration", () => {
     // Full-ancestry scope (finding 5) leaves it alone: its chain never reaches
     // the container.
     const nodes = [
-      makeNode({ id: "c", text: "Daily" }),
-      makeNode({ id: "note", text: "Archive" }), // a normal top-level bullet
-      makeNode({ id: "y", parentId: "note" }), // year, relocated OUT of Daily
-      makeNode({ id: "w", parentId: "y" }), // week, under the relocated year
-      makeNode({ id: "moved", parentId: "w" }), // 2026-07-16, under the moved week
-      makeNode({ id: "flat", parentId: "c" }), // 2026-07-08, still flat -> triggers
+      createNode({ id: "c", text: "Daily" }),
+      createNode({ id: "note", text: "Archive" }), // a normal top-level bullet
+      createNode({ id: "y", parentId: "note" }), // year, relocated OUT of Daily
+      createNode({ id: "w", parentId: "y" }), // week, under the relocated year
+      createNode({ id: "moved", parentId: "w" }), // 2026-07-16, under the moved week
+      createNode({ id: "flat", parentId: "c" }), // 2026-07-08, still flat -> triggers
     ];
     const map = {
       c: "container",
       y: "2026",
-      w: "2026-W29",
+      w: "week:2026-07-13",
       moved: "2026-07-16",
       flat: "2026-07-08",
     };

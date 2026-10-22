@@ -17,7 +17,8 @@
     "isolatedModules": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@dotflowy/changelog-markdown": ["../src/data/changelog-markdown.ts"]
     }
   },
   "include": ["src", "vite.config.ts"]

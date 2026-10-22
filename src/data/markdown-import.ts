@@ -44,6 +44,8 @@ export interface MdNode {
    *  (list, task, heading, fence). See `stripLine` and ADR 0044's amendment. */
   kind: NodeKind;
   children: MdNode[];
+  /** Fence content is literal during paste, including post-paste effects. */
+  literal?: boolean;
 }
 
 // --- The grammar --------------------------------------------------------------
@@ -178,7 +180,7 @@ export function parseMarkdownForest(
       // preserved (`.node-text` is `white-space: pre-wrap`, and leading
       // whitespace is content in code). A blank line inside a fence is content
       // too, so it becomes an empty bullet rather than being dropped.
-      push(fence.depth, leaf(line));
+      push(fence.depth, { ...leaf(line), literal: true });
       const close = FENCE_RE.exec(content);
       if (
         close &&
@@ -241,7 +243,10 @@ function pushListLine(
 
   // A fence-open line is raw: its own text, not a stripped one.
   const fenceOpen = FENCE_RE.test(content);
-  return push(depth, fenceOpen ? leaf(line) : leaf(...stripLine(content)));
+  return push(
+    depth,
+    fenceOpen ? { ...leaf(line), literal: true } : leaf(...stripLine(content)),
+  );
 }
 
 /**
@@ -348,6 +353,8 @@ export interface MdPastePlan {
   focusOffset: number;
   /** Bullets the paste creates, anchor excluded. */
   insertCount: number;
+  /** Fence lines must not run plugin post-paste effects. Never persisted. */
+  literalIds: string[];
 }
 
 /**
@@ -391,6 +398,7 @@ export function planMarkdownPaste(args: {
 
   const inserts: MdPasteInsert[] = [];
   const repoints: MdPastePlan["repoints"] = [];
+  const literalIds = first.literal ? [anchorId] : [];
 
   // Depth-first pre-order emission: every chunked-frame prefix stays chain-valid
   // for live remote viewers (ADR 0037's lesson), and each node's prevSiblingId is
@@ -404,6 +412,7 @@ export function planMarkdownPaste(args: {
     let prev = initialPrev;
     for (const node of siblings) {
       const id = newId();
+      if (node.literal) literalIds.push(id);
       inserts.push({
         id,
         parentId,
@@ -476,5 +485,6 @@ export function planMarkdownPaste(args: {
     focusId: last?.id ?? anchorId,
     focusOffset: (last ? last.text : anchorText).length - tail.length,
     insertCount: inserts.length,
+    literalIds,
   };
 }

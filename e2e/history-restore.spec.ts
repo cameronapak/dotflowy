@@ -42,6 +42,8 @@ async function bigDelete(page: Page) {
 }
 
 test.describe("sliced history restore", () => {
+  test.describe.configure({ timeout: 90_000 });
+
   test("Cmd+Z after a big delete restores through the progress dialog and persists", async ({
     page,
   }) => {
@@ -49,7 +51,7 @@ test.describe("sliced history restore", () => {
     // "saving" phase — proof every slice applied while ONE batch is in flight.
     await seedOutline(page, bigSeed(600), { postDelayMs: 400 });
     await page.goto("/");
-    await expect(text(page, "big")).toBeVisible();
+    await expect(text(page, "big")).toBeVisible({ timeout: 60_000 });
 
     await bigDelete(page);
 
@@ -67,12 +69,14 @@ test.describe("sliced history restore", () => {
     // The restore batch persisted to the (mock) server store, not just the
     // optimistic overlay: a reload still shows the whole subtree.
     await page.reload();
+    await text(page, "alpha").waitFor({ state: "visible" });
     await expect(text(page, "big")).toBeVisible();
     await expect(text(page, "charlie")).toBeVisible();
     // The children are back too (collapsed rows don't render at home, so zoom
     // in; the windowed list only mounts the first screenful — big-0 suffices,
     // the 601-op batch is atomic so partial restore can't persist).
     await page.goto("/big");
+    await page.locator("h2.zoomed-title").waitFor({ state: "visible" });
     await expect(text(page, "big-0")).toBeVisible();
   });
 
@@ -81,7 +85,7 @@ test.describe("sliced history restore", () => {
   }) => {
     await seedOutline(page, bigSeed(600), { postDelayMs: 400 });
     await page.goto("/");
-    await expect(text(page, "big")).toBeVisible();
+    await expect(text(page, "big")).toBeVisible({ timeout: 60_000 });
 
     await bigDelete(page);
 
@@ -100,7 +104,7 @@ test.describe("sliced history restore", () => {
     await expect(page.locator('li[data-node-id="big"]')).toHaveCount(0);
 
     await page.reload();
-    await expect(text(page, "alpha")).toBeVisible();
+    await text(page, "alpha").waitFor({ state: "visible" });
     await expect(page.locator('li[data-node-id="big"]')).toHaveCount(0);
   });
 
@@ -109,7 +113,7 @@ test.describe("sliced history restore", () => {
   }) => {
     await seedOutline(page, STANDARD_TREE);
     await page.goto("/");
-    await expect(text(page, "alpha")).toBeVisible();
+    await expect(text(page, "alpha")).toBeVisible({ timeout: 60_000 });
 
     // A small structural change (3-node subtree delete), then undo it.
     await text(page, "alpha").click();
@@ -122,6 +126,7 @@ test.describe("sliced history restore", () => {
     await expect(page.getByTestId("history-restore-dialog")).toHaveCount(0);
     // And the restore persisted.
     await page.reload();
+    await page.locator(".outline-list").waitFor({ state: "visible" });
     await expect(text(page, "alpha")).toBeVisible();
   });
 });

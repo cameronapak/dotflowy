@@ -1,45 +1,51 @@
-import { useNavigate } from "@tanstack/react-router";
+import { Avatar } from "@base-ui/react/avatar";
 import {
-  ChevronsDownUpIcon,
-  ChevronsUpDownIcon,
-  CircleCheckIcon,
-  FileTextIcon,
+  ArrowShrinkIcon,
+  ArrowExpandIcon,
+  Bookmark01Icon,
+  BubbleChatNotificationIcon,
+  CheckmarkCircle01Icon,
+  Copy01Icon,
+  File01Icon,
   FocusIcon,
-  LogOutIcon,
-  MessageSquareWarningIcon,
-  MoreHorizontalIcon,
-  SettingsIcon,
+  Logout01Icon,
+  Settings01Icon,
   ShieldCheckIcon,
+  SlidersHorizontalIcon,
   SparklesIcon,
-} from "lucide-react";
+  UserIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { localDateKey } from "../data/date-links";
 import { downloadTextFile } from "../data/download";
 import { openFeedbackReport } from "../data/feedback";
-import { capture } from "../data/history";
 import { flattenInline } from "../data/inline-text";
 import { outlineToMarkdown } from "../data/markdown";
-import { toggleCollapsed } from "../data/mutations";
+import { toggleBookmark, toggleCollapsed } from "../data/mutations";
 import { exportOpml } from "../data/opml-export";
 import { runStructural } from "../data/structural";
 import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
+import { useTree } from "../data/useTree";
 import { getViewRootId } from "../data/view-state";
-import { signOutAndReload } from "../lib/auth-client";
+import { signOutAndReload, useSession } from "../lib/auth-client";
+import { usePluginChrome } from "../plugins/registry";
 import { openChangelog } from "./changelog-opener";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
 import { Button } from "./ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+  ResponsiveMenu as DropdownMenu,
+  ResponsiveMenuCheckboxItem as DropdownMenuCheckboxItem,
+  ResponsiveMenuContent as DropdownMenuContent,
+  ResponsiveMenuItem as DropdownMenuItem,
+  ResponsiveMenuSeparator as DropdownMenuSeparator,
+  ResponsiveMenuTrigger as DropdownMenuTrigger,
+} from "./ui/responsive-menu";
 
 /**
  * GitHub's brand glyph (Simple Icons). lucide-react dropped its Github icon, so
@@ -125,10 +131,7 @@ export function exportOutlineAsOpml() {
  * The walk descends through already-collapsed branches (the index is unaffected
  * by the flag), so "Expand all" reaches every nested node.
  */
-function collapsibleTargets(collapsed: boolean): {
-  ids: string[];
-  rootId: string | null;
-} {
+function collapsibleTargets(collapsed: boolean) {
   const index = getTreeIndex();
   const rootId = getViewRootId();
   const targets: string[] = [];
@@ -150,73 +153,165 @@ function collapsibleTargets(collapsed: boolean): {
 /**
  * Collapse or expand every collapsible node under the current view in ONE
  * atomic batch. Wrapped in `runStructural` so N `collapsed` field edits ship as
- * a single DO frame (one round-trip, one broadcast) instead of N PATCHes, and a
- * single `capture` before the batch makes it one undo step -- mirroring how the
- * per-row `onToggleCollapsed` command captures once. `runStructural` is generic
- * over any `nodesCollection` write; these are field edits, not chain relinks, so
- * the sibling chain is untouched.
+ * a single DO frame (one round-trip, one broadcast) instead of N PATCHes.
+ * Browsing does not enter authoring history (ADR 0064). These are field edits,
+ * not chain relinks, so the sibling chain is untouched.
  */
 export function setViewCollapsed(collapsed: boolean) {
-  const { ids, rootId } = collapsibleTargets(collapsed);
+  const { ids } = collapsibleTargets(collapsed);
   if (ids.length === 0) {
     toast(collapsed ? "Already collapsed" : "Already expanded");
     return;
   }
-  capture(getTreeIndex(), rootId);
   runStructural(() => {
     for (const id of ids) toggleCollapsed(id, collapsed);
   });
 }
 
-/**
- * Header overflow ("More") menu. Since #171 the plan/billing, account (Connect
- * Google, Delete account), connections (MCP), data (import/export/copy), and
- * appearance (theme, text size) controls all live on the dedicated `/settings`
- * page -- so this menu is now just the outline-view actions (collapse/expand,
- * show completed, spotlight), the read-only links (What's new, Report a bug,
- * GitHub), and the two entry points that belong on every screen: Settings (top)
- * and Sign out (bottom).
- *
- * This is the static v1 of the header-action overflow: the pinned/overflow
- * split is a fixed default. User-customizable pinning (Chrome-extension style)
- * is the planned v2 and will land with its own ADR + a per-user pin collection.
- */
-export function HeaderMoreMenu() {
-  const navigate = useNavigate();
+/** Current-view actions and display toggles, separate from account/help (ADR 0072). */
+export function HeaderViewMenu() {
+  const { globalActions } = usePluginChrome();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
-  // Unread-changelog signal (ADR 0046): a quiet dot on this trigger replaces the
-  // old loud header CTA. Presence IS the signal; opening the dialog marks
-  // everything read, so both the dot and the item emphasis clear themselves.
+  const { index } = useTree();
+  const rootId = useParams({ strict: false }).nodeId;
+  const current = rootId ? index.byId.get(rootId) : null;
+
+  return (
+    <DropdownMenu title="View options">
+      <DropdownMenuTrigger
+        render={
+          <Button variant="ghost" size="icon-sm" title="View options">
+            <HugeiconsIcon icon={SlidersHorizontalIcon} />
+            <span className="sr-only">View options</span>
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="min-w-52">
+        <div
+          role="presentation"
+          className="px-1.5 py-1 text-xs font-medium text-muted-foreground"
+        >
+          This view
+        </div>
+        {current && (
+          <DropdownMenuCheckboxItem
+            checked={current.bookmarkedAt != null}
+            onCheckedChange={(checked) => toggleBookmark(current.id, checked)}
+          >
+            <HugeiconsIcon icon={Bookmark01Icon} />
+            Bookmark this page
+          </DropdownMenuCheckboxItem>
+        )}
+
+        <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
+          <HugeiconsIcon icon={ArrowShrinkIcon} />
+          Collapse all
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
+          <HugeiconsIcon icon={ArrowExpandIcon} />
+          Expand all
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onClick={() => void copyOutlineAsMarkdown()}>
+          <HugeiconsIcon icon={Copy01Icon} />
+          Copy as Markdown
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+
+        <div
+          role="presentation"
+          className="px-1.5 py-1 text-xs font-medium text-muted-foreground"
+        >
+          Display
+        </div>
+        <DropdownMenuCheckboxItem
+          checked={showCompleted}
+          onCheckedChange={setShowCompleted}
+        >
+          <HugeiconsIcon icon={CheckmarkCircle01Icon} />
+          Show completed
+        </DropdownMenuCheckboxItem>
+
+        <DropdownMenuCheckboxItem
+          checked={spotlight}
+          onCheckedChange={setSpotlightEnabled}
+        >
+          <HugeiconsIcon icon={FocusIcon} />
+          Spotlight mode
+        </DropdownMenuCheckboxItem>
+
+        {globalActions
+          .filter((action) => action.menuLabel && action.checked !== undefined)
+          .map((action) => (
+            <DropdownMenuCheckboxItem
+              key={action.id}
+              checked={action.checked}
+              disabled={action.disabled}
+              onCheckedChange={() => action.run()}
+            >
+              <action.icon />
+              {action.menuLabel}
+            </DropdownMenuCheckboxItem>
+          ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Account, help, and the unread-release signal live on the avatar (ADR 0072). */
+export function HeaderAppMenu() {
+  const navigate = useNavigate();
+  const { data: session } = useSession();
   const unseen = useUnseenReleaseCount();
 
   return (
-    <DropdownMenu>
+    <DropdownMenu title="Account and help">
       <DropdownMenuTrigger
         render={
           <Button
             variant="ghost"
             size="icon-sm"
-            title={unseen > 0 ? "More — what's new" : "More"}
-            className="relative"
+            title="Account and help"
+            aria-label={
+              unseen > 0
+                ? "Account and help (new releases available)"
+                : "Account and help"
+            }
+            className="relative rounded-full"
           >
-            <MoreHorizontalIcon />
+            <Avatar.Root
+              aria-hidden="true"
+              className="inline-flex size-6 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-medium text-muted-foreground"
+            >
+              <Avatar.Fallback className="flex size-full items-center justify-center">
+                {session?.user.email?.charAt(0).toUpperCase() || (
+                  <HugeiconsIcon icon={UserIcon} />
+                )}
+              </Avatar.Fallback>
+              <Avatar.Image
+                src={session?.user.image ?? undefined}
+                alt=""
+                referrerPolicy="no-referrer"
+                keepMounted
+                className="absolute size-6 rounded-full object-cover data-error:invisible data-loading:invisible"
+              />
+            </Avatar.Root>
             {unseen > 0 && (
               <span
                 data-changelog-dot=""
                 aria-hidden="true"
-                className="absolute top-1 right-1 size-2 rounded-full bg-primary ring-2 ring-background"
+                className="absolute top-0 right-0 size-2 rounded-full bg-primary ring-2 ring-background"
               />
             )}
-            <span className="sr-only">
-              More actions{unseen > 0 ? " (new releases available)" : ""}
-            </span>
           </Button>
         }
       />
       <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuItem onClick={() => void navigate({ to: "/settings" })}>
-          <SettingsIcon />
+          <HugeiconsIcon icon={Settings01Icon} />
           Settings
         </DropdownMenuItem>
 
@@ -228,7 +323,7 @@ export function HeaderMoreMenu() {
           data-unseen={unseen > 0 ? "" : undefined}
           className={unseen > 0 ? "font-medium" : undefined}
         >
-          <SparklesIcon />
+          <HugeiconsIcon icon={SparklesIcon} />
           What's new
           {unseen > 0 && (
             // `text-primary-foreground!` is deliberate: the DropdownMenuItem's
@@ -243,7 +338,7 @@ export function HeaderMoreMenu() {
         </DropdownMenuItem>
 
         <DropdownMenuItem onClick={() => openFeedbackReport()}>
-          <MessageSquareWarningIcon />
+          <HugeiconsIcon icon={BubbleChatNotificationIcon} />
           Report a bug
         </DropdownMenuItem>
 
@@ -265,7 +360,7 @@ export function HeaderMoreMenu() {
         <DropdownMenuItem
           onClick={() => window.open("/terms", "_blank", "noopener,noreferrer")}
         >
-          <FileTextIcon />
+          <HugeiconsIcon icon={File01Icon} />
           Terms
         </DropdownMenuItem>
 
@@ -274,37 +369,9 @@ export function HeaderMoreMenu() {
             window.open("/privacy", "_blank", "noopener,noreferrer")
           }
         >
-          <ShieldCheckIcon />
+          <HugeiconsIcon icon={ShieldCheckIcon} />
           Privacy Policy
         </DropdownMenuItem>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
-          <ChevronsDownUpIcon />
-          Collapse all
-        </DropdownMenuItem>
-
-        <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
-          <ChevronsUpDownIcon />
-          Expand all
-        </DropdownMenuItem>
-
-        <DropdownMenuCheckboxItem
-          checked={showCompleted}
-          onCheckedChange={setShowCompleted}
-        >
-          <CircleCheckIcon />
-          Show completed
-        </DropdownMenuCheckboxItem>
-
-        <DropdownMenuCheckboxItem
-          checked={spotlight}
-          onCheckedChange={setSpotlightEnabled}
-        >
-          <FocusIcon />
-          Spotlight mode
-        </DropdownMenuCheckboxItem>
 
         <DropdownMenuSeparator />
 
@@ -312,7 +379,7 @@ export function HeaderMoreMenu() {
           variant="destructive"
           onClick={() => signOutAndReload()}
         >
-          <LogOutIcon />
+          <HugeiconsIcon icon={Logout01Icon} />
           Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>

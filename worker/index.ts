@@ -32,7 +32,7 @@ import {
 } from "better-auth/plugins";
 import { Data, Effect, Schema } from "effect";
 
-import type { AuthEnv } from "./auth";
+import type { KvClaim, WeekStartMigrationResult } from "./outline-do";
 import type { Node } from "./wire";
 
 import {
@@ -43,13 +43,16 @@ import {
 import { createAuth } from "./auth";
 import {
   OutlineSnapshotSchema,
-  SNAPSHOT_VERSION,
   backupKey,
   backupKeyForDate,
   backupPrefix,
   backupTargets,
   isBackupDateKey,
+  isSupportedSnapshotVersion,
 } from "./backup";
+import { handleCaptureKeys, handleCaptureRequest } from "./capture";
+import { lookupEmbedE } from "./embeds";
+import { withFramePolicy } from "./frame-policy";
 import {
   OWNER_DO_ID,
   isAdminSession,
@@ -63,15 +66,27 @@ import {
   pendingWaitlistEmails,
   type InviteBatchResult,
 } from "./invites";
+import { ShardDO, type LunoraEnv } from "./lunora-app";
+import {
+  RetirementOperationInProgress,
+  RetirementOperationRejected,
+  retirementDiagnostic,
+  retirementPopulation,
+  retirementRepairPreview,
+  retirementReport,
+  runRetirementOperation,
+} from "./lunora-retirement-service";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
-import { isHttpUrlString, unfurlTitle } from "./unfurl";
+import { isHttpUrlString, rateLimitedTitleE, unfurlTitleE } from "./unfurl";
+import { unfurlTextE } from "./unfurl-text";
 import {
   AdminAnnouncePostBody,
   AdminInvitePostBody,
+  AdminLunoraRetirementPostBody,
   AdminRestorePostBody,
   AdminSnapshotRestorePostBody,
   KvClaimBody,
@@ -81,6 +96,7 @@ import {
   NodesPatchBody,
   NodesPostBody,
   WaitlistPostBody,
+  WeekStartPostBody,
 } from "./wire";
 
 // Re-export the DO class so the Workers runtime can instantiate it (the
@@ -94,7 +110,12 @@ export const UserOutlineDO = Sentry.instrumentDurableObjectWithSentry(
 );
 type UserOutlineDO = BaseUserOutlineDO;
 
-interface Env extends AuthEnv {
+// Lunora ShardDO (ADR 0058) — re-export for wrangler `SHARD` binding.
+// TEMP: not Sentry-wrapped — Lunora's ShardDOState.sql typing doesn't satisfy
+// Sentry's DurableObjectState constraint (document in HANDOFF).
+export { ShardDO };
+
+interface Env extends LunoraEnv {
   /** Public Sentry DSN (a wrangler.jsonc var, not a secret; it ships in the
    *  client bundle too). Unset => error monitoring is dormant. See worker/
    *  sentry.ts (ticket #227, decided in #156). */
@@ -117,6 +138,8 @@ interface Env extends AuthEnv {
   BACKUPS: R2Bucket;
   /** Per-user rate limiter for the link-title unfurl endpoint (ADR 0016). */
   UNFURL_LIMIT: RateLimit;
+  /** Account-scoped external Quick-add and key-management abuse limit. */
+  CAPTURE_LIMIT: RateLimit;
   /** Per-IP rate limiter for the public alpha-waitlist endpoint. */
   WAITLIST_LIMIT: RateLimit;
   /** Comma-separated Better Auth `user.id`s allowed on admin surfaces — the
@@ -159,7 +182,12 @@ const KV_COLLECTIONS = new Set([
   "daily-index",
   "changelog",
   "saved-queries",
+  "account-prefs",
 ]);
+const ExternalEmbedsPreference = Schema.Struct({
+  key: Schema.Literal("external-embeds"),
+  enabled: Schema.Literal(true),
+});
 
 /**
  * The provenance stamp for an MCP write: the human-facing name of the OAuth
@@ -192,6 +220,8 @@ function rowToNode(r: NodeRow): Node {
     completed: !!r.completed,
     collapsed: !!r.collapsed,
     bookmarkedAt: r.bookmarkedAt,
+    // Legacy D1 rows predate owner-controlled locks.
+    locked: false,
     // Legacy D1 data predates mirrors (ADR 0022); the import source has no such
     // column, so every imported node is its own source.
     mirrorOf: null,
@@ -206,8 +236,8 @@ function rowToNode(r: NodeRow): Node {
   };
 }
 
-function json(
-  data: unknown,
+function json<T>(
+  data: T,
   status = 200,
   headers: Record<string, string> = {},
 ): Response {
@@ -272,6 +302,12 @@ class RouteNotFound extends Data.TaggedError("RouteNotFound")<{
  * batchExceedsNodeLimit / the DO's applyBatchGated.
  */
 class NodeLimitExceeded extends Data.TaggedError("NodeLimitExceeded")<{}> {}
+
+/** A history replay was planned against an older authoritative sequence. */
+class StaleOutlineWrite extends Data.TaggedError("StaleOutlineWrite")<{}> {}
+
+/** An ordinary write would change owner-locked content. */
+class NodeLocked extends Data.TaggedError("NodeLocked")<{}> {}
 
 // --- ensureSeededE ----------------------------------------------------------
 
@@ -341,7 +377,9 @@ function ensureSeededE(
       // repeated D1 queries on every subsequent request.
       Effect.catchTag("SeedLegacyTablesAbsent", () =>
         Effect.succeed({
+          // SAFETY: empty array literals, so the asserted element types hold trivially.
           nodeRows: [] as NodeRow[],
+          // SAFETY: empty array literal, so the asserted element type holds trivially.
           kvRows: [] as { collection: string; key: string; value: string }[],
         }),
       ),
@@ -353,6 +391,7 @@ function ensureSeededE(
         kv: data.kvRows.map((r) => ({
           collection: r.collection,
           key: r.key,
+          // SAFETY: casting to unknown is a no-op; the JSON value is re-encoded, never interpreted here.
           value: JSON.parse(r.value) as unknown,
         })),
       }),
@@ -391,13 +430,19 @@ function handleNodes(
   stub: DurableObjectStub<UserOutlineDO>,
   env: Env,
   billingUserId: string,
-): Effect.Effect<Response, BadRequest | NodeLimitExceeded> {
+): Effect.Effect<
+  Response,
+  BadRequest | NodeLimitExceeded | StaleOutlineWrite | NodeLocked
+> {
   return Effect.gen(function* () {
     switch (request.method) {
       case "GET":
         return json(yield* Effect.promise(() => stub.getNodes()));
       case "POST": {
-        const { ops, nodes } = yield* decodeBody(request, NodesPostBody);
+        const { ops, nodes, clientId, expectedSeq } = yield* decodeBody(
+          request,
+          NodesPostBody,
+        );
         // Atomic-batch path: a single structural mutation arrives as a list of
         // ops and persists as ONE DO frame (one seq, one broadcast). Reply with
         // that seq so the client can hold its optimistic overlay until the frame
@@ -422,9 +467,22 @@ function handleNodes(
                 yield* Effect.promise(() => getPlan(billingUserId, env)),
               )
             : null;
-          const seq = yield* Effect.promise(() =>
-            stub.applyBatchGated(ops, limit),
+          const seq = yield* Effect.promise(
+            () =>
+              // Cloudflare's RPC mapped type distributes a Promise over this
+              // scalar union; normalize it back to the method's actual promise.
+              // SAFETY: this is the declared return union of applyBatchGated.
+              stub.applyBatchGated(
+                ops,
+                limit,
+                clientId,
+                expectedSeq,
+                true,
+              ) as Promise<number | null | "stale" | "locked">,
           );
+          if (seq === "stale")
+            return yield* Effect.fail(new StaleOutlineWrite());
+          if (seq === "locked") return yield* Effect.fail(new NodeLocked());
           if (seq === null) return yield* Effect.fail(new NodeLimitExceeded());
           return json({ seq });
         }
@@ -435,22 +493,41 @@ function handleNodes(
           const limit = nodeLimitForPlan(
             yield* Effect.promise(() => getPlan(billingUserId, env)),
           );
-          const applied = yield* Effect.promise(() =>
-            stub.upsertNodesGated(nodes, limit),
+          const applied = yield* Effect.promise(
+            // SAFETY: the generated RPC stub type predates this method's new locked sentinel; the deployed method returns this declared union.
+            () =>
+              stub.upsertNodesGated(nodes, limit, clientId) as Promise<
+                boolean | "locked"
+              >,
           );
+          if (applied === "locked") return yield* Effect.fail(new NodeLocked());
           if (!applied) return yield* Effect.fail(new NodeLimitExceeded());
         }
         return json({ ok: true });
       }
       case "PATCH": {
-        const { updates } = yield* decodeBody(request, NodesPatchBody);
-        if (updates.length)
-          yield* Effect.promise(() => stub.patchNodes(updates));
-        return json({ ok: true });
+        const { updates, clientId } = yield* decodeBody(
+          request,
+          NodesPatchBody,
+        );
+        const seq = yield* Effect.promise(
+          // SAFETY: the generated RPC stub type predates this method's new locked sentinel; the deployed method returns this declared union.
+          () =>
+            stub.patchNodes(updates, clientId, true) as Promise<
+              number | "locked"
+            >,
+        );
+        if (seq === "locked") return yield* Effect.fail(new NodeLocked());
+        return json({ ok: true, seq });
       }
       case "DELETE": {
-        const { ids } = yield* decodeBody(request, NodesDeleteBody);
-        if (ids.length) yield* Effect.promise(() => stub.deleteNodes(ids));
+        const { ids, clientId } = yield* decodeBody(request, NodesDeleteBody);
+        if (ids.length) {
+          const deleted = yield* Effect.promise(() =>
+            stub.deleteNodes(ids, clientId),
+          );
+          if (!deleted) return yield* Effect.fail(new NodeLocked());
+        }
         return json({ ok: true });
       }
       default:
@@ -474,8 +551,10 @@ function handleKv(
         // to race-safely create today's note / container (the DO serializes it).
         if (new URL(request.url).searchParams.get("op") === "claim") {
           const { key, value } = yield* decodeBody(request, KvClaimBody);
-          const claimed = yield* Effect.promise(() =>
-            stub.getOrCreateKv(collection, key, value),
+          // SAFETY: value came from a JSON-parsed request body validated as { nodeId } by the daily claim client
+          const claimValue = value as KvClaim;
+          const claimed: KvClaim = yield* Effect.promise(() =>
+            stub.getOrCreateKv(collection, key, claimValue),
           );
           return json({ value: claimed });
         }
@@ -493,6 +572,38 @@ function handleKv(
       default:
         return json({ error: "method not allowed" }, 405);
     }
+  });
+}
+
+function handleWeekStart(
+  request: Request,
+  stub: DurableObjectStub<UserOutlineDO>,
+  env: Env,
+  billingUserId: string,
+): Effect.Effect<Response, BadRequest | NodeLimitExceeded | NodeLocked> {
+  return Effect.gen(function* () {
+    if (request.method !== "POST")
+      return json({ error: "method not allowed" }, 405);
+    const body = yield* decodeBody(request, WeekStartPostBody);
+    const limit = nodeLimitForPlan(
+      yield* Effect.promise(() => getPlan(billingUserId, env)),
+    );
+    // SAFETY: the generated DurableObjectStub surface does not preserve this
+    // class method's concrete RPC return type, but the called method does.
+    const result = yield* Effect.promise(
+      () =>
+        (body.operation === "set"
+          ? stub.migrateWeekStart(body.weekStart, limit)
+          : stub.canonicalizeWeekStart(
+              limit,
+            )) as Promise<WeekStartMigrationResult>,
+    );
+    if ("error" in result) {
+      if (result.error === "node_limit")
+        return yield* Effect.fail(new NodeLimitExceeded());
+      return yield* Effect.fail(new NodeLocked());
+    }
+    return json(result);
   });
 }
 
@@ -699,6 +810,10 @@ function handleApiRequest(
   | RouteNotFound
   | BadRequest
   | NodeLimitExceeded
+  | NodeLocked
+  | StaleOutlineWrite
+  | RetirementOperationInProgress
+  | RetirementOperationRejected
 > {
   return Effect.gen(function* () {
     // executionCtx lets auth ride transactional-email sends on waitUntil
@@ -918,7 +1033,7 @@ function handleApiRequest(
             new BadRequest({ reason: `snapshot rejected: ${issue.message}` }),
         ),
       );
-      if (snapshot.version !== SNAPSHOT_VERSION) {
+      if (!isSupportedSnapshotVersion(snapshot.version)) {
         return yield* Effect.fail(
           new BadRequest({
             reason: `unknown snapshot version ${snapshot.version}`,
@@ -935,6 +1050,90 @@ function handleApiRequest(
         }),
       );
       return json({ key, ...result });
+    }
+
+    // Temporary ADR 0061 operator API. Mutations are one user per request;
+    // scripts/lunora-retirement.ts owns sequential batching. The shared admin
+    // gate remains fail-closed and returns 404 to every non-admin probe.
+    if (url.pathname === "/api/admin/lunora-retirement") {
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (
+        (url.searchParams.get("diagnostic") === "1" ||
+          url.searchParams.get("repairPreview") === "1") &&
+        request.method !== "GET"
+      ) {
+        return json({ error: "diagnostic requires GET" }, 405);
+      }
+      if (request.method === "GET") {
+        if (
+          url.searchParams.get("diagnostic") === "1" ||
+          url.searchParams.get("repairPreview") === "1"
+        ) {
+          const userId = yield* resolveRestoreUserId(env, {
+            userId: url.searchParams.get("userId") ?? undefined,
+            email: url.searchParams.get("email") ?? undefined,
+          });
+          const target = yield* Effect.promise(() =>
+            env.DB.prepare('SELECT id FROM "user" WHERE id = ?')
+              .bind(userId)
+              .first<{ id: string }>(),
+          );
+          if (!target)
+            return yield* Effect.fail(
+              new BadRequest({ reason: "unknown user id" }),
+            );
+          const report =
+            url.searchParams.get("repairPreview") === "1"
+              ? yield* Effect.promise(() =>
+                  retirementRepairPreview(env, userId),
+                )
+              : yield* Effect.promise(() => retirementDiagnostic(env, userId));
+          return json(report);
+        }
+        if (url.searchParams.get("population") === "1") {
+          return json({
+            userIds: yield* Effect.promise(() => retirementPopulation(env)),
+          });
+        }
+        const userId =
+          url.searchParams.has("userId") || url.searchParams.has("email")
+            ? yield* resolveRestoreUserId(env, {
+                userId: url.searchParams.get("userId") ?? undefined,
+                email: url.searchParams.get("email") ?? undefined,
+              })
+            : undefined;
+        return json(yield* Effect.promise(() => retirementReport(env, userId)));
+      }
+      if (request.method !== "POST") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      const body = yield* decodeBody(request, AdminLunoraRetirementPostBody);
+      const targetUserId = yield* resolveRestoreUserId(env, body);
+      return json(
+        yield* Effect.tryPromise({
+          try: () =>
+            runRetirementOperation(
+              env,
+              targetUserId,
+              body.operation,
+              undefined,
+              body.approvedManifestHash,
+            ),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.catch((cause) =>
+            cause instanceof RetirementOperationInProgress ||
+            cause instanceof RetirementOperationRejected
+              ? Effect.fail(cause)
+              : Effect.die(cause),
+          ),
+        ),
+      );
     }
 
     // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the
@@ -962,13 +1161,10 @@ function handleApiRequest(
           },
         });
       }
-      const mcpUserId = resolveUserId(token.userId, env);
-      const mcpStub = env.USER_OUTLINE.get(
-        env.USER_OUTLINE.idFromName(mcpUserId),
-      );
       // Provenance: which agent is calling. The bearer token's OAuth client maps
       // to a registered harness name; every node its write tools create is
       // stamped with it, so the editor can mark agent edits apart from the user's.
+      // SAFETY: optional read of Better Auth's MCP session token; a missing clientId falls to null.
       const clientId = (token as { clientId?: string }).clientId ?? null;
       const origin = yield* Effect.promise(() =>
         resolveMcpOrigin(env, clientId),
@@ -980,10 +1176,56 @@ function handleApiRequest(
       // (handleMcp), not a 500. An operator comps themselves with a manual
       // subscription row (getPlan treats it as paid).
       const mcpPlan = yield* Effect.promise(() => getPlan(token.userId, env));
-      return yield* handleMcp(request, mcpStub, origin, mcpPlan !== "free");
+      const classicStub = env.USER_OUTLINE.get(
+        env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
+      );
+      return yield* handleMcp(
+        request,
+        classicStub,
+        origin,
+        mcpPlan !== "free",
+        (writes) => {
+          executionCtx.waitUntil(
+            Effect.runPromise(
+              Effect.forEach(
+                writes,
+                (write) =>
+                  Effect.gen(function* () {
+                    const text = yield* unfurlTextE(
+                      write.before,
+                      write.text,
+                      (url) =>
+                        rateLimitedTitleE(
+                          url,
+                          env.UNFURL_LIMIT,
+                          resolveUserId(token.userId, env),
+                        ),
+                    );
+                    if (text !== write.text)
+                      yield* Effect.promise(() =>
+                        classicStub.upgradeLinkText(
+                          write.nodeId,
+                          write.text,
+                          text,
+                        ),
+                      );
+                  }),
+                { concurrency: 3, discard: true },
+              ),
+            ).catch(() => {
+              console.warn("MCP title lookup failed");
+            }),
+          );
+        },
+      );
     }
 
     // Identity = the validated session's stable user id. No session → 401.
+    // Capture keys authorize exactly this route, never MCP or browser APIs.
+    if (url.pathname === "/api/capture") {
+      return yield* handleCaptureRequest(request, env, executionCtx);
+    }
+
     const session = yield* Effect.promise(() =>
       auth.api.getSession({ headers: request.headers }),
     );
@@ -991,11 +1233,20 @@ function handleApiRequest(
 
     const userId = resolveUserId(session.user.id, env);
 
+    if (url.pathname === "/api/capture-keys") {
+      return yield* handleCaptureKeys(
+        request,
+        env,
+        session.user.id,
+        session.session.createdAt,
+      );
+    }
+
     // Link title unfurl (ADR 0016): fetch a pasted URL's <title> server-side so
     // a bare-url link can upgrade its label. DO-independent, so it runs before
     // the per-user stub is resolved. The ONLY 400 is a missing / non-http(s)
     // `url` param; every other "no title" reason (blocked target, non-HTML,
-    // unreachable, timeout) is a 200 `{title:null}` from unfurlTitle. Per-user
+    // unreachable, timeout) is a 200 `{title:null}` from unfurlTitleE. Per-user
     // rate-limited (the fetch is an authenticated SSRF surface).
     if (url.pathname === "/api/unfurl") {
       const target = url.searchParams.get("url");
@@ -1008,7 +1259,7 @@ function handleApiRequest(
         env.UNFURL_LIMIT.limit({ key: userId }),
       );
       if (!success) return json({ error: "rate limited" }, 429);
-      return json({ title: yield* Effect.promise(() => unfurlTitle(target)) });
+      return json({ title: yield* unfurlTitleE(target) });
     }
 
     const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId));
@@ -1019,6 +1270,26 @@ function handleApiRequest(
       request.method === "GET" && userId === OWNER_DO_ID
         ? ensureSeededE(stub, env)
         : Effect.sync(() => {});
+
+    if (url.pathname === "/api/embeds") {
+      if (request.method !== "GET")
+        return json({ error: "method not allowed" }, 405);
+      const target = url.searchParams.get("url");
+      if (!target) return json({ embed: null });
+      yield* maybeSeed;
+      const preferencesResult = Schema.decodeUnknownOption(
+        Schema.Array(Schema.Unknown),
+      )(yield* Effect.promise(() => stub.getKv("account-prefs")));
+      const preferences =
+        preferencesResult._tag === "Some" ? preferencesResult.value : [];
+      const enabled = preferences.some(Schema.is(ExternalEmbedsPreference));
+      if (!enabled) return json({ embed: null });
+      const { success } = yield* Effect.promise(() =>
+        env.UNFURL_LIMIT.limit({ key: userId }),
+      );
+      if (!success) return json({ error: "rate limited" }, 429);
+      return json({ embed: yield* lookupEmbedE(target) });
+    }
 
     // Real-time sync: a WebSocket upgrade, forwarded to the caller's DO, which
     // hibernation-accepts it and streams outline changes. The session is
@@ -1038,6 +1309,11 @@ function handleApiRequest(
       // `stub` routes on the resolved `userId` (owner → 'default'); the plan
       // lookup takes the raw billing id (`session.user.id`) — see handleNodes.
       return yield* handleNodes(request, stub, env, session.user.id);
+    }
+
+    if (url.pathname === "/api/daily/week-start") {
+      yield* maybeSeed;
+      return yield* handleWeekStart(request, stub, env, session.user.id);
     }
 
     if (url.pathname === "/api/kv") {
@@ -1127,11 +1403,18 @@ const handler = {
       );
     }
 
+    // The retired experimental HTTP namespace stays reserved rather than
+    // falling through to the SPA. Shard access is Worker-internal only.
+    if (url.pathname === "/_lunora" || url.pathname.startsWith("/_lunora/")) {
+      return new Response("not found", { status: 404 });
+    }
+
     // The static shell + assets are PUBLIC so the login screen can load. Serve
     // them without instantiating auth — only the data API (and the token-gated
     // `/mcp`, handled in the pipeline below) is gated.
+    // Framing is limited to the landing page's live demo (frame-policy.ts).
     if (url.pathname !== "/mcp" && !url.pathname.startsWith("/api/")) {
-      return env.ASSETS.fetch(request);
+      return withFramePolicy(await env.ASSETS.fetch(request));
     }
 
     // Run the typed pipeline. Typed errors (validation) are caught here and
@@ -1152,6 +1435,14 @@ const handler = {
         Effect.catchTag("RouteNotFound", () =>
           Effect.succeed(json({ error: "not found" }, 404)),
         ),
+        Effect.catchTag("RetirementOperationInProgress", () =>
+          Effect.succeed(
+            json({ error: "retirement_operation_in_progress" }, 409),
+          ),
+        ),
+        Effect.catchTag("RetirementOperationRejected", (e) =>
+          Effect.succeed(json({ error: e.message }, 409)),
+        ),
         // 403 with a machine-readable body the client keys on to show an upgrade
         // prompt (src/data/nodes-client-effect.ts NodesLimitError).
         Effect.catchTag("NodeLimitExceeded", () =>
@@ -1159,17 +1450,30 @@ const handler = {
             json({ error: "node_limit", limit: FREE_NODE_LIMIT }, 403),
           ),
         ),
+        Effect.catchTag("NodeLocked", () =>
+          Effect.succeed(json({ error: "node_locked" }, 423)),
+        ),
+        Effect.catchTag("StaleOutlineWrite", () =>
+          Effect.succeed(json({ error: "stale_outline" }, 409)),
+        ),
       ),
-    ).catch((err) => {
-      // Reachable unauthenticated via /api/waitlist, so the body must NOT echo
-      // the internal error string (audit #159, finding 1) — it goes to Workers
-      // Logs + Sentry (#227) instead, and the client gets a constant. Sentry's
-      // `withSentry` never sees this rejection on its own: the `.catch`
-      // swallows it before it escapes the handler, so capture it here.
-      console.error(err);
-      Sentry.captureException(err);
-      return json({ error: "internal error" }, 500);
-    });
+    )
+      .catch((err) => {
+        // Reachable unauthenticated via /api/waitlist, so the body must NOT echo
+        // the internal error string (audit #159, finding 1) — it goes to Workers
+        // Logs + Sentry (#227) instead, and the client gets a constant. Sentry's
+        // `withSentry` never sees this rejection on its own: the `.catch`
+        // swallows it before it escapes the handler, so capture it here.
+        console.error(err);
+        Sentry.captureException(err);
+        return json({ error: "internal error" }, 500);
+      })
+      .then((response) => {
+        if (url.pathname === "/api/admin/lunora-retirement") {
+          response.headers.set("cache-control", "private, no-store");
+        }
+        return response;
+      });
   },
 } satisfies ExportedHandler<Env>;
 

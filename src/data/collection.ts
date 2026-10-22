@@ -1,16 +1,20 @@
-import type { Socket } from "effect/unstable/socket";
+import type { Socket } from "effect/socket";
 
 import { createCollection } from "@tanstack/react-db";
 import { Cause, Duration, Effect, Fiber, Schema, Stream } from "effect";
+import { toast } from "sonner";
 
 import type { ChangeOp, ServerMessage, SyncEvent } from "./realtime";
 import type { Node } from "./schema";
 
+import { hasWindow } from "../env";
 import { createNodes, deleteNodes, updateNodes } from "./api";
 import { noteServerVersion } from "./app-version";
+import { publishCalendarSync } from "./calendar-sync";
 import { isMirrorsEnabled } from "./flags";
+import { clearHistory, sameAuthoring } from "./history";
 import { runPromise } from "./nodes-client-effect";
-import { makeSyncStream } from "./realtime";
+import { createSyncStream } from "./realtime";
 import { appRuntime } from "./runtime";
 import { persistOrNotify } from "./save-failure";
 import { nodeSchema } from "./schema";
@@ -21,6 +25,7 @@ import {
   notifySyncInterrupted,
 } from "./sync-supervision";
 import { buildTreeIndex, childrenOf, now } from "./tree";
+import { getWriteClientId } from "./write-origin";
 
 /**
  * Single source of truth for all outline nodes.
@@ -90,6 +95,24 @@ function markSyncReady(): void {
   for (const listener of syncReadyListeners) listener();
 }
 
+/**
+ * Resolve once the classic outline is ready to read. The socket fires this on
+ * its first frame and on initial-load error, so callers never hang forever on
+ * an unreachable server.
+ *
+ * The single implementation of that rule. `seed.ts` and `routes/today.tsx` both
+ * call it; do not grow a private copy in a third place.
+ */
+export function whenNodesSyncReady(): Promise<void> {
+  if (syncReady || !hasWindow()) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const unsub = subscribeSyncReady(() => {
+      unsub();
+      resolve();
+    });
+  });
+}
+
 /** Force the outline to reconcile against server truth now (a fresh snapshot).
  *  Used by the daily plugin's claim loser-path; a no-op before the socket
  *  connects (or during the `/` prerender). */
@@ -104,6 +127,17 @@ export function resyncNodes(): void {
  * awaited from outside the sync closure. Starts at 0 (nothing applied).
  */
 let appliedSeq = 0;
+export function getAppliedSeq(): number {
+  return appliedSeq;
+}
+
+function resetExternalHistory(): void {
+  if (clearHistory())
+    toast("History cleared", {
+      id: "history-cleared",
+      description: "Your outline changed in another tab, device, or app.",
+    });
+}
 type SeqWaiter = { seq: number; resolve: () => void };
 const seqWaiters = new Set<SeqWaiter>();
 
@@ -190,6 +224,26 @@ export function waitForSeqE(
       orElse: () => Effect.void,
     }),
   );
+}
+
+/** Like waitForSeqE, but a missing echo is a failure. Calendar activation uses
+ * this stricter barrier because publishing a preference before its migrated node
+ * frame arrives would expose two calendar meanings in one tab. */
+export function waitForSeqStrictE(
+  seq: number,
+  timeoutMs = 8000,
+): Effect.Effect<void, Cause.TimeoutError> {
+  return Effect.callback<void>((resume) => {
+    if (appliedSeq >= seq) {
+      resume(Effect.void);
+      return;
+    }
+    const waiter: SeqWaiter = { seq, resolve: () => resume(Effect.void) };
+    seqWaiters.add(waiter);
+    return Effect.sync(() => {
+      seqWaiters.delete(waiter);
+    });
+  }).pipe(Effect.timeout(Duration.millis(timeoutMs)));
 }
 
 /**
@@ -391,11 +445,18 @@ function withNodeDefaults(n: Node): Node {
   // The wire/DO type says these are always present, so read them through a loose
   // cast: a row persisted before a field existed (or the e2e mock) may omit it
   // at runtime even though the type can't express that.
-  const loose = n as { mirrorOf?: unknown; origin?: unknown; kind?: unknown };
+  // SAFETY: a row persisted before a field existed, or the e2e mock, may omit it at runtime even though the Node type cannot express that.
+  const loose = n as {
+    mirrorOf?: unknown;
+    origin?: unknown;
+    kind?: unknown;
+    locked?: unknown;
+  };
   if (
     loose.mirrorOf !== undefined &&
     loose.origin !== undefined &&
-    loose.kind !== undefined
+    loose.kind !== undefined &&
+    loose.locked !== undefined
   ) {
     return n;
   }
@@ -404,6 +465,7 @@ function withNodeDefaults(n: Node): Node {
     mirrorOf: loose.mirrorOf === undefined ? null : n.mirrorOf,
     origin: loose.origin === undefined ? null : n.origin,
     kind: loose.kind === undefined ? null : n.kind,
+    locked: loose.locked === undefined ? false : n.locked,
   };
 }
 
@@ -418,7 +480,7 @@ export const nodesCollection = createCollection({
     sync: ({ begin, write, commit, markReady, truncate, metadata }) => {
       // SPA / no-SSR: never open a socket during the `/` prerender. Mark ready so
       // any defensive server-side read resolves empty instead of hanging.
-      if (typeof window === "undefined") {
+      if (!hasWindow()) {
         markReady();
         return () => {};
       }
@@ -431,17 +493,39 @@ export const nodesCollection = createCollection({
         // Release the shell's loading spinner (module signal, see markSyncReady).
         markSyncReady();
       };
+      // SAFETY: this sync is the only writer of the cursor and always stores a number seq.
       const getCursor = (): number | null =>
         (metadata?.collection.get("cursor") as number | undefined) ?? null;
 
-      const applyOps = (ops: readonly ChangeOp[], seq: number): void => {
+      // Compare snapshots with acknowledged server state, not optimistic rows:
+      // an unchanged resync can arrive while a local write is still pending.
+      const syncedNodes = new Map<string, Node>();
+      const applyOps = (
+        ops: readonly ChangeOp[],
+        seq: number,
+        clientId?: string,
+      ): void => {
+        if (
+          clientId !== getWriteClientId() &&
+          ops.some((op) => {
+            if (op.op === "delete") return syncedNodes.has(op.key);
+            const previous = syncedNodes.get(op.value.id);
+            return (
+              !previous || !sameAuthoring(previous, withNodeDefaults(op.value))
+            );
+          })
+        )
+          resetExternalHistory();
         begin();
         for (const op of ops) {
           if (op.op === "delete") {
             write({ type: "delete", key: op.key });
             echoedText.delete(op.key);
+            syncedNodes.delete(op.key);
           } else {
-            write({ type: op.op, value: withNodeDefaults(op.value) });
+            const value = withNodeDefaults(op.value);
+            write({ type: op.op, value });
+            syncedNodes.set(value.id, value);
             echoedText.set(op.value.id, op.value.text);
           }
         }
@@ -458,14 +542,33 @@ export const nodesCollection = createCollection({
         // tab's bundle is stale and offers a reload (ADR 0046). Live `change`
         // frames don't carry it -- a reconnect is when the deploy gap appears.
         if (msg.type !== "change") noteServerVersion(msg.serverVersion);
+        // Calendar preference/index state is committed with the node frame.
+        // Publish it first so date semantics and mappings cross the boundary
+        // before migrated nodes become visible to render and event handlers.
+        if (msg.calendar) publishCalendarSync(msg.calendar);
         if (msg.type === "snapshot") {
+          if (
+            !ready ||
+            msg.nodes.length !== syncedNodes.size ||
+            msg.nodes.some((node) => {
+              const previous = syncedNodes.get(node.id);
+              return (
+                !previous || !sameAuthoring(previous, withNodeDefaults(node))
+              );
+            })
+          )
+            resetExternalHistory();
           // Replace the whole collection: truncate, then write the full set.
           // Idempotent on first connect (empty) and on a resync past the
           // changelog window. The cursor survives truncate (separate store).
           begin();
           truncate();
-          for (const n of msg.nodes)
-            write({ type: "insert", value: withNodeDefaults(n) });
+          syncedNodes.clear();
+          for (const node of msg.nodes) {
+            const value = withNodeDefaults(node);
+            write({ type: "insert", value });
+            syncedNodes.set(value.id, value);
+          }
           metadata?.collection.set("cursor", msg.seq);
           commit();
           // A fresh snapshot supersedes every earlier seq (and may be the
@@ -486,12 +589,13 @@ export const nodesCollection = createCollection({
         } else if (msg.type === "resume") {
           // The gap since our cursor. Empty = already current; the cursor is
           // unchanged so there's nothing to write.
-          for (const frame of msg.changes) applyOps(frame.ops, frame.seq);
+          for (const frame of msg.changes)
+            applyOps(frame.ops, frame.seq, frame.clientId);
           initialError = null;
           ensureReady();
         } else {
           // A live change broadcast from this or another device.
-          applyOps(msg.ops, msg.seq);
+          applyOps(msg.ops, msg.seq, msg.clientId);
         }
       };
 
@@ -501,7 +605,7 @@ export const nodesCollection = createCollection({
       // session; the cleanup interrupts it, which closes the WebSocket via the
       // socket's scope finalizer.
       const { events, resync } = Effect.runSync(
-        makeSyncStream(Effect.sync(getCursor)),
+        createSyncStream(Effect.sync(getCursor)),
       );
       resyncFn = () => {
         appRuntime.runFork(resync);
@@ -588,12 +692,14 @@ export const nodesCollection = createCollection({
   // AND the rollback). A no-op toast for the node-limit case, already toasted
   // upstream.
   onInsert: async ({ transaction }) => {
+    // SAFETY: insert mutations on this collection always carry the full Node row that was inserted.
     await persistOrNotify(
       createNodes(transaction.mutations.map((m) => m.modified as Node)),
     );
     return { refetch: false };
   },
   onUpdate: async ({ transaction }) => {
+    // SAFETY: update mutations on this collection only change Node fields, and keys are node ids (getKey: node.id).
     await persistOrNotify(
       updateNodes(
         transaction.mutations.map((m) => ({
@@ -605,6 +711,7 @@ export const nodesCollection = createCollection({
     return { refetch: false };
   },
   onDelete: async ({ transaction }) => {
+    // SAFETY: delete mutation keys are node ids (getKey: node.id).
     await persistOrNotify(
       deleteNodes(transaction.mutations.map((m) => m.key as string)),
     );

@@ -8,14 +8,14 @@ import { Data, Duration, Effect, Schedule } from "effect";
  * (daily-index.ts), which consumes the program directly and degrades to a plain
  * value on failure. See docs/adr/0012-effect-replaces-errore.md.
  *
- * Design notes (Effect v4, beta.90):
+ * Design notes (Effect v4, rc.115):
  *  - Domain errors are tagged classes via `Data.TaggedError('Tag')<{}>`.
  *    routes on the `_tag` discriminator.
  *  - `Effect.tryPromise` lifts `fetch` into the Effect world. Its `catch` maps
  *    the untyped rejection to our `KvTransportError`.
- *  - Retry: `Schedule.both(Schedule.exponential, Schedule.recurs)` — v4 composes
- *    schedules with `both` (stop when either input stops), capping exponential
- *    backoff at a bounded attempt count.
+ *  - Retry: `Schedule.max([Schedule.exponential, Schedule.recurs])` — v4
+ *    combines schedules with `max` (stop when any input stops), capping
+ *    exponential backoff at a bounded attempt count.
  *  - Timeout: `Effect.timeoutOrElse({ duration, orElse })` turns a timeout into
  *    a `KvTimeoutError`, keeping the error channel typed.
  *  - Recovery: `Effect.match({ onFailure, onSuccess })` is the v4 way to
@@ -24,6 +24,26 @@ import { Data, Duration, Effect, Schedule } from "effect";
  */
 
 const ENDPOINT = "/api/kv";
+
+/** A JSON-parsed value of unchecked shape — the domain `res.json()` produces. */
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+/** Type-guard predicate for the `{ value: T }` claim envelope. */
+const isValueEnvelope = (data: JsonValue): data is { value: JsonValue } =>
+  typeof data === "object" && data !== null && "value" in data;
+
+/** typeof name for a JSON-parsed value (null and array report "object"). */
+const jsonTypeOf = (value: JsonValue): string => {
+  const tag = Object.prototype.toString.call(value).slice(8, -1);
+  if (tag === "Null" || tag === "Array") return "object";
+  return tag.toLowerCase();
+};
 
 const url = (collection: string) =>
   `${ENDPOINT}?collection=${encodeURIComponent(collection)}`;
@@ -59,10 +79,10 @@ export class KvTimeoutError extends Data.TaggedError("KvTimeoutError")<{
 // --- Core fetch effect ------------------------------------------------------
 
 /** Retry schedule: exponential backoff 100ms → cap, bounded to 4 attempts. */
-const retryPolicy = Schedule.both(
+const retryPolicy = Schedule.max([
   Schedule.exponential("100 millis"),
   Schedule.recurs(4),
-);
+]);
 
 interface FetchArgs {
   collection: string;
@@ -129,19 +149,21 @@ export function kvFetchE<T>(
   return request({ collection, method: "GET" }).pipe(
     Effect.flatMap((res) =>
       Effect.tryPromise({
-        try: () => res.json() as Promise<unknown>,
+        // SAFETY: widening Promise<any> to Promise<JsonValue>; the array shape is validated by the Array.isArray below.
+        try: () => res.json() as Promise<JsonValue>,
         catch: (cause) => new KvTransportError({ collection, cause }),
       }),
     ),
     // Validate the parsed shape before the cast: a non-array body is a contract
     // violation (server bug / proxy 200 with an HTML error page), not a success.
     Effect.flatMap((data) =>
+      // SAFETY: Array.isArray has narrowed data; element shape is the caller's T by the /api/kv contract for that collection.
       Array.isArray(data)
         ? Effect.succeed(data as T[])
         : Effect.fail(
             new KvTransportError({
               collection,
-              cause: new Error(`expected an array, got ${typeof data}`),
+              cause: new Error(`expected an array, got ${jsonTypeOf(data)}`),
             }),
           ),
     ),
@@ -184,7 +206,8 @@ export function kvGetOrCreateE<T>(
   }).pipe(
     Effect.flatMap((res) =>
       Effect.tryPromise({
-        try: () => res.json() as Promise<unknown>,
+        // SAFETY: widening Promise<any> to Promise<JsonValue>; the { value } envelope is validated below.
+        try: () => res.json() as Promise<JsonValue>,
         catch: (cause) => new KvTransportError({ collection, cause }),
       }),
     ),
@@ -193,15 +216,19 @@ export function kvGetOrCreateE<T>(
     // the caller (claimMapping reads row.nodeId). Coerce to a transport error so
     // claimMapping's boundary degrades instead of returning garbage.
     Effect.flatMap((data) => {
-      if (typeof data !== "object" || data === null || !("value" in data)) {
+      if (!isValueEnvelope(data)) {
         return Effect.fail(
           new KvTransportError({
             collection,
-            cause: new Error(`expected { value } envelope, got ${typeof data}`),
+            cause: new Error(
+              `expected { value } envelope, got ${jsonTypeOf(data)}`,
+            ),
           }),
         );
       }
-      return Effect.succeed((data as { value: T }).value);
+      // SAFETY: data passed the object, null, and "value" in data checks; the server returns the
+      // authoritative stored claim, T-shaped because every writer of the collection stores T.
+      return Effect.succeed(data.value as T);
     }),
   );
 }

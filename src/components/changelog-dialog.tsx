@@ -28,12 +28,12 @@ import {
  * dialogs, reached from three surfaces through `openChangelog()`: the header
  * badge, the More menu, and Cmd+K.
  *
- * Not a route: SPA mode prerenders only the shell, so `/changelog` would be
- * neither crawlable nor shareable, and everything under `AuthGate` is
- * authed-only anyway. The public, feed-carrying changelog is GitHub Releases,
- * linked at the bottom. Not the Tier-3 panel either: `openPanel` is ADR 0031's
- * containment boundary for untrusted Lane-B code, and core chrome must not squat
- * in the room built to hold it.
+ * Not a route: SPA mode prerenders only the shell, so an in-app `/changelog`
+ * would be neither crawlable nor shareable, and everything under `AuthGate` is
+ * authed-only anyway. The branded public page is `dotflowy.com/changelog`;
+ * GitHub Releases stay the feed, linked at the bottom. Not the Tier-3 panel
+ * either: `openPanel` is ADR 0031's containment boundary for untrusted Lane-B
+ * code, and core chrome must not squat in the room built to hold it.
  *
  * Opening it marks everything read. That is the only write, and it is why the
  * badge can be trusted: the badge and the dialog cannot disagree about what
@@ -42,17 +42,17 @@ import {
 
 /** The reader's axis, straight off the bump type — there is no `category` field
  *  to keep honest, because MAJOR/MINOR/PATCH already say this (ADR 0046). */
-const BUMP_LABEL: Record<Bump, string> = {
+const BUMP_LABEL = {
   major: "Changed",
   minor: "Added",
   patch: "Fixed",
-};
+} satisfies Record<Bump, string>;
 
-const BUMP_VARIANT: Record<Bump, "default" | "secondary" | "outline"> = {
+const BUMP_VARIANT = {
   major: "default",
   minor: "secondary",
   patch: "outline",
-};
+} satisfies Record<Bump, "default" | "secondary" | "outline">;
 
 function formatDate(date: string): string {
   // `date` is a local calendar day (`YYYY-MM-DD`). Parsed bare it would be read
@@ -177,10 +177,7 @@ export function ChangelogDialog() {
         </DialogHeader>
 
         {breaking && (
-          <div
-            className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive"
-            data-testid="changelog-breaking"
-          >
+          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
             <TriangleAlertIcon className="mt-px size-4 shrink-0" />
             <p>
               Something below is marked <strong>Changed</strong> — it asks

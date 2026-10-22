@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon } from "@/components/ui/input-group";
+import { useKeyboardViewport } from "@/hooks/use-keyboard-viewport";
 import { cn } from "@/lib/utils";
 
 function Command({
@@ -22,7 +23,7 @@ function Command({
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        "flex size-full flex-col overflow-hidden rounded-xl! bg-popover p-1 text-popover-foreground",
+        "flex size-full min-h-0 flex-col overflow-hidden rounded-xl! bg-popover p-1 text-popover-foreground",
         className,
       )}
       {...props}
@@ -44,6 +45,8 @@ function CommandDialog({
   showCloseButton?: boolean;
   children: React.ReactNode;
 }) {
+  const { height, offsetTop } = useKeyboardViewport();
+
   return (
     <Dialog {...props}>
       <DialogHeader className="sr-only">
@@ -52,9 +55,13 @@ function CommandDialog({
       </DialogHeader>
       <DialogContent
         className={cn(
-          "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
+          "flex flex-col overflow-hidden rounded-xl! p-0",
           className,
         )}
+        style={{
+          top: height ? offsetTop + height / 2 : undefined,
+          maxHeight: height ? Math.max(0, height - 32) : undefined,
+        }}
         showCloseButton={showCloseButton}
         animate={false}
       >
@@ -95,7 +102,7 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        "no-scrollbar max-h-72 scroll-fade scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
+        "no-scrollbar max-h-72 min-h-0 scroll-fade scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
         className,
       )}
       {...props}

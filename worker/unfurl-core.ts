@@ -22,6 +22,41 @@ export function isHttpUrlString(s: string): boolean {
   return u.protocol === "http:" || u.protocol === "https:";
 }
 
+const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+
+/** Return the canonical metadata URL for a recognized YouTube video URL.
+ * The user's pasted URL stays untouched; this identity only deduplicates title
+ * lookups across watch/share/Shorts/Live/embed and timestamp variants. */
+export function canonicalYouTubeVideoUrl(raw: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (u.port) return null;
+
+  const host = u.hostname.toLowerCase();
+  let videoId: string | null = null;
+
+  if (host === "youtu.be") {
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts.length === 1) videoId = parts[0] ?? null;
+  } else if (host === "youtube.com" || host.endsWith(".youtube.com")) {
+    if (u.pathname === "/watch") {
+      videoId = u.searchParams.get("v");
+    } else {
+      videoId =
+        /^\/(?:v|shorts|embed|live)\/([^/]+)\/?$/.exec(u.pathname)?.[1] ?? null;
+    }
+  }
+
+  return videoId && YOUTUBE_VIDEO_ID.test(videoId)
+    ? `https://www.youtube.com/watch?v=${videoId}`
+    : null;
+}
+
 /** An IPv4 literal in a private / loopback / link-local / reserved range. Used
  *  to deny obvious internal targets even though Cloudflare already blocks raw-IP
  *  fetch -- belt and suspenders. Non-IPv4 hostnames return false here (handled
@@ -31,6 +66,7 @@ function isPrivateIpv4(host: string): boolean {
   if (!m) return false;
   const o = m.slice(1).map(Number);
   if (o.some((n) => n > 255)) return false;
+  // SAFETY: the regex captured exactly four groups and map preserves length.
   const [a, b] = o as [number, number, number, number];
   return (
     a === 0 || // 0.0.0.0/8 "this network"
@@ -60,10 +96,10 @@ function mappedIpv4(host: string): string | null {
   return `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
 }
 
-/** The SSRF target guard: a fully-formed http(s) URL whose host isn't an obvious
- *  internal destination. Re-run on every redirect hop -- a 302 to an internal
- *  target is the classic redirect bounce. A blocked target yields `{title:null}`
- *  (200), NOT a 400: from the client's view it's just "no title". */
+/** The outbound target guard: exclude internal destinations and browser-only
+ *  X content. Run before cache reads and on every redirect hop. A blocked
+ *  target yields `{title:null}` (200), NOT a 400: from the client's view it's
+ *  just "no title". */
 export function isAllowedUnfurlTarget(raw: string): boolean {
   let u: URL;
   try {
@@ -72,11 +108,15 @@ export function isAllowedUnfurlTarget(raw: string): boolean {
     return false;
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-  const host = u.hostname
-    .toLowerCase()
-    .replace(/^\[|]$/g, "") // strip IPv6 brackets
-    .replace(/\.$/, ""); // strip a trailing dot so "foo.internal." can't slip the name checks
+  const host = u.hostname.toLowerCase().replace(/^\[|]$|\.+$/g, ""); // IPv6 brackets / all trailing DNS dots
   if (!host) return false;
+  if (
+    host === "x.com" ||
+    host.endsWith(".x.com") ||
+    host === "twitter.com" ||
+    host.endsWith(".twitter.com")
+  )
+    return false;
   if (host === "localhost" || host.endsWith(".localhost")) return false;
   if (host.endsWith(".local") || host.endsWith(".internal")) return false;
   if (host === "0.0.0.0" || host === "::" || host === "::1") return false;
@@ -92,7 +132,12 @@ export function isAllowedUnfurlTarget(raw: string): boolean {
   return true;
 }
 
-const NAMED_ENTITIES: Record<string, string> = {
+/** The named HTML entities a title carries, keyed by lowercase name. */
+interface EntityTable {
+  [key: string]: string;
+}
+
+const NAMED_ENTITIES: EntityTable = {
   amp: "&",
   lt: "<",
   gt: ">",

@@ -30,6 +30,14 @@ Idempotent: parse it, serialize it with `outlineToMarkdown`, parse again, and yo
 
 **Consequence, accepted:** because the plugin chain never sees a structural paste, a bare URL inside a pasted line stays **plain text**, while a lone pasted URL still becomes `[url](url)` + chip + unfurl (ADR 0016). Asymmetric, and defensible: pasting a lone URL is an authoring gesture with obvious intent; pasting a document is a transfer, and transfers preserve. ADR 0037 already set this law — "imported plain text behaves exactly as if typed in dotflowy." Typing a bare URL doesn't linkify either. Rejected: autolinking per line (a content transformation the source never asked for, and N unfurl fetches on one paste).
 
+**Amended October 8, 2026:** [ADR 0016](./0016-link-title-unfurl.md) expands
+title unfurling to new bare URLs in structural paste. Parsing still precedes
+the plugin chain and preserves the source; after persistence, `afterPaste` may
+replace eligible URLs with titled links. This is an explicit exception to the
+original transfer-only rule above. Custom labels, inline and fenced code,
+spoilers, literal paste, and URLs from the anchor's old text remain untouched.
+OPML import and generic persistence do not trigger enrichment.
+
 ## The trigger
 
 - **Single-line paste is untouched.** No `\n` → today's exact path (Seam I chain, URL wrap, unfurl). Non-negotiable: it is the authoring gesture, and it preserves the links plugin.

@@ -33,6 +33,10 @@ export type { ChangeOp, Node } from "../src/data/wire-schema";
 export const NodesPostBody = Schema.Struct({
   ops: Schema.optional(Schema.Array(ChangeOpSchema)),
   nodes: Schema.optional(Schema.Array(NodeSchema)),
+  clientId: Schema.optional(Schema.String),
+  expectedSeq: Schema.optional(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  ),
 });
 
 /** PATCH /api/nodes — single-field edits. `changes` stays an open record; the DO
@@ -44,11 +48,13 @@ export const NodesPatchBody = Schema.Struct({
       changes: Schema.Record(Schema.String, Schema.Unknown),
     }),
   ),
+  clientId: Schema.optional(Schema.String),
 });
 
 /** DELETE /api/nodes. */
 export const NodesDeleteBody = Schema.Struct({
   ids: Schema.Array(Schema.String),
+  clientId: Schema.optional(Schema.String),
 });
 
 /** POST /api/kv?op=claim — atomic get-or-create on one key. */
@@ -68,6 +74,16 @@ export const KvUpsertBody = Schema.Struct({
 export const KvDeleteBody = Schema.Struct({
   keys: Schema.Array(Schema.String),
 });
+
+/** POST /api/daily/week-start — atomically change calendar meaning and migrate
+ *  the derived Daily scaffold in the caller's per-user Durable Object. */
+export const WeekStartPostBody = Schema.Union([
+  Schema.Struct({ operation: Schema.Literal("canonicalize") }),
+  Schema.Struct({
+    operation: Schema.Literal("set"),
+    weekStart: Schema.Literals(["sunday", "monday"]),
+  }),
+]);
 
 /** POST /api/waitlist — public alpha-waitlist signup (invite-only signup gate,
  *  worker/auth.ts). Email plausibility is checked in the route handler; the
@@ -119,4 +135,21 @@ export const AdminSnapshotRestorePostBody = Schema.Struct({
   email: Schema.optional(Schema.String),
   userId: Schema.optional(Schema.String),
   date: Schema.String,
+});
+
+/** Temporary ADR 0061 one-user operator operation. */
+export const AdminLunoraRetirementPostBody = Schema.Struct({
+  email: Schema.optional(Schema.String),
+  userId: Schema.optional(Schema.String),
+  operation: Schema.Literals([
+    "dry-run",
+    "migrate",
+    "migrate-with-recovery",
+    "repair-classic",
+    "retry",
+    "restore",
+    "preserve-classic",
+    "recover-classic",
+  ]),
+  approvedManifestHash: Schema.optional(Schema.String),
 });

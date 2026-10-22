@@ -60,6 +60,13 @@ nudge reads accurate state). **Deferred:** drag, cut, paste — paste needs a no
 insertion logic that doesn't exist, and drag is a single-node imperative system
 (`use-drag-reorder.ts`) that needs real surgery to carry a selection.
 
+_Amended by ADR 0054:_ the week calendar's external date target is the first
+selection-aware drag path. Starting a drag anywhere inside the selected slab
+carries the selected roots in order as one batch; an ordinary unselected drag
+remains single-node. This deliberately reuses the selection actor's imperative
+root-id API rather than moving pointer state into that actor. General
+multi-selection drag among outline gaps remains outside this amendment.
+
 **The actions menu, and `runMany`.** When a selection exists, a menu **auto-appears anchored to the
 active (focus) edge — the newest node a `Shift+arrow` just added — and re-anchors to it on every
 extension**, so it tracks the node you're selecting instead of parking over the run's text.

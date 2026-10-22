@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { nodesCollection, nodesLoadError } from "./collection";
 import { BootstrapError } from "./errors";
 import { appendChild } from "./mutations";
-import { createId, makeNode, now } from "./tree";
+import { createId, createNode, now } from "./tree";
 
 // One-shot guard, set synchronously before the first await. bootstrapOutline is
 // the single mount entry point; this guard means React StrictMode's
@@ -31,6 +31,7 @@ let bootstrapped = false;
 export async function bootstrapOutline(): Promise<BootstrapError | void> {
   if (bootstrapped) return;
   bootstrapped = true;
+
   // One Effect program. Wait for the first load (tryPromise covers the rare
   // synchronous sync-init throw); then the typed-failure gate — if the sync
   // failed (the common 500/offline case settles ready-but-empty with the error
@@ -99,7 +100,7 @@ async function seedIfEmpty(): Promise<boolean> {
   const cId = createId();
 
   nodesCollection.insert(
-    makeNode({
+    createNode({
       id: aId,
       parentId: null,
       prevSiblingId: null,
@@ -108,7 +109,7 @@ async function seedIfEmpty(): Promise<boolean> {
     }),
   );
   nodesCollection.insert(
-    makeNode({
+    createNode({
       id: bId,
       parentId: null,
       prevSiblingId: aId,
@@ -116,7 +117,7 @@ async function seedIfEmpty(): Promise<boolean> {
     }),
   );
   nodesCollection.insert(
-    makeNode({
+    createNode({
       id: cId,
       parentId: null,
       prevSiblingId: bId,

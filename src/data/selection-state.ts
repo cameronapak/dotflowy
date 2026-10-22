@@ -2,7 +2,7 @@ import { useSelector } from "@xstate/react";
 import { Schema } from "effect";
 import { createActor, setup } from "xstate";
 
-import { nodesCollection } from "./collection";
+import { getLiveNodes } from "./live-nodes";
 import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from "./tree";
 import { getTreeIndex } from "./tree-store";
 import { getViewIsHidden, getViewRootId } from "./view-state";
@@ -167,7 +167,10 @@ const selectionMachine = setup({
     context: Schema.toStandardSchemaV1(ContextSchema),
     events: {
       "select.single": Schema.toStandardSchemaV1(
-        Schema.Struct({ nodeId: Schema.String }),
+        Schema.Struct({
+          nodeId: Schema.String,
+          focusId: Schema.optional(Schema.String),
+        }),
       ),
       "select.all": Schema.toStandardSchemaV1(Schema.Struct({})),
       extend: Schema.toStandardSchemaV1(
@@ -186,7 +189,7 @@ const selectionMachine = setup({
     idle: {
       on: {
         "select.single": ({ event }) => {
-          const d = computeRange(event.nodeId, event.nodeId);
+          const d = computeRange(event.nodeId, event.focusId ?? event.nodeId);
           return d ? { target: "selecting", context: { data: d } } : undefined;
         },
         "select.all": () => {
@@ -199,7 +202,7 @@ const selectionMachine = setup({
     selecting: {
       on: {
         "select.single": ({ event }) => {
-          const d = computeRange(event.nodeId, event.nodeId);
+          const d = computeRange(event.nodeId, event.focusId ?? event.nodeId);
           return d
             ? { context: { data: d } }
             : { target: "idle", context: { data: null } };
@@ -217,16 +220,17 @@ const selectionMachine = setup({
         },
         // Re-derive (parentId + rootIds) from the LIVE collection, same
         // anchor/focus, after a structural mutation relocates the run
-        // (indent/outdent). Reads `nodesCollection` directly so it's correct
+        // (indent/outdent). Reads the live store directly so it's correct
         // synchronously inside the same `runStructural` batch, before the tree
-        // store's subscription has rebuilt. ids + order are unchanged by an
+        // store's subscription has rebuilt (classic `nodesCollection` or Lunora
+        // `wholeOutline` — `getLiveNodes`). ids + order are unchanged by an
         // indent/outdent, so only `parentId` shifts.
         refresh: ({ context }) => {
           if (!context.data) return undefined;
           const d = computeRange(
             context.data.anchorId,
             context.data.focusId,
-            buildTreeIndex(nodesCollection.toArray),
+            buildTreeIndex(getLiveNodes()),
           );
           return d
             ? { context: { data: d } }
@@ -255,6 +259,7 @@ export function getSelectionRootIds(): string[] {
   const d = snapshot().context.data;
   // Variance-only cast: callers read but never mutate (the schema types it
   // readonly); preserving the `string[]` public signature avoids a ripple.
+  // SAFETY: the schema stores rootIds as an array of strings; this is a readonly-to-mutable variance cast only.
   return d ? (d.rootIds as string[]) : EMPTY_ROOTS;
 }
 
@@ -263,13 +268,11 @@ export function getSelectionState(): SelectionData | null {
   return snapshot().context.data;
 }
 
-/** Select exactly `nodeId` and its subtree -- the fresh single-root selection
- *  used by BOTH entry paths: Cmd+A rung 2, and the first Shift+arrow press from a
- *  focused bullet. Entering deliberately selects just the node under the caret
- *  (never extends to a sibling or climbs to the parent); extension/depth-walk is
- *  for subsequent presses via {@link extendSelection}. */
-export function selectSingle(nodeId: string) {
-  selectionActor.send({ type: "select.single", nodeId });
+/** Select `nodeId` and its subtree for Cmd+A rung 2 and the first Shift+arrow.
+ *  An optional focus end restores a previously selected range after undo.
+ *  Interactive extension/depth-walk uses {@link extendSelection}. */
+export function selectSingle(nodeId: string, focusId: string = nodeId) {
+  selectionActor.send({ type: "select.single", nodeId, focusId });
 }
 
 /** Move the focus end one visible sibling in `direction` (Shift+arrow), once a
@@ -323,6 +326,7 @@ export function clearSelection() {
 export function useSelectionRootIds(): string[] {
   return useSelector(
     selectionActor,
+    // SAFETY: the schema stores rootIds as an array of strings; this is a readonly-to-mutable variance cast only.
     (snap) =>
       (snap.context.data?.rootIds as string[] | undefined) ?? EMPTY_ROOTS,
     Object.is,

@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, LockIcon } from "lucide-react";
 import {
   Fragment,
   memo,
@@ -15,14 +15,22 @@ import type { NodeCommands } from "./node-commands";
 
 import { echoedTextFor } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
+import { getHistoryState } from "../data/history";
 import { useSelectionFill } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
 import {
+  useIsLocked,
   useMirrorCount,
   useNode,
   useVisibleChildIds,
 } from "../data/tree-store";
-import { autoformat, slotsAt, useIsProtected } from "../plugins/registry";
+import { rowKeyFor } from "../data/visible-order";
+import {
+  autoformat,
+  getProtection,
+  usePluginChrome,
+  useIsProtected,
+} from "../plugins/registry";
 import { hasFoldingToken } from "../plugins/registry";
 import { BulletGlyph } from "./bullet-glyph";
 import { focusTextFromRowTap } from "./caret-place";
@@ -33,10 +41,12 @@ import {
   readSource,
   revealLinkAtCaret,
   setCaretOffset,
+  useEditorFeatureDecoration,
   watchCaretReveal,
 } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
+import { NodeBody } from "./node-body";
 import { NodeDecorations } from "./NodeDecorations";
 import {
   copySourceSelection,
@@ -45,7 +55,7 @@ import {
 } from "./paste";
 import { applyPendingCaret } from "./pending-caret";
 import { healProtectedText } from "./protected-text";
-import { ProtectedLock } from "./protection";
+import { ProtectionIndicator } from "./protection";
 import { useSlashMenu } from "./slash-menu";
 import { useBulletKeymap } from "./use-bullet-keymap";
 
@@ -95,6 +105,9 @@ export interface OutlineRowProps {
   // True when an ancestor within the view is completed (fade inheritance, ADR
   // 0002). Carried by the flat list, not threaded through a parent row.
   ancestorCompleted: boolean;
+  // Retained only for the brief hide-completed exit; never persisted.
+  exiting: boolean;
+  exitInert: boolean;
   commands: NodeCommands;
   pluginCtx: () => PluginContext;
   registerRef: (id: string, el: HTMLSpanElement | null) => void;
@@ -179,6 +192,8 @@ function RowChrome({
   capped,
   depth,
   ancestorCompleted,
+  exiting,
+  exitInert,
   commands,
   pluginCtx,
   registerRef,
@@ -197,6 +212,8 @@ function RowChrome({
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const caretWatchRef = useRef<(() => void) | null>(null);
+  useEditorFeatureDecoration(textRef, composingRef);
+  const { slotsByPosition } = usePluginChrome();
 
   // Direct visible children of the CONTENT -- a mirror windows its source's
   // subtree, so the chevron + collapsed dot follow the source's children. No
@@ -204,18 +221,27 @@ function RowChrome({
   // With windowing only ~viewport rows call this, so the per-parent fan-out
   // stays a viewport's worth, never the whole tree.
   const childIds = useVisibleChildIds(content.id, isHidden);
+  const childKeyPrefix = isMirror || rowKey !== instance.id ? rowKey : null;
+  const hasVisibleChildren = filter
+    ? childIds.some((id) =>
+        filter.visibleIds.has(rowKeyFor(childKeyPrefix, id)),
+      )
+    : childIds.length > 0;
   // Only the boolean is needed here (a leaf row has no children list to pass
   // down), so test emptiness without materializing the filtered array. A capped
   // mirror is never expandable (it would loop), so it shows no chevron.
   const hasChildren = capped
     ? false
-    : filter
-      ? childIds.some((id) => filter.visibleIds.has(id))
-      : childIds.length > 0;
-  // Collapse is LOCAL to the instance (a mirror collapsed here leaves the source
-  // open elsewhere); fade/match follow the CONTENT.
-  const effectiveCollapsed = filter ? false : instance.collapsed;
-  const isContext = filter ? !filter.matchIds.has(content.id) : false;
+    : hasVisibleChildren ||
+      (filter
+        ? filter.matchIds.has(rowKey) &&
+          filter.retainedKey !== rowKey &&
+          childIds.length > 0
+        : false);
+  // Matches stay expandable when their nonmatching children are collapsed.
+  // Ancestor context remains visually expanded when the filter reveals a match.
+  const effectiveCollapsed = filter ? !hasVisibleChildren : instance.collapsed;
+  const isContext = filter ? !filter.matchIds.has(rowKey) : false;
   // The zoom morph (`view-transition-name: zoom-target`) must name exactly ONE
   // element -- the browser aborts the transition on a duplicate name. pivotId is
   // a node id, but it addresses the row by KEY, not content: a source and every
@@ -236,6 +262,8 @@ function RowChrome({
   });
 
   const protectedNode = useIsProtected(content.id);
+  const protection = protectedNode ? getProtection(content.id) : null;
+  const locked = useIsLocked(content.id);
   // Covers this row AND its visible descendants (2e-2) -- the flat list has no
   // DOM nesting for a root's tint to paint behind its children, so every
   // covered row reads its own value.
@@ -255,11 +283,22 @@ function RowChrome({
   // (registering them in plugins/index.ts would misrepresent them), but they
   // share the same {id, render} shape, so a slot-list `.map()` covers all of it.
   const beforeTextSlots: SlotSpec[] = [
-    ...slotsAt("row:before-text"),
+    ...(slotsByPosition.get("row:before-text") ?? []),
     {
-      id: "core:protected-lock",
+      id: "core:protection-indicator",
       position: "row:before-text",
-      render: () => (protectedNode ? <ProtectedLock size={12} /> : null),
+      render: () =>
+        protectedNode || locked ? (
+          <ProtectionIndicator
+            size={12}
+            label={
+              locked
+                ? "Locked subtree"
+                : (protection?.indicator?.label ?? "Protected node")
+            }
+            icon={locked ? LockIcon : protection?.indicator?.icon}
+          />
+        ) : null,
     },
     {
       id: "core:mirror-badge",
@@ -325,8 +364,11 @@ function RowChrome({
     const el = textRef.current;
     if (!el || composingRef.current) return;
     if (syncedRef.current === content.text) return;
+    // Lunora owns the sticky optimistic hold across a missed shape poke. A DOM
+    // prefix guard here swallowed legitimate shrinks such as undo-to-empty.
     if (
       document.activeElement === el &&
+      !getHistoryState().busy &&
       echoedTextFor(content.id) === content.text
     ) {
       return;
@@ -365,6 +407,8 @@ function RowChrome({
     <li
       className="outline-node"
       data-node-id={instance.id}
+      data-completion-exit={exiting || undefined}
+      inert={exitInert}
       data-parent-id={instance.parentId ?? undefined}
       data-depth={depth}
       data-mirror={
@@ -383,7 +427,7 @@ function RowChrome({
         position: "absolute",
         top: 0,
         left: 0,
-        width: "100%",
+        width: `max(100cqw, calc(${depth * INDENT_PX}px + min(100cqw, var(--outline-node-min-width))))`,
         transform: `translateY(${start - scrollMargin}px)`,
         paddingInlineStart: depth * INDENT_PX,
       }}
@@ -448,13 +492,18 @@ function RowChrome({
               registerRef(rowKey, el);
             }}
             className={`node-text${isPivot ? " vt-morph" : ""}`}
+            data-kind={content.kind ?? undefined}
             style={isPivot ? { viewTransitionName: "zoom-target" } : undefined}
-            contentEditable
+            contentEditable={!locked}
+            tabIndex={locked ? 0 : undefined}
             suppressContentEditableWarning
             spellCheck={false}
             aria-label={content.text.trim() || "Empty bullet"}
+            aria-readonly={locked}
             aria-multiline="true"
             data-completed={content.completed}
+            data-history-key={rowKey}
+            data-history-node-id={content.id}
             onInput={(e) => {
               const el = e.currentTarget;
               const text = readSource(el);
@@ -526,6 +575,7 @@ function RowChrome({
               if (next !== null) syncedRef.current = next;
             }}
             onFocus={(e) => {
+              if (e.target !== e.currentTarget) return;
               clearSelection();
               const el = e.currentTarget;
               caretWatchRef.current?.();
@@ -539,11 +589,17 @@ function RowChrome({
               });
             }}
             onBlur={(e) => {
+              if (e.target !== e.currentTarget) return;
               slash.close();
               menus.close();
               caretWatchRef.current?.();
               caretWatchRef.current = null;
               const el = e.currentTarget;
+              if (
+                e.relatedTarget instanceof HTMLElement &&
+                el.contains(e.relatedTarget)
+              )
+                return;
               const text = readSource(el);
               const restored = healProtectedText(content.id, text, el);
               if (restored !== null) {
@@ -554,10 +610,16 @@ function RowChrome({
               }
             }}
             onKeyDown={(e) => {
+              if (locked && e.key === "/" && !slash.isOpen) {
+                e.preventDefault();
+                slash.openWithoutInput();
+                return;
+              }
               if (menus.handleKeyDown(e)) return;
               slash.handleKeyDown(e);
             }}
           />
+          <NodeBody node={content} position="row:body" getCtx={pluginCtx} />
         </div>
         {/* Trailing decoration zone (Seam F `row:after-text`, ADR 0031). Flex
             sibling of `.row-body`, hugs the trailing edge; dormant until a
@@ -608,7 +670,7 @@ function MirrorMissingRow({
         position: "absolute",
         top: 0,
         left: 0,
-        width: "100%",
+        width: `max(100cqw, calc(${depth * INDENT_PX}px + min(100cqw, var(--outline-node-min-width))))`,
         transform: `translateY(${start - scrollMargin}px)`,
         paddingInlineStart: depth * INDENT_PX,
       }}

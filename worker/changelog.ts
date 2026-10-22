@@ -28,6 +28,22 @@ import type { ChangeFrame, ChangeOp } from "../src/data/wire-schema";
 export const MAX_FRAME_OPS = 500;
 
 /**
+ * Whether a client cursor can replay retained changes without crossing a full
+ * snapshot replacement. `resumeFloor` is the seq stamped by the latest
+ * retirement restore; older cursors must receive the replacement snapshot even
+ * when their old changelog rows are still retained for operator history.
+ */
+export function canResumeChangelog(
+  since: number | null,
+  seq: number,
+  oldest: number | null,
+  resumeFloor: number,
+): boolean {
+  if (since === null || since > seq || since < resumeFloor) return false;
+  return since === seq || (oldest !== null && since + 1 >= oldest);
+}
+
+/**
  * Split one committed batch into consecutive-seq frames of ≤ `maxOps` ops,
  * starting at `lastSeq + 1`. An empty batch plans no frames, so the seq never
  * advances on a no-op commit (e.g. a patch that touched no writable columns).
@@ -36,13 +52,16 @@ export function planChangeFrames(
   ops: readonly ChangeOp[],
   lastSeq: number,
   maxOps: number = MAX_FRAME_OPS,
+  clientId?: string,
 ): ChangeFrame[] {
   const frames: ChangeFrame[] = [];
   for (let i = 0; i < ops.length; i += maxOps) {
-    frames.push({
-      seq: lastSeq + frames.length + 1,
-      ops: ops.slice(i, i + maxOps),
-    });
+    const seq = lastSeq + frames.length + 1;
+    const frame: ChangeFrame =
+      clientId === undefined
+        ? { seq, ops: ops.slice(i, i + maxOps) }
+        : { seq, ops: ops.slice(i, i + maxOps), clientId };
+    frames.push(frame);
   }
   return frames;
 }

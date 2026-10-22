@@ -58,16 +58,8 @@ const EMOJI_CLASS = HIGHLIGHT_EMOJI.map((e) => e.emoji).join("");
  *  the emoji. */
 export const HIGHLIGHT_PATTERN = `==[${EMOJI_CLASS}]?[^=\\n]+==`;
 
-/** Built per call: a `g`-flagged RegExp carries `lastIndex` across `.test()`
- *  calls, so a shared instance would miss back-to-back matches (mirrors
- *  tags.ts / emphasis.ts). */
 function highlightRegex(): RegExp {
   return new RegExp(HIGHLIGHT_PATTERN, "gu");
-}
-
-/** True iff the text contains at least one complete highlight run. */
-export function hasHighlight(text: string): boolean {
-  return highlightRegex().test(text);
 }
 
 export interface HighlightParts {

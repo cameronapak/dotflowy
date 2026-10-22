@@ -101,6 +101,7 @@ export function pasteIntoBullet(
   getCtx: () => PluginContext,
   onText: (text: string) => void,
   structural: StructuralPasteTarget | null = null,
+  notifyPaste: typeof afterPaste = afterPaste,
 ): string | null {
   const cd = e.clipboardData;
   if (!cd) return null;
@@ -145,6 +146,12 @@ export function pasteIntoBullet(
       tail: source.slice(end),
       rowEl: structural.rowEl,
       focus: structural.focus,
+      onApplied: literal
+        ? undefined
+        : (writes) => {
+            for (const write of writes)
+              notifyPaste({ ...write, inserted: write.text }, getCtx());
+          },
     });
     // The collection now owns the anchor's text; the row's sync effect
     // re-decorates from it. Reporting null keeps the caller's `syncedRef` stale,
@@ -172,7 +179,8 @@ export function pasteIntoBullet(
   // Post-paste side effects, now that the DOM reflects the insert (so a plugin
   // can decorate the just-folded link). Plugins self-gate on the inserted text.
   // Literal paste means literal: no unfurl fetch either.
-  if (!literal) afterPaste({ inserted, nodeId, el }, getCtx());
+  if (!literal)
+    notifyPaste({ inserted, before: source, text: next, nodeId, el }, getCtx());
   return next;
 }
 

@@ -16,14 +16,24 @@ import { toast } from "sonner";
 
 import type { PluginContext } from "../types";
 
-import { setRestoreProgress } from "../../components/history-restore";
-import { nodesCollection, resyncNodes } from "../../data/collection";
+import { setRestoreProgress } from "../../components/history-restore-opener";
+import { getAppliedSeq, resyncNodes } from "../../data/collection";
 import {
   dayKeyToScaffoldChain,
+  dayKeyToWeekKey,
+  monthKeyToYearKey,
   parentScaffoldKey,
+  scaffoldKeyKind,
   scaffoldLabel,
+  weekKeyToMonthKey,
+  weekKeyToStartDay,
 } from "../../data/date-links";
+import {
+  ensureWeekStartCanonical,
+  getEditorFeatures,
+} from "../../data/editor-features";
 import { RESTORE_SLICE_OPS, capture } from "../../data/history";
+import { getLiveNodes } from "../../data/live-nodes";
 import {
   appendChild,
   insertChildAtStart,
@@ -32,12 +42,13 @@ import {
   setText,
 } from "../../data/mutations";
 import { isNodesLimitError } from "../../data/nodes-client-effect";
+import { buildTreeIndex, childrenOf } from "../../data/outline-plans";
 import {
   runStructural,
   runStructuralSliced,
   runStructuralTracked,
 } from "../../data/structural";
-import { buildTreeIndex, childrenOf, createId } from "../../data/tree";
+import { createId } from "../../data/tree";
 import {
   CONTAINER_KEY,
   DAILY_CONTAINER_TEXT,
@@ -53,6 +64,7 @@ import { withDailyNavigation } from "./pending";
 import {
   type DailyMigrationPlan,
   inScaffoldScope,
+  isOrphanMappedDay,
   planDailyMigration,
   sortedInsertAfterId,
 } from "./scaffold";
@@ -60,7 +72,7 @@ import {
 // --- get-or-create ----------------------------------------------------------
 
 function hasNode(id: string): boolean {
-  return nodesCollection.toArray.some((n) => n.id === id);
+  return getLiveNodes().some((n) => n.id === id);
 }
 
 /** One atomic claim for a scaffold/day key: the authoritative id, whether this
@@ -93,7 +105,7 @@ function insertScaffoldNode(
   text: string,
   id: string,
 ): void {
-  const index = buildTreeIndex(nodesCollection.toArray);
+  const index = buildTreeIndex(getLiveNodes());
   const siblings = childrenOf(index, parentNodeId).map((n) => ({
     id: n.id,
     key: getKeyForNode(n.id),
@@ -116,7 +128,7 @@ function healExistingDay(
   key: string,
   seedEntryLine: boolean,
 ): void {
-  const node = nodesCollection.toArray.find((n) => n.id === dayId);
+  const node = getLiveNodes().find((n) => n.id === dayId);
   if (node && !node.text.trim()) setText(dayId, formatDayText(key));
   // Seeding is opt-in at the OPEN boundary (ADR 0041): only a write-intent
   // surface (/today, Today button, Cmd+K "Go to Today") asks for an empty line.
@@ -134,7 +146,8 @@ function healExistingDay(
  *  and quick-add's Seam-L rejection can rethrow the REAL NodesLimitError.
  *  Contained to this module; {@link getOrCreateDay} translates it back to
  *  `string | null` for external callers. */
-type NewDayResult = { id: string } | { id: null; cause: unknown };
+/** Shared success/failure shape for day + scaffold-only mint (same map type). */
+type GetOrCreateResult = { id: string } | { id: null; cause: unknown };
 
 /**
  * Materialize a genuinely NEW day and whichever calendar levels above it are
@@ -153,10 +166,11 @@ async function materializeNewDay(
   day: { id: string; won: boolean; present: boolean },
   key: string,
   seedEntryLine: boolean,
-): Promise<NewDayResult> {
+  expectedSeq: number,
+): Promise<GetOrCreateResult> {
   // The day is absent -> derive + claim its Y/M/W chain (concurrently). A
   // non-calendar key (defensive) lands the day directly under the container.
-  const chain = dayKeyToScaffoldChain(key);
+  const chain = dayKeyToScaffoldChain(key, getEditorFeatures().weekStart);
   const levels = chain
     ? await Promise.all([
         claimScaffoldNode(chain.yearKey),
@@ -174,10 +188,11 @@ async function materializeNewDay(
   if (claimed.some((c) => !c.won && !c.present)) resyncNodes();
 
   const parentId = chain && week ? week.id : container.id;
+
   const { persisted } = runStructuralTracked(() => {
     // Container: appended at the end of the top level (special, not sorted).
     if (!hasNode(container.id)) {
-      const tops = childrenOf(buildTreeIndex(nodesCollection.toArray), null);
+      const tops = childrenOf(buildTreeIndex(getLiveNodes()), null);
       const after = tops.length ? tops[tops.length - 1]!.id : null;
       appendChild(null, after, DAILY_CONTAINER_TEXT, container.id);
     }
@@ -211,7 +226,7 @@ async function materializeNewDay(
     // Seed the entry line in the SAME batch when a write-intent surface asked.
     if (seedEntryLine && !hasChildInLiveCollection(day.id))
       appendChild(day.id, null, "");
-  });
+  }, expectedSeq);
   // Phantom-success guard (#233): the optimistic overlay makes `hasNode(day.id)`
   // true the instant the batch applies, so returning the id off it would let a
   // caller `setMapping` + navigate to a day that VANISHES on a failed send. Gate
@@ -238,7 +253,7 @@ async function materializeNewDay(
 /** Does `parentId` have any child in the LIVE nodes collection? Used for the
  *  reopen-seed check, which must not trust a possibly-stale tree index. */
 function hasChildInLiveCollection(parentId: string): boolean {
-  return nodesCollection.toArray.some((n) => n.parentId === parentId);
+  return getLiveNodes().some((n) => n.parentId === parentId);
 }
 
 // --- one-time flat -> nested migration (issue #271, decision 8) --------------
@@ -272,10 +287,11 @@ let dailyMigration: Promise<void> | null = null;
 async function ensureDailyMigrated(containerId: string): Promise<void> {
   if (dailyMigration) return dailyMigration;
   const plan = planDailyMigration(
-    buildTreeIndex(nodesCollection.toArray),
+    buildTreeIndex(getLiveNodes()),
     containerId,
     getDailyRows(),
     getKeyForNode,
+    getEditorFeatures().weekStart,
   );
   if (!plan.needed) return;
   dailyMigration = runDailyMigration(containerId, plan).catch((err) => {
@@ -296,12 +312,19 @@ function moveDaySorted(
   weekId: string,
   containerId: string,
 ): void {
-  const index = buildTreeIndex(nodesCollection.toArray);
+  const index = buildTreeIndex(getLiveNodes());
   const day = index.byId.get(dayNodeId);
   if (!day) return; // deleted between plan and apply
   const dayKey = getKeyForNode(dayNodeId);
   if (!dayKey) return;
-  if (!inScaffoldScope(index, day, containerId, getKeyForNode)) return;
+  // Orphans (dangling/missing parent) are the heal target; otherwise only
+  // reparent days still inside the Daily scaffold (finding 1 + 5).
+  if (
+    !isOrphanMappedDay(index, day) &&
+    !inScaffoldScope(index, day, containerId, getKeyForNode)
+  ) {
+    return;
+  }
   const siblings = childrenOf(index, weekId)
     .filter((n) => n.id !== dayNodeId)
     .map((n) => ({ id: n.id, key: getKeyForNode(n.id) }));
@@ -328,22 +351,47 @@ async function runDailyMigration(
   // scaffold mappings point at deleted nodes, and serial claims paid a full RTT
   // per key). No per-key `waitForNode`: phase 2 materializes any missing node
   // under its claimed id regardless, so waiting is pure loss. A single resync
-  // (when anything is missing) nudges genuinely-remote nodes in for the NEXT
-  // touch without stalling this one.
-  const claims = await Promise.all(
-    plan.scaffoldKeys.map(async (key) => {
-      const existing = getMappedId(key);
-      if (existing && hasNode(existing))
-        return { key, id: existing, present: true };
-      const candidate = createId();
-      const { winner } = await claimMapping(key, candidate);
-      setMapping(key, winner);
-      return { key, id: winner, present: hasNode(winner) };
-    }),
-  );
+  // for a missing lost-claim node nudges genuinely-remote nodes in for the NEXT
+  // touch without stalling this one. Winning claims need no resync: a snapshot
+  // would invalidate the migration's own undo point.
+  // Parents-first (plan.scaffoldKeys order): when claiming each key we can look
+  // under an already-resolved parent for a same-label child and adopt it —
+  // recovers hand-reattached / MCP-repaired scaffolds that never got a
+  // daily-index row, so we don't mint a duplicate June/Week beside them.
+  const indexAtClaim = buildTreeIndex(getLiveNodes());
+  const claims: Array<{ key: string; id: string; present: boolean }> = [];
+  const claimedIds = new Map<string, string>();
+  let needsResync = false;
+  for (const key of plan.scaffoldKeys) {
+    const existing = getMappedId(key);
+    if (existing && hasNode(existing)) {
+      claimedIds.set(key, existing);
+      claims.push({ key, id: existing, present: true });
+      continue;
+    }
+    const parentKey = parentScaffoldKey(key);
+    const parentId = parentKey ? claimedIds.get(parentKey) : containerId;
+    const label = scaffoldLabel(key);
+    const adoptable =
+      parentId != null
+        ? childrenOf(indexAtClaim, parentId).find((n) => n.text === label)?.id
+        : undefined;
+    // Adopt only when the label match isn't already claimed as another key.
+    const adoptKey = adoptable ? getKeyForNode(adoptable) : null;
+    const candidate =
+      adoptable && (adoptKey === null || adoptKey === key)
+        ? adoptable
+        : createId();
+    const { winner, won } = await claimMapping(key, candidate);
+    setMapping(key, winner);
+    claimedIds.set(key, winner);
+    const present = hasNode(winner);
+    claims.push({ key, id: winner, present });
+    if (!won && !present) needsResync = true;
+  }
   const keymap = new Map(claims.map((c) => [c.key, c.id]));
   const toCreate = new Set(claims.filter((c) => !c.present).map((c) => c.key));
-  if (toCreate.size > 0) resyncNodes();
+  if (needsResync) resyncNodes();
 
   // Phase 2: build the synchronous steps (parents-first creates, then day moves).
   const createSteps: Array<() => void> = [];
@@ -379,12 +427,16 @@ async function runDailyMigration(
 
   // One undo point: snapshot the whole pre-migration tree, then apply.
   const captureStep = () =>
-    capture(buildTreeIndex(nodesCollection.toArray), containerId);
+    capture(buildTreeIndex(getLiveNodes()), containerId);
   if (estimatedWrites < RESTORE_SLICE_OPS) {
-    runStructural(() => {
+    const { persisted } = runStructuralTracked(() => {
       captureStep();
       for (const step of steps) step();
     });
+    // Creation captures a stale-write precondition after this migration. Wait
+    // for the committed frame so its sequence and migrated nodes are both
+    // authoritative before the next Daily batch is planned.
+    await persisted;
   } else {
     // Wire the modal progress (finding 8c): a big migration streams behind the
     // history-restore dialog instead of freezing a blank /today, exactly like
@@ -421,20 +473,20 @@ async function runDailyMigration(
  *  `withDailyNavigation` is a counter, not a mutex). A same-key second caller
  *  JOINS the entry here instead of re-running the fast path. Only the CREATE
  *  path registers, so an already-durable day never touches this map. The map
- *  caches the RAW {@link NewDayResult} -- never a toast-translated chain -- so
+ *  caches the RAW {@link GetOrCreateResult} -- never a toast-translated chain -- so
  *  every joiner evaluates its OWN toast/rejection decision on the shared result
  *  (a baked-in side effect would inherit the ORIGINATOR's copy/suppression). */
-const inFlightDays = new Map<string, Promise<NewDayResult>>();
+const inFlightDays = new Map<string, Promise<GetOrCreateResult>>();
 
 /** The shared get-or-create body: readiness + claims + migration + heal-or-
- *  create, single-flighted per key. Returns the RAW {@link NewDayResult} and
+ *  create, single-flighted per key. Returns the RAW {@link GetOrCreateResult} and
  *  performs NO toasting -- callers ({@link getOrCreateDay}, the Seam-L
  *  `captureDestination.resolve`) each translate per their own surface. */
 export async function getOrCreateDayResult(
   key: string,
   opts?: { seedEntryLine?: boolean; trackNavigation?: boolean },
-): Promise<NewDayResult> {
-  const run = async (): Promise<NewDayResult> => {
+): Promise<GetOrCreateResult> {
+  const run = async (): Promise<GetOrCreateResult> => {
     // Single-flight join, checked FIRST (F1): while a same-key create is in
     // flight, the claims + `day.present` fast path below read the creator's
     // OPTIMISTIC rows (the claim already set the mapping, the batch already
@@ -449,6 +501,8 @@ export async function getOrCreateDayResult(
     // days' MAPPINGS aren't broadcast -- either leaves sorted insertion / the
     // migration working against a stale reverse map.
     await refreshDailyIndex();
+    await ensureWeekStartCanonical();
+    await refreshDailyIndex();
     // Container + this day: independent per-key atomic claims, run concurrently
     // (finding 2/8a). The claim winner is authoritative; a loser reuses it.
     const [container, day] = await Promise.all([
@@ -458,6 +512,7 @@ export async function getOrCreateDayResult(
     // Nest any legacy flat days before placing this one (issue #271) -- its own
     // inline batch (deliberate: the new day must land in the migrated scaffold).
     await ensureDailyMigrated(container.id);
+    const expectedSeq = getAppliedSeq();
     // An EXISTING day (pre-migration flat OR already nested): reuse it, heal a
     // blank title + optional seed, and DO NOT mint Y/M/W scaffold beside it --
     // placement is the migration's job (finding 3).
@@ -477,6 +532,7 @@ export async function getOrCreateDayResult(
       day,
       key,
       opts?.seedEntryLine ?? false,
+      expectedSeq,
     );
     inFlightDays.set(key, creating);
     void creating.finally(() => {
@@ -518,9 +574,8 @@ export async function getOrCreateDay(
 /** get-or-create the day, then navigate to it -- a date-chip click (a reference,
  *  seed-free; the Today button navigates the route with focus=last instead).
  *  `morph` (default true) picks the nav: a date chip is an element in the
- *  outgoing view, so it MORPHS into the new title (`ctx.nav.zoom`); the week
- *  strip's pill isn't -- its layoutId pill already IS the transition -- so it
- *  passes `morph: false` for a PLAIN swap (ADR 0054). */
+ *  outgoing view, so it MORPHS into the new title (`ctx.nav.zoom`). Pass false
+ *  for a PLAIN swap when another element already carries the transition. */
 export async function goToDate(
   key: string,
   ctx: PluginContext,
@@ -532,4 +587,137 @@ export async function goToDate(
   if (!dayId) return; // getOrCreateDay owns the generic toast now (F3)
   if (opts?.morph === false) ctx.nav.open(dayId);
   else ctx.nav.zoom(dayId);
+}
+
+// --- scaffold-only mint (ADR 0057): Cmd+K → week/month/year without a day ----
+
+const inFlightScaffolds = new Map<string, Promise<GetOrCreateResult>>();
+
+/**
+ * Mint the Daily > Y > M > W chain up to `key` (year / month / week) WITHOUT
+ * creating a day child. Used when Cmd+K navigates a period scaffold that does
+ * not exist yet. Returns null for non-scaffold keys (callers must not pass a
+ * day — use {@link getOrCreateDay}).
+ */
+export async function getOrCreateScaffold(
+  key: string,
+  opts?: {
+    trackNavigation?: boolean;
+    failureToast?: string;
+  },
+): Promise<string | null> {
+  const kind = scaffoldKeyKind(key);
+  if (kind !== "year" && kind !== "month" && kind !== "week") return null;
+
+  const run = async (): Promise<GetOrCreateResult> => {
+    const joined = inFlightScaffolds.get(key);
+    if (joined) return joined;
+    await refreshDailyIndex();
+    await ensureWeekStartCanonical();
+    await refreshDailyIndex();
+
+    const container = await claimScaffoldNode(CONTAINER_KEY);
+    await ensureDailyMigrated(container.id);
+
+    // A preference switch can land after this action was constructed but before
+    // it writes. Re-anchor Week identity to the server-synced current calendar;
+    // year and month identities are preference-independent.
+    const startDay = kind === "week" ? weekKeyToStartDay(key) : null;
+    const effectiveKey =
+      kind === "week" && startDay
+        ? dayKeyToWeekKey(startDay, getEditorFeatures().weekStart)
+        : key;
+    if (!effectiveKey) return { id: null, cause: null };
+    const expectedSeq = getAppliedSeq();
+
+    const existing = getMappedId(effectiveKey);
+    if (existing && hasNode(existing)) return { id: existing };
+
+    // Derive parent keys (week → month → year).
+    let monthKey: string | null = null;
+    let yearKey: string | null = null;
+    if (kind === "week") {
+      monthKey = weekKeyToMonthKey(effectiveKey);
+      yearKey = monthKey ? monthKeyToYearKey(monthKey) : null;
+    } else if (kind === "month") {
+      monthKey = effectiveKey;
+      yearKey = monthKeyToYearKey(effectiveKey);
+    } else {
+      yearKey = effectiveKey;
+    }
+    if (!yearKey) return { id: null, cause: null };
+
+    const [year, month, week] = await Promise.all([
+      claimScaffoldNode(yearKey),
+      monthKey ? claimScaffoldNode(monthKey) : Promise.resolve(null),
+      kind === "week" ? claimScaffoldNode(effectiveKey) : Promise.resolve(null),
+    ]);
+
+    const target = kind === "week" ? week : kind === "month" ? month : year;
+    if (!target) return { id: null, cause: null };
+    if (target.present) return { id: target.id };
+
+    const inFlight = inFlightScaffolds.get(key);
+    if (inFlight) return inFlight;
+
+    const creating = (async (): Promise<GetOrCreateResult> => {
+      const claimed = [container, year, month, week].filter(
+        (c): c is { id: string; won: boolean; present: boolean } => c != null,
+      );
+      if (claimed.some((c) => !c.won && !c.present)) resyncNodes();
+
+      const { persisted } = runStructuralTracked(() => {
+        if (!hasNode(container.id)) {
+          const tops = childrenOf(buildTreeIndex(getLiveNodes()), null);
+          const after = tops.length ? tops[tops.length - 1]!.id : null;
+          appendChild(null, after, DAILY_CONTAINER_TEXT, container.id);
+        }
+        if (!hasNode(year.id))
+          insertScaffoldNode(
+            container.id,
+            yearKey,
+            scaffoldLabel(yearKey),
+            year.id,
+          );
+        if (monthKey && month && !hasNode(month.id))
+          insertScaffoldNode(
+            year.id,
+            monthKey,
+            scaffoldLabel(monthKey),
+            month.id,
+          );
+        if (kind === "week" && week && monthKey && month && !hasNode(week.id))
+          insertScaffoldNode(
+            month.id,
+            effectiveKey,
+            scaffoldLabel(effectiveKey),
+            week.id,
+          );
+      }, expectedSeq);
+      try {
+        await persisted;
+      } catch (err) {
+        return { id: null, cause: err };
+      }
+      if (hasNode(target.id)) return { id: target.id };
+      resyncNodes();
+      return { id: null, cause: null };
+    })();
+
+    inFlightScaffolds.set(key, creating);
+    void creating.finally(() => {
+      if (inFlightScaffolds.get(key) === creating)
+        inFlightScaffolds.delete(key);
+    });
+    return creating;
+  };
+
+  const result =
+    opts?.trackNavigation === false
+      ? await run()
+      : await withDailyNavigation(run);
+  if (result.id !== null) return result.id;
+  if (!isNodesLimitError(result.cause))
+    toast.error(opts?.failureToast ?? "Couldn't open that calendar page");
+  return null;
 }

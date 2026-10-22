@@ -55,17 +55,102 @@
       "skillPath": "skills/effect/SKILL.md",
       "computedHash": "1b789df989e009e38ad988ea8986430bde2accad67eb924b07f1458c019ad026"
     },
-    "ft-create-concise-pr": {
-      "source": "cameronapak/jstack",
-      "sourceType": "github",
-      "skillPath": "skills/ft-create-concise-pr/SKILL.md",
-      "computedHash": "796bee1efc9ed93fa1ade57af7691c7c331441df8ed6036266ab9aa954db000d"
-    },
     "grill-with-docs": {
       "source": "mattpocock/skills",
       "sourceType": "github",
       "skillPath": "skills/engineering/grill-with-docs/SKILL.md",
       "computedHash": "9c460cbd94fd3c63cdef967dbdb6e66ca687103cdc380cd37834e4d10b738f78"
+    },
+    "lunora": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora/SKILL.md",
+      "computedHash": "a7bc815f8a1a4f0b863e9bc6d6c8ca9b963a883693abeed3104f0f9a5c2c928b"
+    },
+    "lunora-create-package": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-create-package/SKILL.md",
+      "computedHash": "9e567fc2773d7a9b9f59fc5b8b1e9119dbe910bf1823f4ada8a71f12376ec109"
+    },
+    "lunora-deploy": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-deploy/SKILL.md",
+      "computedHash": "7025f80d339e68c4bdb5f02f654b5dac2344bc59e8bd9d11329f49af0a4502bc"
+    },
+    "lunora-functions": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-functions/SKILL.md",
+      "computedHash": "108ead4a4ac46155eaa096854cdcd74b605af333f1e0e1cf9b7c6a914bf62690"
+    },
+    "lunora-migration-helper": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-migration-helper/SKILL.md",
+      "computedHash": "19a3058c7ac63dbcbfc46cec3fe27252b543a4ec718c4b19deb1b4811c3278a3"
+    },
+    "lunora-performance-audit": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-performance-audit/SKILL.md",
+      "computedHash": "82f072e17db4919787521367756b7d8671a8c9efb97f22c60818d0c78127f233"
+    },
+    "lunora-quickstart": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-quickstart/SKILL.md",
+      "computedHash": "a4c9873a52ab80e352bd655b713e6d03f38a2656d72f7a660cadd543eab2025e"
+    },
+    "lunora-realtime": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-realtime/SKILL.md",
+      "computedHash": "21330e73cb7e565e81cb800e5f0f6bceb26690ad38a51551a61a2ae02e39bfaa"
+    },
+    "lunora-setup-auth": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-setup-auth/SKILL.md",
+      "computedHash": "eaf832bd8b3b63ddd0fb7fc496aaf7d36fe678ff9b3e89478c6a1d660cbb9ecd"
+    },
+    "lunora-setup-hyperdrive": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-setup-hyperdrive/SKILL.md",
+      "computedHash": "4ac9a797938fb89a8dd8072b3f5ec99e7974c4492229c54509682ba60be9d314"
+    },
+    "lunora-setup-mail": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-setup-mail/SKILL.md",
+      "computedHash": "20187a4c17368435117771c6c25883159535cbb95ac7c0e7d54ca71bca37a642"
+    },
+    "lunora-setup-scheduler": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-setup-scheduler/SKILL.md",
+      "computedHash": "3ee3b503b6639ac0daed96ef0ca2497849a1b480b37dc43107298000a0435075"
+    },
+    "lunora-setup-storage": {
+      "source": "anolilab/lunora",
+      "ref": "alpha",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/lunora-setup-storage/SKILL.md",
+      "computedHash": "12316c03e251b3fa8964acfdea77dcc161d86854f039ff6348afca2e15f1d93f"
     },
     "offline": {
       "source": "tanstack/db",
@@ -78,6 +163,12 @@
       "sourceType": "github",
       "skillPath": "packages/react-db/skills/react-db/SKILL.md",
       "computedHash": "bea666abfdf61cd0c355ebb620880b707fb7ac797823d36390ee2951fa513dcc"
+    },
+    "retro": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/retro/SKILL.md",
+      "computedHash": "b8d55851a2909e26c2dbb2e8563719c87b3b700559f604e4df344f8c27e21047"
     },
     "setup-matt-pocock-skills": {
       "source": "mattpocock/skills",
@@ -96,6 +187,12 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/wayfinder/SKILL.md",
       "computedHash": "c9e18cefd77b6b5b0ee35f59ce2fd96359aa2d2f02e3479e12c873c5402d9d43"
+    },
+    "writing-for-agents": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/writing-for-agents/SKILL.md",
+      "computedHash": "95da47fc97af998e85b7d7e6d57b3ac76727c1e290cfe9ea09005aacb826959f"
     }
   }
 }

@@ -6,12 +6,23 @@ import {
   SquareSlash,
   Undo2,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
+import { useHistoryState } from "./history-restore";
+import {
+  FORMAT_BUTTONS,
+  readFormatTarget,
+  type SelectionFormatActions,
+} from "./selection-format";
+import {
+  restoreSelection,
+  type SelectionSnapshot,
+  snapshotSelection,
+} from "./wrap";
 
 /**
  * The zero-arg command surface the bar drives. Each method resolves the focused
@@ -52,6 +63,45 @@ function useOutlineEditing(findFocusedId: () => string | null): boolean {
   return editing;
 }
 
+function sameKeys(a: Set<string> | null, b: Set<string> | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.size === b.size && [...a].every((k) => b.has(k));
+}
+
+/**
+ * The marker keys lit over the current selection, or null when there is no
+ * formatting target (collapsed caret, cross-bullet range, a selected chip).
+ * Non-null switches the bar into format mode (ADR 0069). Selection handles fire
+ * `selectionchange` continuously while dragged, so reads are rAF-coalesced; the
+ * bar sits at the keyboard, not over the text, so it can update live.
+ */
+function useFormatSelection(enabled: boolean): Set<string> | null {
+  const [active, setActive] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let raf = 0;
+    const recompute = () => {
+      raf = 0;
+      const next = readFormatTarget()?.active ?? null;
+      // Handles fire selectionchange every frame while dragged; re-render
+      // only when the mode or the lit set actually changes.
+      setActive((prev) => (sameKeys(prev, next) ? prev : next));
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(recompute);
+    };
+    schedule();
+    document.addEventListener("selectionchange", schedule);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      document.removeEventListener("selectionchange", schedule);
+      // The next editing session starts in edit mode, never on a stale set.
+      setActive(null);
+    };
+  }, [enabled]);
+  return enabled ? active : null;
+}
+
 /** Finger travel (px) past which a press is a scroll, not a tap. The pill is
  *  `overflow-x-auto`, so a horizontal drag to scroll it must NOT fire an action
  *  — mirrors the bullet-dot drag/click split (use-drag-reorder.ts). */
@@ -74,10 +124,15 @@ function BarButton({
   label,
   onRun,
   children,
+  disabled = false,
+  active,
 }: {
   label: string;
   onRun: () => void;
   children: ReactNode;
+  disabled?: boolean;
+  /** A format button's lit state; undefined for the plain action buttons. */
+  active?: boolean;
 }) {
   const start = useRef<{ x: number; y: number } | null>(null);
   const moved = useRef(false);
@@ -85,10 +140,16 @@ function BarButton({
     <button
       type="button"
       aria-label={label}
+      aria-pressed={active}
+      data-active={active || undefined}
+      disabled={disabled}
       className={cn(
         "flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full text-foreground/80",
         "transition-transform duration-100 ease-out active:scale-[0.96]",
         "active:bg-accent active:text-accent-foreground",
+        // Lit = re-press removes it (ADR 0069), so it must clear 3:1 on the glass.
+        "data-[active]:bg-foreground data-[active]:text-background",
+        "disabled:opacity-35 disabled:active:scale-100",
       )}
       onPointerDown={(e) => {
         // Keep focus on the contentEditable — see the component doc.
@@ -106,7 +167,7 @@ function BarButton({
         }
       }}
       onPointerUp={() => {
-        if (start.current && !moved.current) onRun();
+        if (!disabled && start.current && !moved.current) onRun();
         start.current = null;
       }}
       onPointerCancel={() => {
@@ -136,35 +197,72 @@ function Divider() {
  */
 export function MobileActionsBar({
   actions,
+  formatActions,
   findFocusedId,
 }: {
   actions: MobileBarActions;
+  formatActions: SelectionFormatActions;
   findFocusedId: () => string | null;
 }) {
   const coarse = useCoarsePointer();
   const editing = useOutlineEditing(findFocusedId);
-  const keyboardOffset = useKeyboardViewport();
+  const { height, offsetTop } = useKeyboardViewport();
+  const history = useHistoryState();
+  // Format mode (ADR 0069): a text selection inside one bullet swaps the node
+  // actions for the formatting set. Never both — every node action targets the
+  // whole bullet, and a lit format button re-pressed is the format's undo.
+  const liveFormat = useFormatSelection(coarse && editing);
+  // The selection as the finger landed, restored before the action runs.
+  const pressSnapshot = useRef<SelectionSnapshot | null>(null);
+  // Format mode holds for the length of a press. If WebKit drops the range
+  // under the finger, the live read flips to edit mode before pointerup; the
+  // button the finger is on must not unmount (or become Outdent) mid-tap.
+  const [held, setHeld] = useState<Set<string> | null>(null);
+  const formatActive = liveFormat ?? held;
+  useEffect(() => {
+    // Window bubble phase runs after the button's own pointerup, and still
+    // fires when the finger lifts off the bar. Remove both listeners together
+    // on unmount rather than leaving the unused one behind after every tap.
+    const release = () => setHeld(null);
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+    };
+  }, []);
 
   // Presence gate: a mouse user never mounts the bar. Visibility gate: no bar
   // without a focused bullet, so every action has a valid target by construction.
   if (!coarse || !editing) return null;
 
   return (
-    // Outer layer owns positioning: fixed to the bottom, lifted above the software
-    // keyboard by the visualViewport gap, and the safe-area pad when it sits at the
-    // real bottom (no keyboard). The pill inside centers within this.
+    // A fixed frame fits the visible viewport; the pill sits at its bottom.
+    // Only the pill takes pointer events, so the frame never blocks the editor.
+    // Follow viewport changes directly, without a second CSS animation lagging
+    // behind the keyboard's own animation.
     <div
-      className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 transition-transform duration-200 ease-out"
+      className="pointer-events-none fixed inset-x-0 z-40 flex items-end justify-center px-3"
       style={{
-        transform: `translateY(-${keyboardOffset}px)`,
+        top: offsetTop,
+        height,
+        paddingLeft: "max(12px, env(safe-area-inset-left))",
+        paddingRight: "max(12px, env(safe-area-inset-right))",
         paddingBottom:
-          keyboardOffset === 0 ? "env(safe-area-inset-bottom)" : undefined,
+          height + offsetTop >= window.innerHeight
+            ? "env(safe-area-inset-bottom)"
+            : undefined,
       }}
     >
       <div
         role="toolbar"
-        aria-label="Editing actions"
+        aria-label={formatActive ? "Format selection" : "Editing actions"}
         data-mobile-bar
+        data-mode={formatActive ? "format" : "edit"}
+        onPointerDownCapture={() => {
+          pressSnapshot.current = formatActive ? snapshotSelection() : null;
+          setHeld(formatActive);
+        }}
         className={cn(
           // max-w-full + overflow-x-auto: on a narrow / browser-zoomed viewport the
           // pill can't outgrow the padded outer (the outer's px-3 keeps it off the
@@ -172,7 +270,7 @@ export function MobileActionsBar({
           // instead of clipping. Buttons are shrink-0, so they keep their 44px
           // targets and the strip scrolls rather than squashing; justify-start (the
           // flex default) keeps the leftmost button reachable when it does scroll.
-          "flex max-w-full scroll-fade-x items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1",
+          "pointer-events-auto flex max-w-full scroll-fade-x items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1",
           // Frosted-glass material: translucent, blurred, hairline edge + soft
           // shadow (depth from shadow, not a hard border) — the iOS accessory
           // pill's grammar, resolved through our own theme tokens so it adapts to
@@ -182,29 +280,63 @@ export function MobileActionsBar({
           "ring-1 ring-black/5 dark:ring-white/10",
         )}
       >
-        <BarButton label="Outdent" onRun={actions.outdent}>
-          <Outdent className="size-5" />
-        </BarButton>
-        <BarButton label="Indent" onRun={actions.indent}>
-          <Indent className="size-5" />
-        </BarButton>
-        <Divider />
-        <BarButton label="Undo" onRun={actions.undo}>
-          <Undo2 className="size-5" />
-        </BarButton>
-        <BarButton label="Redo" onRun={actions.redo}>
-          <Redo2 className="size-5" />
-        </BarButton>
-        <Divider />
-        {/* A boxed check, deliberately NOT a bare ✓ — iOS's accessory pill shows a
-            bare "Done" check right below, and two identical checks that mean
-            different things (complete-bullet vs dismiss-keyboard) read as a bug. */}
-        <BarButton label="Toggle complete" onRun={actions.toggleComplete}>
-          <SquareCheck className="size-5" />
-        </BarButton>
-        <BarButton label="Command menu" onRun={actions.insertSlash}>
-          <SquareSlash className="size-5" />
-        </BarButton>
+        {formatActive ? (
+          FORMAT_BUTTONS.map((btn, i) => {
+            const run = btn.action(formatActions);
+            if (!run) return null;
+            return (
+              <Fragment key={btn.key}>
+                {i > 0 && FORMAT_BUTTONS[i - 1]?.group !== btn.group && (
+                  <Divider />
+                )}
+                <BarButton
+                  label={btn.label}
+                  active={btn.marker ? formatActive.has(btn.key) : undefined}
+                  onRun={() => {
+                    restoreSelection(pressSnapshot.current);
+                    run();
+                  }}
+                >
+                  <btn.Icon className="size-5" />
+                </BarButton>
+              </Fragment>
+            );
+          })
+        ) : (
+          <>
+            <BarButton label="Outdent" onRun={actions.outdent}>
+              <Outdent className="size-5" />
+            </BarButton>
+            <BarButton label="Indent" onRun={actions.indent}>
+              <Indent className="size-5" />
+            </BarButton>
+            <Divider />
+            <BarButton
+              label={history.undoLabel}
+              onRun={actions.undo}
+              disabled={!history.canUndo}
+            >
+              <Undo2 className="size-5" />
+            </BarButton>
+            <BarButton
+              label={history.redoLabel}
+              onRun={actions.redo}
+              disabled={!history.canRedo}
+            >
+              <Redo2 className="size-5" />
+            </BarButton>
+            <Divider />
+            {/* A boxed check, deliberately NOT a bare ✓ — iOS's accessory pill shows a
+              bare "Done" check right below, and two identical checks that mean
+              different things (complete-bullet vs dismiss-keyboard) read as a bug. */}
+            <BarButton label="Toggle complete" onRun={actions.toggleComplete}>
+              <SquareCheck className="size-5" />
+            </BarButton>
+            <BarButton label="Command menu" onRun={actions.insertSlash}>
+              <SquareSlash className="size-5" />
+            </BarButton>
+          </>
+        )}
       </div>
     </div>
   );

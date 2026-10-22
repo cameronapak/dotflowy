@@ -14,12 +14,16 @@ import { CalendarDaysIcon, Link2 } from "lucide-react";
 
 import type { Node } from "../../data/tree";
 
-import { dateSuggestions } from "../../data/date-links";
+import { getEditorFeatures } from "../../data/editor-features";
 import {
   linkTargetId,
   linkedNodeLabel,
   NODE_LINK_PATTERN,
 } from "../../data/node-links";
+import { pickerDateSuggestions } from "../../data/parse-go-to-date";
+// Bounded exemption (ADR 0038/0057): suppress the mapped day uuid row when a
+// date suggestion wins. Identity lookup only — not get-or-create; not a seam.
+import { getMappedId } from "../daily/daily-index";
 import { definePlugin, type MenuTrigger, type WidgetEl } from "../types";
 import { NodeLinkChip } from "./chip";
 
@@ -110,10 +114,15 @@ export default definePlugin({
         const q = raw.toLowerCase();
         // Date entries fold INTO this picker (ADR 0038) -- the menu engine's
         // dispatch is first-match-wins on the trigger, so a second `[[` menu
-        // would shadow. `dateSuggestions` is the pure core layer
-        // (src/data/date-links.ts), so no cross-plugin import into daily.
-        // Non-empty only on a date-ish query, pinned above node matches.
-        const dates = dateSuggestions(raw).map((s) => ({
+        // would shadow. Relatives + ISO + gated NL chrono live in
+        // `pickerDateSuggestions` (client-only; date-links stays Worker-safe).
+        // Inserts `[[YYYY-MM-DD]]` tokens — never uuid links, never navigate.
+        const features = getEditorFeatures();
+        const dateHits =
+          features.ready && features.daily
+            ? pickerDateSuggestions(raw, new Date(), features.weekStart)
+            : [];
+        const dates = dateHits.map((s) => ({
           key: `date:${s.key}`,
           render: () => (
             <span className="flex min-w-0 items-center gap-1.5">
@@ -128,10 +137,18 @@ export default definePlugin({
           // Trailing space so the caret lands past the atom (same as below).
           replacement: `[[${s.key}]] `,
         }));
+        // When a date row resolves, hide the mapped day node's uuid row
+        // (daily-index identity — not title match). Other node matches stay.
+        const suppressIds = new Set<string>();
+        for (const s of dateHits) {
+          const mapped = getMappedId(s.key);
+          if (mapped) suppressIds.add(mapped);
+        }
         const matches: Node[] = [];
         for (const n of ctx.tree.byId.values()) {
           if (n.id === node.id) continue;
           if (n.mirrorOf != null) continue;
+          if (suppressIds.has(n.id)) continue;
           const label = linkedNodeLabel(n.text).trim();
           if (!label) continue;
           if (q && !label.toLowerCase().includes(q)) continue;

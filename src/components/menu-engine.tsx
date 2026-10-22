@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
@@ -9,10 +10,12 @@ import type {
   PluginContext,
 } from "../plugins/types";
 
+import { useIsMobile } from "../hooks/use-mobile";
 import { menuSpecs } from "../plugins/registry";
 import { caretOffset, caretPosition, wrap } from "./caret-menu-utils";
 import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { MenuList } from "./menu-list";
+import { TypingSuggestions } from "./typing-suggestions";
 import { useClampedMenuPosition } from "./use-menu-position";
 
 /**
@@ -65,6 +68,7 @@ export function useMenus({
   onTextChange: (text: string) => void;
 }) {
   const [open, setOpen] = useState<MenuOpen | null>(null);
+  const mobile = useIsMobile();
 
   const spec: MenuSpec | null = open
     ? (menuSpecs.find((s) => s.id === open.specId) ?? null)
@@ -169,6 +173,7 @@ export function useMenus({
         return true;
       case "Escape":
         e.preventDefault();
+        e.stopPropagation();
         setOpen(null);
         return true;
       default:
@@ -176,21 +181,35 @@ export function useMenus({
     }
   };
 
-  const menu =
-    isOpen && open
-      ? createPortal(
+  const menu = mobile ? (
+    <AnimatePresence>
+      {isOpen && open && (
+        <TypingSuggestions getEditor={getEl} onDismiss={close}>
           <MenuList
             entries={entries}
             activeIndex={open.activeIndex}
             emptyLabel={spec?.emptyLabel}
-            ref={menuPosition.ref}
-            style={menuPosition.style}
+            inDock
             onHover={(i) => setOpen((s) => (s ? { ...s, activeIndex: i } : s))}
             onSelect={pick}
-          />,
-          document.body,
-        )
-      : null;
+          />
+        </TypingSuggestions>
+      )}
+    </AnimatePresence>
+  ) : isOpen && open ? (
+    createPortal(
+      <MenuList
+        entries={entries}
+        activeIndex={open.activeIndex}
+        emptyLabel={spec?.emptyLabel}
+        ref={menuPosition.ref}
+        style={menuPosition.style}
+        onHover={(i) => setOpen((s) => (s ? { ...s, activeIndex: i } : s))}
+        onSelect={pick}
+      />,
+      document.body,
+    )
+  ) : null;
 
   return { handleInput, handleKeyDown, close, isOpen, menu };
 }

@@ -100,7 +100,7 @@ losses or anything that outlived the PITR window.
   shared `NodeSchema`; when a new required `Node` field lands, the snapshot
   boundary needs a backfill (or a `SNAPSHOT_VERSION` bump) or every pre-change
   snapshot in the 90-day depth becomes unrestorable — this is on the
-  new-`Node`-field checklist in AGENTS.md.
+  new-`Node`-field checklist in `docs/architecture.md`.
 
 ## Local dev / verification
 

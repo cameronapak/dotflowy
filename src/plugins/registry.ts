@@ -1,6 +1,6 @@
 // Seam aggregation (ADR 0001). Derives the combined token machinery from the
-// explicit plugins array once, at module load (plugins are compiled in -- D1 --
-// so nothing changes at runtime). The core (inline-code.ts) consumes the
+// compiled-in plugins array. Optional editor seams refresh only when account
+// preferences change (ADR 0064); protection remains unconditional. The core consumes the
 // combined regex + dispatch from here, staying generic over which plugins
 // exist; this file is the only place that knows the plugin set for tokens.
 
@@ -14,14 +14,17 @@ import type {
   CaptureDestination,
   CommandSpec,
   El,
+  ExternalDropTargetSpec,
   HeaderSlotSpec,
   SubheaderSlotSpec,
   InteractionEvent,
+  InteractionSpec,
   KeymapSpec,
   MenuSpec,
   NodeProtection,
   PasteInput,
   PluginContext,
+  PluginDef,
   PointerInteractionEvent,
   SearchAction,
   SearchActionContext,
@@ -31,6 +34,7 @@ import type {
   TokenView,
   ViewContext,
   ViewFilter,
+  ViewStream,
   ViewTransform,
   WidgetEl,
 } from "./types";
@@ -38,12 +42,19 @@ import type {
 import { registerWidget } from "../components/plugin-widget";
 import { CORE_FILTER_OPERATORS } from "../data/core-filter-operators";
 import {
+  getEditorFeatures,
+  subscribeEditorFeatures,
+  type EditorFeature,
+} from "../data/editor-features";
+import {
   buildFilterOperatorMap,
   buildQueryFilter,
   collectOperatorKeyInfos,
+  type QueryFilter,
 } from "../data/filter-query";
+import { isMirrorsEnabled } from "../data/flags";
 import { getTreeIndex, subscribeTree } from "../data/tree-store";
-import { plugins } from "./index";
+import { editorFeaturePlugins, plugins } from "./index";
 
 // No plugin styles seam: ADR 0031 retired raw plugin CSS (it could restyle the
 // whole app). Plugins style with Tailwind utilities on their own El/JSX; dynamic
@@ -60,16 +71,17 @@ for (const p of plugins) {
     withOrder.push({ spec, order: withOrder.length });
   }
 }
-const tokenSpecs: TokenSpec[] = withOrder
+const allTokenSpecs: TokenSpec[] = withOrder
   .sort((a, b) => a.spec.precedence - b.spec.precedence || a.order - b.order)
   .map(({ spec }) => spec);
+let tokenSpecs: TokenSpec[] = [];
 
 // Seam A (React mode -- ADR 0006): register each widget token's component with
 // the custom-element host, keyed by the token id (the `data-widget` value the
 // serializer stamps). Importing plugin-widget here also runs its client-only
 // `customElements.define` side effect (no-op in the prerender). Done once at
 // load, in the same pass that builds the token regex.
-for (const spec of tokenSpecs) {
+for (const spec of allTokenSpecs) {
   if (spec.component) registerWidget(spec.id, spec.component);
 }
 
@@ -78,11 +90,8 @@ for (const spec of tokenSpecs) {
 // has internal capture groups. One combined `gu` regex => one matchAll pass,
 // preserving the per-node hot path (D6). Empty set => a regex that never
 // matches, so a plugin-less core simply renders escaped plain text.
-const combined =
-  tokenSpecs.map((spec, i) => `(?<_t${i}>${spec.pattern})`).join("|") || "(?!)";
-
 /** The one combined token regex (links | code | tags | ...). Global + unicode. */
-export const tokenRegex = new RegExp(combined, "gu");
+export let tokenRegex = new RegExp("(?!)", "gu");
 
 /** Map a combined-regex match back to the spec whose named group matched. */
 function specForMatch(m: RegExpMatchArray): TokenSpec | null {
@@ -97,6 +106,10 @@ function specForMatch(m: RegExpMatchArray): TokenSpec | null {
 /** Render one matched token to its descriptor, dispatching to its plugin. A
  *  widget result is stamped with the token id (its component key) so the
  *  serializer can address the right `<dotflowy-widget>` component (ADR 0006). */
+const isWidgetRender = (r: El | WidgetEl): r is WidgetEl =>
+  // SAFETY: El is a string or element; the typeof-object branch rules out string
+  typeof r === "object" && (r as WidgetEl).kind === "widget";
+
 export function renderToken(
   m: RegExpMatchArray,
   view: TokenView,
@@ -106,8 +119,9 @@ export function renderToken(
   // raw source as plain text rather than throw on the hot path.
   if (!spec) return m[0];
   const r = spec.render(m[0], view);
-  if (typeof r === "object" && (r as WidgetEl).kind === "widget") {
-    (r as WidgetEl).widget = spec.id;
+  // SAFETY: the string El form is ruled out, leaving the widget discriminator
+  if (isWidgetRender(r)) {
+    r.widget = spec.id;
   }
   return r;
 }
@@ -115,11 +129,8 @@ export function renderToken(
 // A regex matching only the FOLDING tokens (links today), or one that never
 // matches when none fold. Drives inline-code's "could the caret reveal anything
 // on this line" fast path -- generically, not link-coupled.
-const folding = tokenSpecs.filter((s) => s.folds);
-const foldingRegex = new RegExp(
-  folding.map((s) => s.pattern).join("|") || "(?!)",
-  "u",
-);
+let folding: TokenSpec[] = [];
+let foldingRegex = new RegExp("(?!)", "u");
 
 /** True iff the line contains at least one folding token (a link today). */
 export function hasFoldingToken(text: string): boolean {
@@ -128,7 +139,7 @@ export function hasFoldingToken(text: string): boolean {
 
 // --- Seam B: delegated interactions ----------------------------------------
 
-const interactionSpecs = plugins.flatMap((p) => p.interactions ?? []);
+let interactionSpecs: InteractionSpec[] = [];
 
 /** True iff `target` sits inside any "block the caret" interaction surface --
  *  the core preventDefaults the mousedown so a chip/link click never places a
@@ -150,6 +161,7 @@ export function dispatchClick(
     if (!s.onClick) continue;
     const el = target.closest(s.selector);
     if (el) {
+      // SAFETY: closest matched an element in this DOM, matched elements are HTMLElements
       s.onClick(el as HTMLElement, ctx, e);
       return true;
     }
@@ -166,6 +178,7 @@ export function dispatchPointerDown(
     if (!s.onPointerDown) continue;
     const el = target.closest(s.selector);
     if (el) {
+      // SAFETY: closest matched an element in this DOM, matched elements are HTMLElements
       s.onPointerDown(el as HTMLElement, ctx, e);
       return true;
     }
@@ -182,6 +195,7 @@ export function dispatchPointerUp(
     if (!s.onPointerUp) continue;
     const el = target.closest(s.selector);
     if (el) {
+      // SAFETY: closest matched an element in this DOM, matched elements are HTMLElements
       s.onPointerUp(el as HTMLElement, ctx, e);
       return true;
     }
@@ -198,6 +212,7 @@ export function dispatchPointerCancel(
     if (!s.onPointerCancel) continue;
     const el = target.closest(s.selector);
     if (el) {
+      // SAFETY: closest matched an element in this DOM, matched elements are HTMLElements
       s.onPointerCancel(el as HTMLElement, ctx, e);
       return true;
     }
@@ -215,6 +230,7 @@ export function dispatchContextMenu(
     if (!s.onContextMenu) continue;
     const el = target.closest(s.selector);
     if (el) {
+      // SAFETY: closest matched an element in this DOM, matched elements are HTMLElements
       s.onContextMenu(el as HTMLElement, ctx, e);
       return true;
     }
@@ -279,14 +295,17 @@ export function buildViewFilter(
   index: TreeIndex,
   ctx: ViewContext,
   isHidden: (node: Node) => boolean,
+  focusedKey: string | null = null,
 ): ViewFilter | null {
-  const q = typeof ctx.search.q === "string" ? ctx.search.q : undefined;
+  const q = ctx.search.q;
   const queryFilter = buildQueryFilter(
     index,
     ctx.rootId,
     q,
     isHidden,
     filterOperatorMap,
+    isMirrorsEnabled(),
+    focusedKey,
   );
   if (queryFilter) return queryFilter;
   for (const t of viewTransforms) {
@@ -310,20 +329,50 @@ export function buildViewFilter(
 export function useViewFilter(
   ctx: ViewContext,
   isHidden: (node: Node) => boolean,
+  focusedKey: string | null = null,
 ): ViewFilter | null {
   const cache = useRef<{
     index: TreeIndex;
     ctx: ViewContext;
-    filter: ViewFilter | null;
+    isHidden: (node: Node) => boolean;
+    focusedKey: string | null;
+    filter: QueryFilter | null;
   } | null>(null);
   const getSnapshot = useCallback(() => {
     const index = getTreeIndex();
     const prev = cache.current;
-    if (prev && prev.index === index && prev.ctx === ctx) return prev.filter;
-    const filter = buildViewFilter(index, ctx, isHidden);
-    cache.current = { index, ctx, filter };
+    if (
+      prev &&
+      prev.index === index &&
+      prev.ctx === ctx &&
+      prev.isHidden === isHidden &&
+      prev.focusedKey === focusedKey
+    )
+      return prev.filter;
+    let filter: QueryFilter | null = buildViewFilter(
+      index,
+      ctx,
+      isHidden,
+      focusedKey,
+    );
+    const previous = prev?.filter;
+    // Still evaluate every change: operator predicates can inspect the whole
+    // index. But unchanged membership must not invalidate the visible-row list
+    // or virtualizer geometry. Focus-only retention is part of that contract.
+    if (
+      filter &&
+      previous &&
+      filter.retainedKey === previous.retainedKey &&
+      filter.emptyMessage === previous.emptyMessage &&
+      filter.visibleIds.size === previous.visibleIds.size &&
+      filter.matchIds.size === previous.matchIds.size &&
+      [...filter.visibleIds].every((id) => previous.visibleIds.has(id)) &&
+      [...filter.matchIds].every((id) => previous.matchIds.has(id))
+    )
+      filter = previous;
+    cache.current = { index, ctx, isHidden, focusedKey, filter };
     return filter;
-  }, [ctx, isHidden]);
+  }, [ctx, isHidden, focusedKey]);
   return useSyncExternalStore(subscribeTree, getSnapshot, () => null);
 }
 
@@ -370,17 +419,13 @@ export function afterPaste(input: AfterPasteInput, ctx: PluginContext): void {
 
 /** Every plugin's slash commands, in array order. The core's bespoke `/` engine
  *  (useSlashMenu) concatenates these after its own generic commands (Move). */
-export const commandSpecs: CommandSpec[] = plugins.flatMap(
-  (p) => p.commands ?? [],
-);
+export let commandSpecs: CommandSpec[] = [];
 
 /** The plugin commands that opted into node multi-selection (ADR 0018) by
  *  defining `runMany`. The selection actions menu lists the core's own Copy +
  *  Delete + Move, then these (todos' To-do, daily's Send to Today). Array order
  *  preserved. */
-export const selectionCommandSpecs: CommandSpec[] = commandSpecs.filter(
-  (c) => c.runMany,
-);
+export let selectionCommandSpecs: CommandSpec[] = [];
 
 // --- Seam D: per-bullet keymap ---------------------------------------------
 
@@ -419,18 +464,11 @@ for (const k of keymapSpecs) {
 
 // --- Seam F: node render slots ---------------------------------------------
 
-const slotSpecs: SlotSpec[] = plugins.flatMap((p) => p.slots ?? []);
-
-// Group slots by position once, so the per-render lookup returns a STABLE array
+// Group slots by position on preference changes, so lookup returns a STABLE array
 // (a fresh filter() each render would be a changing prop on the memoized
 // OutlineRow -- ADR 0014). An empty position shares one frozen array.
 const EMPTY_SLOTS: readonly SlotSpec[] = Object.freeze([]);
-const slotsByPosition = new Map<SlotPosition, SlotSpec[]>();
-for (const s of slotSpecs) {
-  const arr = slotsByPosition.get(s.position);
-  if (arr) arr.push(s);
-  else slotsByPosition.set(s.position, [s]);
-}
+let slotsByPosition = new Map<SlotPosition, SlotSpec[]>();
 
 /** The slots registered at `position` (a list-row or zoomed-title position), in
  *  plugin/array order. Returns a referentially stable array (precomputed), safe
@@ -443,17 +481,19 @@ export function slotsAt(position: SlotPosition): readonly SlotSpec[] {
 
 /** Every plugin's header slots, in array order. The core renders these into the
  *  header's action cluster (the daily "Today" button). */
-export const headerSlots: HeaderSlotSpec[] = plugins.flatMap(
-  (p) => p.headerSlots ?? [],
-);
+export let headerSlots: HeaderSlotSpec[] = [];
 
 // --- Seam F (subheader): contextual chrome below the header -----------------
 
 /** Every plugin's subheader slots, in array order. The core renders non-null
  *  results into one collapsible muted band below the header. */
-export const subheaderSlots: SubheaderSlotSpec[] = plugins.flatMap(
-  (p) => p.subheaderSlots ?? [],
-);
+export let subheaderSlots: SubheaderSlotSpec[] = [];
+
+// --- Seam M: external structural drop targets ------------------------------
+
+/** Plugin-owned controls that can receive the core bullet drag, in plugin array
+ *  order. Optional editor features disappear from this list when switched off. */
+export let externalDropTargets: ExternalDropTargetSpec[] = [];
 
 // --- Protected nodes --------------------------------------------------------
 
@@ -466,7 +506,7 @@ const protectPredicates = plugins
  *  descriptor (the core's default copy then carries every message). The
  *  enforcement lives in `components/protection.tsx` (`guardProtected` on the
  *  delete / to-do / complete command paths, `signalRejection` on the blur heal)
- *  and the lock render reads {@link isProtected}; this just resolves the
+ *  and the indicator render reads {@link isProtected}; this just resolves the
  *  descriptor. The plugin authors only the overrides it cares about. ADR 0015. */
 export function getProtection(nodeId: string): NodeProtection | null {
   for (const p of protectPredicates) {
@@ -526,17 +566,9 @@ export function useIsProtected(nodeId: string): boolean {
 
 // --- Seam J: search providers ----------------------------------------------
 
-const aliasProviders = plugins
-  .map((p) => p.searchAliases)
-  .filter((f): f is NonNullable<typeof f> => f != null);
-
-const actionProviders = plugins
-  .map((p) => p.searchActions)
-  .filter((f): f is NonNullable<typeof f> => f != null);
-
-const annotationProviders = plugins
-  .map((p) => p.searchAnnotation)
-  .filter((f): f is NonNullable<typeof f> => f != null);
+let aliasProviders: NonNullable<PluginDef["searchAliases"]>[] = [];
+let actionProviders: NonNullable<PluginDef["searchActions"]>[] = [];
+let annotationProviders: NonNullable<PluginDef["searchAnnotation"]>[] = [];
 
 /** Extra fuzzy-match terms for `node`, contributed by plugins that recognize it
  *  (the daily plugin's relative date label). Empty for an ordinary node. The
@@ -571,9 +603,9 @@ export function searchAnnotation(node: Node): string | null {
 
 // --- Seam: default capture destination (ADR 0049) --------------------------
 
-const captureDestinationProviders = plugins
-  .map((p) => p.captureDestination)
-  .filter((f): f is NonNullable<typeof f> => f != null);
+let captureDestinationProviders: NonNullable<
+  PluginDef["captureDestination"]
+>[] = [];
 
 /** Quick-add's default capture destination: a LAZY provider (a `label` known
  *  synchronously + a `resolve()` invoked only at born-on-first-keystroke -- the
@@ -589,3 +621,149 @@ export function getCaptureDestination(): CaptureDestination {
   }
   return { label: "Top level", resolve: async () => null };
 }
+
+// --- Seam N: view streams (ADR 0070) ----------------------------------------
+
+let viewStreamProviders: NonNullable<PluginDef["viewStream"]>[] = [];
+const viewStreamSignals = plugins.flatMap((p) =>
+  p.viewStreamChanged ? [p.viewStreamChanged] : [],
+);
+
+/** The stream to show around `rootId`, or null for an ordinary zoom view.
+ *  First non-null across ENABLED plugins wins. */
+export function getViewStream(rootId: string | null): ViewStream | null {
+  if (rootId === null) return null;
+  for (const fn of viewStreamProviders) {
+    const stream = fn(rootId);
+    if (stream) return stream;
+  }
+  return null;
+}
+
+/** Subscribe to anything that can change a stream: editor preferences and
+ *  each plugin's own section signal. */
+export function subscribeViewStreams(cb: () => void): () => void {
+  const offs = [
+    subscribeEditorFeatures(cb),
+    ...viewStreamSignals.map((signal) => signal(cb)),
+  ];
+  return () => {
+    for (const off of offs) off();
+  };
+}
+
+// A stable external-store snapshot makes dynamic editor chrome a real React
+// input, including under React Compiler. Never mutate a published slots map.
+const chromeListeners = new Set<() => void>();
+function subscribeChrome(notify: () => void) {
+  chromeListeners.add(notify);
+  return () => {
+    chromeListeners.delete(notify);
+  };
+}
+function readPluginChrome() {
+  return {
+    // Keep disabled plugins' enable switches reachable without an editor target.
+    globalActions: plugins.flatMap((p) =>
+      (p.globalActions?.() ?? []).map((action) => ({
+        ...action,
+        id: `plugin:${p.id}:${action.id}`,
+      })),
+    ),
+    editorFont:
+      plugins.map((p) => p.editorFont?.()).find((font) => font != null) ?? null,
+  };
+}
+let chrome = {
+  headerSlots,
+  subheaderSlots,
+  slotsByPosition,
+  commandSpecs,
+  selectionCommandSpecs,
+  aliasProviders,
+  ...readPluginChrome(),
+};
+export function usePluginChrome() {
+  return useSyncExternalStore(
+    subscribeChrome,
+    () => {
+      getEditorFeatures();
+      return chrome;
+    },
+    () => chrome,
+  );
+}
+
+function publishChrome() {
+  chrome = {
+    headerSlots,
+    subheaderSlots,
+    slotsByPosition,
+    commandSpecs,
+    selectionCommandSpecs,
+    aliasProviders,
+    ...readPluginChrome(),
+  };
+  for (const notify of chromeListeners) notify();
+}
+
+// Bible and Daily contribute only these optional editor seams. Widgets remain
+// registered, and protection/preloads still use ALL plugins, so an off switch
+// cannot expose Daily structure to deletion. Rebuild once per preference change,
+// not per node or keystroke; live exports keep event-time consumers current.
+function refreshOptionalSeams(
+  enabled: Readonly<Partial<Record<EditorFeature, boolean>>>,
+) {
+  const active = plugins.filter((p) => {
+    const feature = editorFeaturePlugins.get(p);
+    return feature === undefined || enabled[feature];
+  });
+  const enabledTokens = new Set(active.flatMap((p) => p.tokens ?? []));
+  tokenSpecs = allTokenSpecs.filter((spec) => enabledTokens.has(spec));
+  tokenRegex = new RegExp(
+    tokenSpecs.map((spec, i) => `(?<_t${i}>${spec.pattern})`).join("|") ||
+      "(?!)",
+    "gu",
+  );
+  folding = tokenSpecs.filter((s) => s.folds);
+  foldingRegex = new RegExp(
+    folding.map((s) => s.pattern).join("|") || "(?!)",
+    "u",
+  );
+  interactionSpecs = active.flatMap((p) => p.interactions ?? []);
+  commandSpecs = active.flatMap((p) => p.commands ?? []);
+  selectionCommandSpecs = commandSpecs.filter((c) => c.runMany);
+  headerSlots = active.flatMap((p) => p.headerSlots ?? []);
+  subheaderSlots = active.flatMap((p) => p.subheaderSlots ?? []);
+  externalDropTargets = active.flatMap((p) => p.externalDropTargets ?? []);
+  slotsByPosition = new Map();
+  for (const slot of active.flatMap((p) => p.slots ?? [])) {
+    const slots = slotsByPosition.get(slot.position);
+    if (slots) slots.push(slot);
+    else slotsByPosition.set(slot.position, [slot]);
+  }
+  aliasProviders = active.flatMap((p) =>
+    p.searchAliases ? [p.searchAliases] : [],
+  );
+  actionProviders = active.flatMap((p) =>
+    p.searchActions ? [p.searchActions] : [],
+  );
+  annotationProviders = active.flatMap((p) =>
+    p.searchAnnotation ? [p.searchAnnotation] : [],
+  );
+  captureDestinationProviders = active.flatMap((p) =>
+    p.captureDestination ? [p.captureDestination] : [],
+  );
+  viewStreamProviders = active.flatMap((p) =>
+    p.viewStream ? [p.viewStream] : [],
+  );
+  publishChrome();
+}
+subscribeEditorFeatures(() => {
+  const features = getEditorFeatures();
+  refreshOptionalSeams(features.ready ? features : {});
+});
+// Do not expose write-intent Daily controls before the account read settles.
+// This initialization is inert: it never fetches before the signed-in AuthGate.
+refreshOptionalSeams({});
+for (const plugin of plugins) plugin.chromeChanged?.(publishChrome);

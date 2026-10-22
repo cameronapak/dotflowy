@@ -36,6 +36,7 @@ function AdminWaitlist() {
           setState("denied");
           return;
         }
+        // SAFETY: the endpoint returns { entries } on 200
         const data = (await res.json()) as { entries: WaitlistEntry[] };
         if (cancelled) return;
         setEntries(data.entries);

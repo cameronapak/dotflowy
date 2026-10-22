@@ -9,7 +9,7 @@ unread badge**. Nothing is written twice: one fragment set produces both.
 
 ## MAJOR means "a reader has to do something"
 
-**Nobody can pin Dotflowy.** Humans get whatever the last `bun run deploy` pushed. Agents
+**Nobody can pin Dotflowy.** Humans get the latest production deployment. Agents
 negotiate MCP's `protocolVersion` (the spec date), not our `serverInfo.version` — no MCP client
 pins to a server version, and there is no `^1.2.0` anywhere in the system.
 
@@ -56,8 +56,8 @@ an agent that reasoned its way to `changeset version`; a build-time invariant do
 as [ADR 0014](./0014-validate-the-worker-do-trust-boundary.md) — validate at the boundary, fail
 closed.
 
-The release script also emits `changelog.json` as a public static asset, so a branded page later
-(on either domain) is a pure renderer rather than a rewrite.
+The app build also emits `changelog.json` as a public static asset. The branded landing page
+compiles the same archive directly (not by fetching that asset).
 
 ## The cursor is `lastSeenVersion`. There is no `seq`
 
@@ -73,8 +73,8 @@ so it syncs across a user's devices. It passes its **concrete** Effect Schema in
 forbids a generic `createKvCollection<T>` factory.
 
 **Read it with `subscribeChanges` + `useSyncExternalStore`, never `useLiveQuery`**, which hard-fails
-the `/` prerender (see `src/data/tag-colors.ts`). The unread signal rides the header's "More" menu
-(a quiet notification dot on the trigger, and emphasis on the "What's new" item when the menu opens
+the `/` prerender (see `src/data/tag-colors.ts`). The unread signal rides the header's App menu
+(a quiet notification dot on the avatar, and emphasis on the "What's new" item when the menu opens
 — not a standalone header CTA, which read as too loud), and the header renders during that prerender.
 
 **`getServerSnapshot` returns `null`, and `null` is ambiguous** — it means both "the collection
@@ -96,7 +96,7 @@ credibility to do marketing — that loan can never be repaid.
 ## The in-app surface is a dialog in `__root.tsx`
 
 Mounted once, beside `McpConnectDialog` / `OpmlImportDialog` / `DeleteConfirmDialog`, behind a
-module-singleton opener (the `move-dialog-opener.ts` pattern). Entry points: the header More menu
+module-singleton opener (the `move-dialog-opener.ts` pattern). Entry points: the header App menu
 (its "What's new" item, emphasized while unread) and a Cmd+K global action. MAJOR renders a
 "Breaking" callout derived from the bump type already in the data — not a louder badge, and **no new
 state**.
@@ -129,15 +129,45 @@ file the affected user will never load. It also forces the fix for `SERVER_INFO.
 construction: adopting semver without it ships `2.0.0` to humans and `0.1.0` to every agent on the
 same deploy.
 
-## The public changelog is GitHub Releases
+## The branded public changelog is the landing site
 
-The repo is public. `gh release create` in the release script gives, for zero build code: a
-crawlable page, permanent per-version URLs, immutable git tags binding each release to a commit,
-and an **Atom feed** at `/releases.atom` — the entire RSS requirement.
+`dotflowy.com/changelog` (and a homepage teaser of the latest three releases) is the
+**branded, crawlable, shareable** surface for anonymous readers — same `changelog/**` archive
+compiled at **landing build time** via the same Vite plugin the app uses. No unread cursor: the
+marketing site is anonymous. Landing can lag a release until the next landing deploy; that lag is
+accepted (do not fetch live from the app origin).
 
-The cost is accepted: a code host is a jarring destination for an outliner's users. The in-app
-dialog is the primary surface; the public page serves links, feeds, and crawlers, and those three
-don't care about brand.
+GitHub Releases remain the **feed + permanent per-version URL** backup (`gh release create`, Atom
+at `/releases.atom`). The in-app dialog stays the primary surface for signed-in users.
+
+## Merging approves app release and deployment
+
+The app now releases automatically on `main`. This replaces the original manual
+release choice below. A merge approves publication and deployment without a
+second release PR. The CLI keeps its independent release-PR approval model.
+
+The production workflow validates current `main`, prepares the version through
+the existing archive-before-consume script, and builds both sites. It pushes a
+temporary candidate branch and explicitly dispatches the seven real CLI checks
+on that exact SHA. Only after they succeed does it push the identical release
+commit/tag atomically, publish the GitHub Release, deploy landing, and deploy
+the app. Empty or absent changesets use the same checks and still deploy without
+a version bump. Release dates use America/Chicago. Candidate identity and
+protection rollout follow
+[ADR 0073](./0073-exact-sha-checked-app-release-candidates.md).
+
+One run finishes before the next starts. Pending intermediate commits may be
+superseded; the next run takes newest `main` and releases all pending news
+together. An atomic push rejects a candidate made stale by a concurrent merge.
+GitHub's built-in token pushes release metadata without recursively triggering
+another push workflow. The explicit validation dispatch uses the same token
+with job-scoped Actions write permission. It does not bypass branch protection.
+
+Published releases and tags are reused on retries. Failures stop without rollback;
+publication can precede the live app, and landing can temporarily be ahead of it.
+This non-atomic sequence is accepted. D1 migrations and data backfills remain
+separately approved operations. Setup and recovery are in
+[the deployment guide](../deploying.md#automatic-production-deployment).
 
 ## Considered and rejected
 
@@ -150,12 +180,13 @@ don't care about brand.
 - **`localStorage` for the cursor.** Rejected: "have I read this" is account state, not device
   state, and the kv collection is ~35 lines (`tag-colors.ts`).
 - **Parsing `CHANGELOG.md` at build time.** Product data hostage to prose formatting.
-- **The changesets GitHub Action / Release PR.** Real enforcement, but stands up a release pipeline
-  that doesn't exist (`ci.yml` is quality-only) for a solo repo. The build-time invariant enforces
-  the same thing for free.
-- **A branded page on the landing site, fed by the app build.** Cross-repo coupling with a
-  deploy-ordering hazard: the changelog goes stale until the _other_ site rebuilds. `changelog.json`
-  keeps this reversible.
+- **A second release PR for the app.** Originally rejected in favor of manual releases.
+  Automatic deployment now treats the ordinary merge as release approval and keeps the
+  archive invariant. The independently published CLI uses a release PR;
+  see [ADR 0062](./0062-automated-cli-releases.md).
+- **A branded page fed by fetching the app's `changelog.json` at runtime.** Cross-origin fetch +
+  deploy-ordering hazard; rejected in favor of compiling `changelog/**` into the landing bundle
+  (same plugin, same invariant). `changelog.json` remains available if a third consumer wants it.
 
 ## Don't
 

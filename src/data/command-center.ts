@@ -1,5 +1,3 @@
-import type { ComponentType } from "react";
-
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -17,13 +15,16 @@ import {
 
 import type { CommandSpec } from "../plugins/types";
 import type { NodeActionBridge } from "./command-bridge";
+import type { CommandCenterAction } from "./command-center-types";
 import type { Node, TreeIndex } from "./tree";
 
 import { commandSpecs } from "../plugins/registry";
-import { paragraphCommand } from "./core-commands";
+import { lockCommand, paragraphCommand, unlockCommand } from "./core-commands";
 import { isMirrorsEnabled } from "./flags";
 import { childrenOf } from "./tree";
 import { getViewRootId } from "./view-state";
+
+export type { ActionScope, CommandCenterAction } from "./command-center-types";
 
 /**
  * Command center (ADR 0034): the ONE unified row descriptor the Cmd+K palette
@@ -52,20 +53,6 @@ export function resolveAmbientTargetId(
 ): string | null {
   if (focusedNodeId) return focusedNodeId;
   return getViewRootId();
-}
-
-export type ActionScope = "global" | "node";
-
-export interface CommandCenterAction {
-  id: string;
-  label: string;
-  description: string;
-  icon: ComponentType<{ className?: string }>;
-  scope: ActionScope;
-  keywords?: string[];
-  /** Display-only shortcut, one string per key cap (e.g. `["⌘", "⇧", "↑"]`). */
-  hotkey?: string[];
-  run: () => void;
 }
 
 /**
@@ -229,20 +216,21 @@ export function buildNodeVerbActions(
  * specs too, but they already appear above as node VERBS, so only the paragraph
  * spec crosses over -- no row is doubled.
  */
-const PALETTE_SPECS: readonly CommandSpec[] = [
-  ...commandSpecs,
-  paragraphCommand,
-];
-
 export function buildCommandSpecActions(
   node: Node,
   bridge: NodeActionBridge,
 ): CommandCenterAction[] {
   const { getCtx } = bridge;
   const out: CommandCenterAction[] = [];
-  for (const spec of PALETTE_SPECS) {
+  const specs: readonly CommandSpec[] = [
+    ...commandSpecs,
+    paragraphCommand,
+    lockCommand,
+    unlockCommand,
+  ];
+  for (const spec of specs) {
     if (spec.caretScoped) continue;
-    if (!spec.available(node)) continue;
+    if (!spec.available(node, getCtx())) continue;
     out.push({
       id: `cmd:${spec.id}`,
       label: spec.label,
