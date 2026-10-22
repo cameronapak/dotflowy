@@ -90,6 +90,46 @@ invite code from your local `.dev.vars` `INVITE_CODES` (or skips it when
 `SIGNUP_OPEN=true`), so it works whatever your invite value is. Prefer your
 own account? Sign up by hand with invite code `dev-invite`.
 
+### Check local HTTP and WebSocket sync
+
+If Vite chooses another port because :3000 is busy, open the URL from the Vite
+log. The browser should talk to the Worker through Vite's `/api` proxy, so check
+both paths when debugging local setup:
+
+```sh
+curl -i http://localhost:3000/api/nodes
+# unauthenticated curl may return 401, but it should be a Worker response
+```
+
+HTTP success is not enough; the outline sync path is a WebSocket. After signing
+in locally, run this in the browser console at the actual app URL. It works
+through Vite or on the single-origin `cf:dev` server:
+
+```js
+console.log((await fetch("/api/nodes")).status); // 200
+const socket = new WebSocket(
+  `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/sync`,
+);
+socket.onopen = () =>
+  socket.send(JSON.stringify({ type: "hello", since: null }));
+socket.onmessage = (event) => {
+  console.log(JSON.parse(event.data).type); // snapshot
+  socket.close();
+};
+```
+
+The server sends the snapshot only after the `hello` handshake. If the
+browser logs "WebSocket is closed before the connection is established" or
+bootstrap says "sync socket closed before initial data", inspect the Worker
+logs and the `/api/sync` upgrade. The Vite proxy needs WebSocket support for `/api`
+(`ws: true` in object form), and Vite must be restarted after any
+`vite.config.ts` proxy edit.
+
+Local auth testing should use a real local account created with the invite code
+from your local `.dev.vars`. If you temporarily add an auth bypass for manual
+testing, keep it uncommitted and exclude it from PRs unless the PR is explicitly
+about productizing that bypass.
+
 ### Production-like loop (one server)
 
 ```sh

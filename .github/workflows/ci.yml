@@ -98,7 +98,11 @@ jobs:
           bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
       - name: Install test browsers
-        run: bunx playwright install --with-deps chromium webkit
+        run: |
+          # Slow Azure mirror downloads can exhaust the job before tests start.
+          # https://github.com/actions/runner-images/issues/14823
+          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          bunx playwright install --with-deps chromium webkit
       - name: App browser regression
         run: bun run test:e2e:app --shard=${{ matrix.shard }}/4 --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
         env:
