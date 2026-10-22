@@ -39,6 +39,59 @@ async function openPalette(page: Page) {
   await expect(page.getByPlaceholder(/Search nodes and actions/)).toBeVisible();
 }
 
+test("View bookmarks the current page on desktop and removes it in the narrow sheet", async ({
+  page,
+}) => {
+  await load(page);
+  const view = page.getByRole("button", { name: "View options" });
+  const bookmark = page.getByRole("menuitemcheckbox", {
+    name: "Bookmark this page",
+    exact: true,
+  });
+  await view.click();
+  await expect(bookmark).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.goto("/alpha");
+  await expect(page.locator("h2.zoomed-title .node-text")).toBeVisible();
+  await view.click();
+  await expect(bookmark).toHaveAttribute("aria-checked", "false");
+  await bookmark.click();
+  await expect(bookmark).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await openPalette(page);
+  await expect(page.getByRole("option", { name: /Alpha/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.reload();
+  await expect(page.locator("h2.zoomed-title .node-text")).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await view.click();
+  await expect(
+    page.getByRole("dialog", { name: "View options" }),
+  ).toBeVisible();
+  await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
+    "data-expanded",
+  );
+  await expect(bookmark).toHaveAttribute("aria-checked", "true");
+  await bookmark.click();
+  await expect(bookmark).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("Escape");
+  await openPalette(page);
+  await expect(
+    page.getByText("No bookmarks yet.", { exact: false }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.goto("/");
+  await expect(text(page, "alpha")).toBeVisible();
+  await view.click();
+  await expect(
+    page.getByRole("dialog", { name: "View options" }),
+  ).toBeVisible();
+  await expect(bookmark).toHaveCount(0);
+});
+
 test.describe("mobile", () => {
   test.use({ hasTouch: true, isMobile: true });
 
