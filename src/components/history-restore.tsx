@@ -116,7 +116,7 @@ function editorLocation(focusId: string | null): HistoryLocation {
     return lastLocation;
   return {
     rootId: getViewRootId(),
-    rowKey: active?.dataset.historyKey ?? focusId,
+    rowKey: active?.dataset.historyKey ?? selection?.focusId ?? focusId,
     caret: active ? getSelectionRange(active) : null,
     selection: selection
       ? { anchorId: selection.anchorId, focusId: selection.focusId }

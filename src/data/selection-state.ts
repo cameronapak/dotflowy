@@ -2,10 +2,19 @@ import { useSelector } from "@xstate/react";
 import { Schema } from "effect";
 import { createActor, setup } from "xstate";
 
+import { walkQueryNodes } from "./filter-query";
+import { isMirrorsEnabled } from "./flags";
 import { getLiveNodes } from "./live-nodes";
 import { buildTreeIndex, childrenOf, type Node, type TreeIndex } from "./tree";
 import { getTreeIndex } from "./tree-store";
-import { getViewIsHidden, getViewRootId } from "./view-state";
+import { getViewFilter, getViewIsHidden, getViewRootId } from "./view-state";
+import {
+  buildVisibleRows,
+  focusKeyAfterEdit,
+  instanceIdForKey,
+  parentKeyOf,
+  rowKeyFor,
+} from "./visible-order";
 
 /**
  * Node multi-selection state (ADR 0018), modelled as an XState v6 machine whose
@@ -30,7 +39,7 @@ import { getViewIsHidden, getViewRootId } from "./view-state";
  * entering or leaving it -- preserving ADR 0014's per-node-render budget.
  * Selection is NEVER threaded as a prop.
  *
- * Model: a selection is a **contiguous run of siblings under one parent**
+ * Model: a selection is a **contiguous run of visible siblings under one parent**
  * (`rootIds`), and selecting a node implies its whole subtree (you select roots;
  * descendants come along). The fixed end is the `anchorId`; Shift+arrow moves the
  * `focusId` end. Because the run is always sibling-scoped, every operation on it
@@ -56,9 +65,9 @@ export type SelectionEdge = "top" | "bottom" | "middle" | "single";
 const SelectionDataSchema = Schema.Struct({
   /** The shared parent of every selected root (the run is sibling-scoped). */
   parentId: Schema.NullOr(Schema.String),
-  /** The fixed end of the run (where the selection started). */
+  /** Render key of the fixed end (where the selection started). */
   anchorId: Schema.String,
-  /** The moving end (Shift+arrow walks this). */
+  /** Render key of the moving end (Shift+arrow walks this). */
   focusId: Schema.String,
   /** The selected sibling roots, in visible display order. */
   rootIds: Schema.Array(Schema.String),
@@ -76,13 +85,27 @@ const ContextSchema = Schema.Struct({
 
 // --- pure derivation (reads the live tree at event time) --------------------
 
-/** The visible siblings under `parentId`, mirroring the render's Seam-G prune
- *  (hide-completed today) so the selectable run matches what's on screen. The
- *  tag filter's separate prune is intentionally NOT applied here (v1: selecting
- *  while a tag filter is active is out of scope). */
-function visibleSiblings(index: TreeIndex, parentId: string | null): Node[] {
+/** The sibling run is contiguous in the filtered view, not storage order.
+ * Query membership uses render keys, so another mirror's revealed children
+ * cannot leak into this instance's selection. Roots still imply whole subtrees. */
+function visibleSiblings(
+  index: TreeIndex,
+  parentId: string | null,
+  prefix: string | null = null,
+): Node[] {
   const isHidden = getViewIsHidden();
-  return childrenOf(index, parentId).filter((n) => !isHidden(n));
+  const filter = getViewFilter();
+  const mirrorsEnabled = isMirrorsEnabled();
+  return childrenOf(index, parentId).filter((n) => {
+    const content =
+      mirrorsEnabled && n.mirrorOf ? index.byId.get(n.mirrorOf) : n;
+    // The renderer keeps a broken mirror as a visible, non-expandable leaf.
+    if (!content) return true;
+    return (
+      !isHidden(content) &&
+      (!filter || filter.visibleIds.has(rowKeyFor(prefix, n.id)))
+    );
+  });
 }
 
 /**
@@ -96,18 +119,24 @@ function computeRange(
   focusId: string,
   index: TreeIndex = getTreeIndex(),
 ): SelectionData | null {
-  const anchor = index.byId.get(anchorId);
+  const anchor = index.byId.get(instanceIdForKey(anchorId));
   if (!anchor) return null;
   const parentId = anchor.parentId;
-  const sibs = visibleSiblings(index, parentId);
-  const ai = sibs.findIndex((n) => n.id === anchorId);
+  const prefix = parentKeyOf(anchorId);
+  const sibs = visibleSiblings(index, parentId, prefix);
+  const ai = sibs.findIndex((n) => n.id === anchor.id);
   if (ai === -1) return null;
-  let fi = sibs.findIndex((n) => n.id === focusId);
+  let fi = sibs.findIndex((n) => rowKeyFor(prefix, n.id) === focusId);
   if (fi === -1) fi = ai; // focus not a visible sibling -> collapse to anchor
   const lo = Math.min(ai, fi);
   const hi = Math.max(ai, fi);
   const rootIds = sibs.slice(lo, hi + 1).map((n) => n.id);
-  return { parentId, anchorId, focusId: sibs[fi]!.id, rootIds };
+  return {
+    parentId,
+    anchorId,
+    focusId: rowKeyFor(prefix, sibs[fi]!.id),
+    rootIds,
+  };
 }
 
 /**
@@ -127,28 +156,39 @@ function computeExtend(
   direction: "up" | "down",
 ): SelectionData {
   const index = getTreeIndex();
-  const sibs = visibleSiblings(index, data.parentId);
-  const fi = sibs.findIndex((n) => n.id === data.focusId);
+  const prefix = parentKeyOf(data.anchorId);
+  const sibs = visibleSiblings(index, data.parentId, prefix);
+  const fi = sibs.findIndex((n) => rowKeyFor(prefix, n.id) === data.focusId);
   if (fi === -1) return data;
   const ni = direction === "down" ? fi + 1 : fi - 1;
   if (ni >= 0 && ni < sibs.length) {
-    return computeRange(data.anchorId, sibs[ni]!.id, index) ?? data;
+    return (
+      computeRange(data.anchorId, rowKeyFor(prefix, sibs[ni]!.id), index) ??
+      data
+    );
   }
   // Sibling boundary. Single-root selections walk by depth; multi-root no-ops.
   if (data.rootIds.length !== 1) return data;
   if (direction === "up") {
     // Climb to the parent. Stop at the zoom root (parentId === the view root, or
     // null at the top level) -- the view root isn't a selectable node.
-    if (data.parentId === null || data.parentId === getViewRootId())
-      return data;
-    return computeRange(data.parentId, data.parentId, index) ?? data;
+    const parentKey = prefix ?? data.parentId;
+    if (parentKey === null || parentKey === getViewRootId()) return data;
+    return computeRange(parentKey, parentKey, index) ?? data;
   }
-  // Dive into the first visible child. Collapsed nodes render no children.
-  const node = index.byId.get(data.focusId);
-  if (!node || node.collapsed) return data;
-  const kids = visibleSiblings(index, data.focusId);
-  if (kids.length === 0) return data;
-  return computeRange(kids[0]!.id, kids[0]!.id, index) ?? data;
+  // The rendered walk owns collapsed context, mirror children, and cycle caps.
+  const rows = buildVisibleRows(
+    index,
+    getViewRootId(),
+    getViewIsHidden(),
+    getViewFilter(),
+    isMirrorsEnabled(),
+  );
+  const rowIndex = rows.findIndex((row) => row.key === data.focusId);
+  const row = rows[rowIndex];
+  const child = rows[rowIndex + 1];
+  if (!row || !child || child.depth <= row.depth) return data;
+  return computeRange(child.key, child.key, index) ?? data;
 }
 
 /** Every visible top-level child of the current view (Cmd+A rung 3 -- the zoom
@@ -218,23 +258,43 @@ const selectionMachine = setup({
             context: { data: computeExtend(context.data, event.direction) },
           };
         },
-        // Re-derive (parentId + rootIds) from the LIVE collection, same
-        // anchor/focus, after a structural mutation relocates the run
-        // (indent/outdent). Reads the live store directly so it's correct
-        // synchronously inside the same `runStructural` batch, before the tree
-        // store's subscription has rebuilt (classic `nodesCollection` or Lunora
-        // `wholeOutline` — `getLiveNodes`). ids + order are unchanged by an
-        // indent/outdent, so only `parentId` shifts.
+        // Structural writes preserve roots and direction. Only their parent
+        // and render addresses change. The current filter still has PRE-edit
+        // keys; the next committed row model reconciles visibility instead.
         refresh: ({ context }) => {
           if (!context.data) return undefined;
-          const d = computeRange(
-            context.data.anchorId,
-            context.data.focusId,
-            buildTreeIndex(getLiveNodes()),
-          );
-          return d
-            ? { context: { data: d } }
-            : { target: "idle", context: { data: null } };
+          const index = buildTreeIndex(getLiveNodes());
+          const { anchorId, focusId } = context.data;
+          const anchor = index.byId.get(instanceIdForKey(anchorId));
+          if (!anchor) return { target: "idle", context: { data: null } };
+          // Query traversal includes collapsed context and caps mirror cycles.
+          // It derives candidate addresses only, never query membership.
+          const candidates =
+            isMirrorsEnabled() && index.mirrorsBySource.size > 0
+              ? Array.from(
+                  walkQueryNodes(index, getViewRootId()),
+                  ({ node, key }) => ({ id: node.id, key }),
+                )
+              : [];
+          return {
+            context: {
+              data: {
+                ...context.data,
+                // Root subscribers also re-anchor the menu to the new path.
+                rootIds: [...context.data.rootIds],
+                parentId: anchor.parentId,
+                anchorId:
+                  focusKeyAfterEdit(candidates, anchor.id, anchorId) ??
+                  anchor.id,
+                focusId:
+                  focusKeyAfterEdit(
+                    candidates,
+                    instanceIdForKey(focusId),
+                    focusId,
+                  ) ?? instanceIdForKey(focusId),
+              },
+            },
+          };
         },
         clear: () => ({ target: "idle", context: { data: null } }),
       },

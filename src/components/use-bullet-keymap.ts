@@ -299,7 +299,7 @@ export function useBulletKeymap({
               // mirror by its source id would make select+delete remove the
               // source and orphan every instance. instanceId === node.id for a
               // mirror-free row.
-              selectSingle(instanceId);
+              selectSingle(el.dataset.historyKey ?? instanceId);
               el.blur();
               window.getSelection()?.removeAllRanges();
             },
@@ -315,7 +315,7 @@ export function useBulletKeymap({
               if (!el || !atLineEnd(el)) return;
               e.preventDefault();
               e.stopPropagation();
-              selectSingle(instanceId); // the instance, not its source (see above)
+              selectSingle(el.dataset.historyKey ?? instanceId);
               el.blur();
               window.getSelection()?.removeAllRanges();
             },
@@ -336,7 +336,7 @@ export function useBulletKeymap({
               if (!empty && !isAllTextSelected(el)) return; // rung 1: native select-all
               e.preventDefault();
               e.stopPropagation();
-              selectSingle(instanceId); // the instance, not its source (see above)
+              selectSingle(el.dataset.historyKey ?? instanceId);
               el.blur();
               window.getSelection()?.removeAllRanges();
             },

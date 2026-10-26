@@ -320,12 +320,12 @@ export function findVisibleNeighbor(
  * Pure.
  */
 export function focusKeyAfterEdit(
-  rows: readonly VisibleRow[],
+  rows: readonly Pick<VisibleRow, "id" | "key">[],
   instanceId: string,
   activeKey: string,
 ): string | null {
   const active = parseRowKey(activeKey);
-  let best: VisibleRow | null = null;
+  let best: Pick<VisibleRow, "id" | "key"> | null = null;
   let bestShared = -1;
   for (const r of rows) {
     if (r.id !== instanceId) continue;
