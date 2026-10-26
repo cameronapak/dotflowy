@@ -10,7 +10,8 @@ Keep this file brief. Put task-specific guidance behind a pointer.
 
 ## Guardrails
 
-- **Grill first.** New plugin, route, seam, `Node` field, side-collection, or ADR-worthy behavior: read the matching ADRs, then ask the user to run `/grill-with-docs` (user-invoked only). If they waive it, hold the design against those ADRs by hand. An agent can invoke `/domain-modeling`, `/code-review`, and `/security-review`.
+- **Own technical decisions.** New plugin, route, seam, `Node` field, side-collection, or ADR-worthy behavior: read the matching ADRs, then make and document technical decisions independently. Update affected ADRs, docs, tests, and contracts in the same change. Ask Cam only for unresolved product, policy, irreversible, security, or materially ambiguous decisions. Existing delivery approvals and verification requirements still apply.
+- **Grilling is optional.** Use `/grill-with-docs` when Cam requests it; recommend it when you identify a genuinely consequential unresolved tradeoff. It remains user-invoked, not a prerequisite for technical decisions. An agent can invoke `/domain-modeling`, `/code-review`, and `/security-review`.
 - **There is no client-side data migration.**
 - **Key the DO through `resolveUserId`**, never the email. The one exception is the owner-continuity bridge to `'default'`.
 - **The `/api` session check trusts the server session.**
