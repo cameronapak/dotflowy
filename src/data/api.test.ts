@@ -3,8 +3,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { ChangeOp } from "./realtime";
 
 import { persistBatch, updateNodes, waitForPendingWrites } from "./api";
+import { createNode } from "./tree";
 
-// Pins the structural-batch serialization (the `writeSem` semaphore in api.ts):
+// Pins ordered outline persistence:
 // rapid batches must NOT overlap on the wire (else the DO can reorder them and
 // re-tear a sibling chain — ADR 0009), and a failed batch must not wedge the
 // queue. A controllable fetch parks each request until the test resolves it, so
@@ -34,7 +35,7 @@ function at(i: number): Pending {
   return p;
 }
 
-/** Let parked fibers advance (semaphore acquire → fetch fire) on a real tick. */
+/** Let parked writes advance to the controlled server. */
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
 const ok = (seq: number): Response =>
   new Response(JSON.stringify({ seq }), { status: 200 });
@@ -49,21 +50,90 @@ test("history's write barrier waits for coalesced fields and structural sends", 
     settled = true;
   });
   await tick();
-  expect(pending.length).toBe(2);
+  expect(pending.length).toBe(1);
   expect(settled).toBe(false);
   at(0).resolve(ok(8));
   await tick();
+  expect(pending.length).toBe(2);
   expect(settled).toBe(false);
   at(1).resolve(ok(9));
   await Promise.all([field, batch, barrier]);
   expect(settled).toBe(true);
 });
 
+test.each([false, true])(
+  "field coalescing cannot cross a structural edit (older request held: %s)",
+  async (holdOlder) => {
+    installControlledFetch();
+    const older = holdOlder ? persistBatch([op("unrelated")]) : null;
+    if (older) await tick();
+    const before = [
+      updateNodes([{ id: "a", changes: { text: "old" } }]),
+      updateNodes([{ id: "a", changes: { text: "Xafter" } }]),
+    ];
+    const split = persistBatch([
+      { op: "update", value: createNode({ id: "a", text: "X" }) },
+      {
+        op: "insert",
+        value: createNode({ id: "b", prevSiblingId: "a", text: "after" }),
+      },
+    ]);
+    const after = [
+      updateNodes([{ id: "a", changes: { text: "Z" } }]),
+      updateNodes([{ id: "b", changes: { text: "Yafter" } }]),
+    ];
+    const writes = [...(older ? [older] : []), ...before, split, ...after];
+    try {
+      await tick();
+      expect(pending.length).toBe(1);
+      if (older) {
+        at(0).resolve(ok(1));
+        await tick();
+      }
+      const offset = older ? 1 : 0;
+      expect(JSON.parse(at(offset).body).updates).toEqual([
+        { id: "a", changes: { text: "Xafter" } },
+      ]);
+      at(offset).resolve(ok(2));
+      await tick();
+      expect(pending.length).toBe(offset + 2);
+      expect(
+        JSON.parse(at(offset + 1).body).ops.map(
+          ({ value }: { value: { id: string; text: string } }) => [
+            value.id,
+            value.text,
+          ],
+        ),
+      ).toEqual([
+        ["a", "X"],
+        ["b", "after"],
+      ]);
+      at(offset + 1).resolve(ok(3));
+      await tick();
+      expect(pending.length).toBe(offset + 3);
+      expect(JSON.parse(at(offset + 2).body).updates).toEqual([
+        { id: "a", changes: { text: "Z" } },
+        { id: "b", changes: { text: "Yafter" } },
+      ]);
+      at(offset + 2).resolve(ok(4));
+      await Promise.all(writes);
+    } finally {
+      // A broken ordering implementation can have several requests in flight.
+      // Release all of them, including successors, before restoring fetch.
+      for (let i = 0; i < 5; i++) {
+        for (const request of pending) request.resolve(ok(5));
+        await tick();
+      }
+      await Promise.allSettled(writes);
+    }
+  },
+);
+
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-describe("persistBatch serialization (writeSem)", () => {
+describe("persistBatch serialization", () => {
   test("a second batch stays off the wire until the first responds", async () => {
     installControlledFetch();
     const p1 = persistBatch([op("a")]);
@@ -105,14 +175,14 @@ describe("persistBatch serialization (writeSem)", () => {
   });
 });
 
-// Pins the field coalescer (the `fieldSem` generations in api.ts): rapid field
+// Pins field coalescing: rapid field
 // edits serialize + coalesce into one PATCH per round trip, and -- the ADR 0010
 // invariant -- every caller that merged into a failed generation rolls back
 // together (shared-fate). A field PATCH is `void`-shaped (no `{seq}` body to
 // read), so a 200 with any body is success and a 5xx rejects without retrying.
 const okField = (): Response => ok(10);
 
-describe("updateNodes field coalescer (fieldSem generations)", () => {
+describe("updateNodes field coalescer", () => {
   test("shared-fate: both callers of a failed generation reject", async () => {
     installControlledFetch();
     // Gen 1 = A, sent alone (nothing in flight when it arms).

@@ -68,6 +68,10 @@ jobs:
           bun run check:changeset
       - name: Real Worker regression
         run: bun run test:e2e:retirement --workers=1 --retries=0 --max-failures=1
+      - name: Install Worker browser
+        run: bunx playwright install --with-deps chromium
+      - name: Real Worker browser persistence
+        run: bun run test:e2e:worker-browser
       - name: Upload Worker failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

@@ -155,7 +155,8 @@ export const createSyncStream = (
     const attempt = yield* Ref.make(0);
     // Has ANY frame ever arrived this session? Gates InitialError.
     const everDelivered = yield* Ref.make(false);
-    // The next connect should ignore the cursor (a pending resync).
+    // Keep recovery pending through connection attempts until a snapshot arrives.
+    // Other timed-out writes share it instead of restarting a slow handshake.
     const forceSnapshot = yield* Ref.make(false);
     // Opened by `resync` to drop the current connection; closed at each connect
     // so a resync requested while disconnected doesn't interrupt the fresh
@@ -172,7 +173,7 @@ export const createSyncStream = (
       const connectOnce = Effect.scoped(
         Effect.gen(function* () {
           yield* resyncLatch.close;
-          const force = yield* Ref.getAndSet(forceSnapshot, false);
+          const force = yield* Ref.get(forceSnapshot);
           const since = force ? null : yield* cursor;
 
           const socket = yield* Socket.makeWebSocket(syncUrl());
@@ -183,6 +184,15 @@ export const createSyncStream = (
             Effect.gen(function* () {
               const msg = decodeFrame(raw);
               if (!msg) return;
+              // The DO accepts sockets before receiving hello, so a broadcast
+              // can beat the handshake. Its delta is covered by the upcoming
+              // snapshot/resume; alone it cannot establish a recovered base.
+              if (
+                msg.type === "change" &&
+                !(yield* Deferred.isDone(firstFrame))
+              )
+                return;
+              if (msg.type === "snapshot") yield* Ref.set(forceSnapshot, false);
               yield* Ref.set(everDelivered, true);
               yield* Deferred.succeed(firstFrame, undefined);
               yield* Queue.offer(out, { _tag: "Message", message: msg });
@@ -258,11 +268,10 @@ export const createSyncStream = (
       return loop;
     });
 
-    // Set the intent BEFORE opening the latch, so by the time the loop wakes and
-    // reconnects, `forceSnapshot` is already true (the next connect ignores the
-    // cursor). Opening first would race the loop reading a not-yet-set flag.
-    const resync = Ref.set(forceSnapshot, true).pipe(
-      Effect.andThen(resyncLatch.open),
+    // Set intent before waking the loop. Once recovery is pending, let its
+    // socket/hello watchdog own retries rather than each write's echo timer.
+    const resync = Ref.getAndSet(forceSnapshot, true).pipe(
+      Effect.flatMap((pending) => (pending ? Effect.void : resyncLatch.open)),
       Effect.asVoid,
     );
 

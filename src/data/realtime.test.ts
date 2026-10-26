@@ -204,10 +204,10 @@ describe("createSyncStream", () => {
         }),
     ));
 
-  test("connects with the cursor; resync reconnects ignoring it", () =>
+  test("coalesces resyncs until the authoritative handshake arrives", () =>
     withHarness(
       () => 99, // a non-null cursor we expect resync to IGNORE
-      ({ sockets }, resync) =>
+      ({ sockets, collected }, resync) =>
         Effect.gen(function* () {
           expect(sockets.length).toBe(1);
           nth(sockets, 0).driveOpen();
@@ -230,6 +230,30 @@ describe("createSyncStream", () => {
             type: "hello",
             since: null,
           });
+          // Another acknowledged write times out while recovery is connecting.
+          // It must not cancel the connection already fetching server truth.
+          yield* resync;
+          yield* settle;
+          expect(sockets.length).toBe(2);
+          expect(nth(sockets, 1).closedWith).toBeNull();
+
+          // Accepted sockets can receive a live broadcast before the hello
+          // reply. That delta alone cannot establish the recovered base.
+          nth(sockets, 1).driveMessage({ type: "change", seq: 101, ops: [] });
+          yield* settle;
+          expect(collected).toHaveLength(1);
+          nth(sockets, 1).driveMessage({
+            type: "snapshot",
+            seq: 101,
+            nodes: [],
+          });
+          yield* settle;
+          expect(collected).toHaveLength(2);
+
+          // A completed recovery must not suppress a later, independent resync.
+          yield* resync;
+          yield* settle;
+          expect(sockets.length).toBe(3);
         }),
     ));
 
