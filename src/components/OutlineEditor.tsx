@@ -537,7 +537,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // Resolved only on pointer-up, after the drag hook's own cleanup. Like the
     // delegated Seam-B handlers above, this reads the live event-time context.
     getPluginContext: () => pluginCtx(),
-    onMove: (grabbedKey, newParentInstanceId, afterSiblingId) =>
+    onMove: (grabbedKey, newParentInstanceId, afterSiblingId, pointerType) =>
       runStructural(() => {
         const index = getTreeIndex();
         const instanceId = instanceIdForKey(grabbedKey);
@@ -557,7 +557,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           // the post-move render walk), not the source's far copy. Bare id off
           // the flag.
           const key = focusKeyFor(instanceId, grabbedKey);
-          pendingFocus.current = key;
+          // A touch reorder is not an edit request. Use this gesture's input,
+          // not the device's primary pointer (hybrids can use either).
+          if (pointerType !== "touch") pendingFocus.current = key;
           // Tint the row it landed on so the eye can find what just moved.
           pendingFlash.current = key;
           // Vanish disclosure (issue #244): a drop that lands the node outside

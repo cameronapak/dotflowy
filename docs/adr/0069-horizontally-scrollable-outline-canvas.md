@@ -40,9 +40,22 @@ than maintaining per-route horizontal scroll state.
 
 **Pointer and touch behavior.** A touch beginning on row text or empty row space
 uses native direction locking for horizontal canvas panning or vertical window
-scrolling. A touch beginning on the bullet remains reserved for zoom or drag,
-as ADR 0029 requires. Provider frames and other interactive children keep their
-own gestures. During drag reorder, nearing either horizontal edge auto-scrolls
+scrolling. A bullet tap zooms; a swipe beginning on the bullet also pans or
+scrolls. To reorder with touch, hold for 350ms within the existing 5px movement
+threshold, then move. Earlier movement cancels the pending drag and leaves
+scrolling to the browser. The bullet permits native panning and pinch zoom;
+a non-passive touchmove listener prevents panning only after the hold. A second
+finger or pointer cancellation abandons the drag. Mouse and pen retain the
+5px movement threshold without a hold.
+
+A touch drop flashes the landing row without requesting editor focus. The
+gesture's pointer type decides this, not the device's primary pointer, so a
+mouse on a touch-capable device retains desktop focus behavior. Tapping text
+or row dead space still edits as specified in ADR 0029; this is not a browse
+mode. Drop geometry, sibling order, and no-op history rollback are unchanged.
+
+Provider frames and other interactive children keep their own gestures.
+During drag reorder, nearing either horizontal edge auto-scrolls
 the canvas while projected depth continues to change in the existing 24px
 steps.
 

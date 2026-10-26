@@ -94,6 +94,7 @@ test("after cold loading, the drop indicator and saved order match the hovered g
   await expect
     .poll(() => visibleOrder(page))
     .toEqual(["a1", "a2", "a3", "a0", "a4", "a5", "a6", "a7"]);
+  await expect(page.locator('li[data-node-id="a0"] .node-text')).toBeFocused();
   await expect
     .poll(async () => {
       const nodes = await page.evaluate(async () =>
@@ -126,4 +127,149 @@ test("dragging right of a row nests the drop one level deeper", async ({
   const li = page.locator('li[data-node-id="a5"]');
   await expect(li).toHaveAttribute("data-parent-id", "a2");
   await expect(li).toHaveAttribute("data-depth", "1");
+});
+
+test("same-spot mouse drops preserve order and the redo timeline", async ({
+  page,
+}) => {
+  await load(page);
+  const text = page.locator('li[data-node-id="a2"] .node-text');
+  await text.fill("edited");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(text).toHaveText("node2");
+
+  const bullet = page.locator('li[data-node-id="a2"] .bullet');
+  const box = await bullet.boundingBox();
+  if (!box) throw new Error("no bullet box");
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  for (const returnToStart of [false, true]) {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + (returnToStart ? 70 : 6));
+    await expect(page.locator(".drag-pill")).toBeVisible();
+    if (returnToStart) await page.mouse.move(x, y);
+    await page.mouse.up();
+    await expect
+      .poll(() => visibleOrder(page))
+      .toEqual(flatList().map((n) => n.id));
+  }
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByRole("option", { name: /^Redo typing/ }).click();
+  await expect(text).toHaveText("edited");
+});
+
+test.describe("touch drag", () => {
+  test.use({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+  });
+
+  test("a dot swipe scrolls without reordering, and the next dot tap zooms", async ({
+    page,
+  }) => {
+    const nodes = Array.from({ length: 60 }, (_, i) => ({
+      id: `t${i}`,
+      parentId: null,
+      prevSiblingId: i ? `t${i - 1}` : null,
+      text: `Touch ${i + 1}`,
+    }));
+    await seedOutline(page, nodes);
+    await openSeededOutline(page, { anchorId: "t0" });
+    const bullet = page.locator('li[data-node-id="t8"] .bullet');
+    const box = await bullet.boundingBox();
+    if (!box) throw new Error("no bullet box");
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const before = await page.evaluate(() => scrollY);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y }],
+    });
+    for (let step = 1; step <= 6; step++) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x, y: y - step * 20 }],
+      });
+    }
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+    await expect
+      .poll(() => page.evaluate(() => scrollY))
+      .toBeGreaterThan(before + 40);
+    await expect(page.locator(".drag-pill")).toHaveCount(0);
+    const saved = await page.evaluate(async () =>
+      (await fetch("/api/nodes")).json(),
+    );
+    expect(
+      saved.map((n: SeedNode) => [n.id, n.parentId, n.prevSiblingId]).sort(),
+    ).toEqual(nodes.map((n) => [n.id, n.parentId, n.prevSiblingId]).sort());
+    await expect(page.locator(".node-text:focus")).toHaveCount(0);
+    await bullet.tap();
+    await expect(page).toHaveURL(/\/t8$/);
+  });
+
+  test("a held touch reorders at the indicated gap without entering the editor", async ({
+    page,
+  }) => {
+    await load(page);
+    const box = await page
+      .locator('li[data-node-id="a2"] .bullet')
+      .boundingBox();
+    if (!box) throw new Error("no bullet box");
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const target = await rowBox(page, "a6");
+    const cdp = await page.context().newCDPSession(page);
+    // A pickup close to its starting point is a no-op; cancellation after
+    // leaving that gap also must not commit or leave gesture UI behind.
+    for (const cancel of [false, true]) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x, y }],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x, y: cancel ? target.y : y + 6 }],
+      });
+      await expect(page.locator(".drag-pill")).toBeVisible();
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: cancel ? "touchCancel" : "touchEnd",
+        touchPoints: [],
+      });
+      await expect(page.locator(".drag-pill, .drag-indicator")).toHaveCount(0);
+      await expect
+        .poll(() => visibleOrder(page))
+        .toEqual(flatList().map((n) => n.id));
+      await expect(page.locator(".node-text:focus")).toHaveCount(0);
+    }
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y }],
+    });
+    // Gesture duration, not a rendering wait: hold before moving the finger.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    for (let step = 1; step <= 6; step++) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x, y: y + ((target.y - y) * step) / 6 }],
+      });
+    }
+    await expect(page.locator(".drag-indicator")).toBeVisible();
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+    await expect
+      .poll(() => visibleOrder(page))
+      .toEqual(["a0", "a1", "a3", "a4", "a5", "a2", "a6", "a7"]);
+    await expect(page.locator(".node-text:focus")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/$/);
+  });
 });

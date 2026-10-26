@@ -34,6 +34,9 @@ import { INDENT_PX } from "./OutlineRow";
 
 // Movement (px) before a press becomes a drag. Below this, it's a click → zoom.
 const THRESHOLD = 5;
+// A touch must stay within the movement threshold for this long. Earlier
+// movement belongs to native scrolling, not to reorder.
+const TOUCH_HOLD_MS = 350;
 // Indent per depth level. The render's single source (OutlineRow.INDENT_PX);
 // measured from the live rows when possible, this is the fallback so the
 // windowed drop-depth projection can't drift from the rendered indent.
@@ -116,6 +119,7 @@ interface DragDeps {
     grabbedKey: string,
     newParentInstanceId: string | null,
     afterSiblingInstanceId: string | null,
+    pointerType: string,
   ) => void;
 }
 
@@ -130,6 +134,9 @@ interface DragState {
   sourceKeys: string[];
   startX: number;
   startY: number;
+  pointerId: number;
+  pointerType: string;
+  pressedAt: number;
   dragging: boolean;
   rows: Row[]; // visible rows excluding the grabbed node + its subtree
   indent: number;
@@ -146,8 +153,9 @@ interface DragState {
   // The exact listener instances registered for this drag, so cleanup removes
   // the same references even if the component re-rendered mid-drag.
   moveHandler: (e: PointerEvent) => void;
-  upHandler: () => void;
-  cancelHandler: () => void;
+  upHandler: (e: PointerEvent) => void;
+  cancelHandler: (e: PointerEvent) => void;
+  touchHandler: (e: TouchEvent) => void;
 }
 
 export function useDragReorder(deps: DragDeps) {
@@ -172,6 +180,8 @@ export function useDragReorder(deps: DragDeps) {
     document.removeEventListener("pointermove", s.moveHandler);
     document.removeEventListener("pointerup", s.upHandler);
     document.removeEventListener("pointercancel", s.cancelHandler);
+    document.removeEventListener("touchmove", s.touchHandler);
+    document.removeEventListener("touchstart", s.touchHandler);
     state.current = null;
   }, []);
 
@@ -461,12 +471,20 @@ export function useDragReorder(deps: DragDeps) {
 
   function onMove(e: PointerEvent) {
     const s = state.current;
-    if (!s) return;
+    if (!s || e.pointerId !== s.pointerId) return;
     s.lastX = e.clientX;
     s.lastY = e.clientY;
     if (!s.dragging) {
       const moved = Math.hypot(e.clientX - s.startX, e.clientY - s.startY);
       if (moved < THRESHOLD) return;
+      if (
+        s.pointerType === "touch" &&
+        performance.now() - s.pressedAt < TOUCH_HOLD_MS
+      ) {
+        consumed.current = true;
+        cleanup();
+        return;
+      }
       beginDrag();
       s.raf = requestAnimationFrame(tickScroll);
     }
@@ -474,15 +492,39 @@ export function useDragReorder(deps: DragDeps) {
     project(e.clientX, e.clientY);
   }
 
-  function onUp() {
+  function onTouch(e: TouchEvent) {
     const s = state.current;
-    if (!s) return;
+    if (!s || s.pointerType !== "touch") return;
+    if (e.touches.length !== 1) {
+      consumed.current = true;
+      cleanup();
+      return;
+    }
+    // Pointer preventDefault cannot stop native touch panning. Take ownership
+    // only after the hold; before it, leave the browser free to scroll. A pan
+    // already claimed by the browser cannot be reclaimed mid-gesture.
+    if (
+      e.type === "touchmove" &&
+      performance.now() - s.pressedAt >= TOUCH_HOLD_MS
+    ) {
+      if (e.cancelable) e.preventDefault();
+      else {
+        consumed.current = true;
+        cleanup();
+      }
+    }
+  }
+
+  function onUp(e: PointerEvent) {
+    const s = state.current;
+    if (!s || e.pointerId !== s.pointerId) return;
     if (s.dragging) {
       consumed.current = true;
       const pending = s.pending;
       const external = s.external;
       const nodeIds = s.nodeIds;
       const grabbedKey = s.id;
+      const pointerType = s.pointerType;
       cleanup();
       if (external) {
         external.spec.onDrop(
@@ -495,6 +537,7 @@ export function useDragReorder(deps: DragDeps) {
           grabbedKey,
           pending.parentId,
           pending.afterSiblingId,
+          pointerType,
         );
       }
       return;
@@ -502,19 +545,21 @@ export function useDragReorder(deps: DragDeps) {
     cleanup();
   }
 
-  function onCancel() {
+  function onCancel(e: PointerEvent) {
     const s = state.current;
-    if (!s) return;
+    if (!s || e.pointerId !== s.pointerId) return;
     if (s.dragging) consumed.current = true;
     cleanup();
   }
 
   const startDrag = useCallback(
     (grabbedKey: string, e: ReactPointerEvent) => {
+      if (!e.isPrimary) return;
       // A fresh press: clear any stale click-suppression.
       consumed.current = false;
       // Ignore secondary buttons.
       if (e.button !== 0 && e.pointerType === "mouse") return;
+      cleanup();
       // Snapshot selection ownership at press time, before any compatibility
       // mouse/focus events can run. Pointer cancel and failed async drops leave
       // the actor itself untouched; this snapshot only drives the gesture.
@@ -525,6 +570,9 @@ export function useDragReorder(deps: DragDeps) {
         sourceKeys: selected?.rowKeys ?? [grabbedKey],
         startX: e.clientX,
         startY: e.clientY,
+        pointerId: e.pointerId,
+        pointerType: e.pointerType,
+        pressedAt: performance.now(),
         dragging: false,
         rows: [],
         indent: INDENT_FALLBACK,
@@ -538,10 +586,15 @@ export function useDragReorder(deps: DragDeps) {
         moveHandler: onMove,
         upHandler: onUp,
         cancelHandler: onCancel,
+        touchHandler: onTouch,
       };
       document.addEventListener("pointermove", onMove, { passive: false });
       document.addEventListener("pointerup", onUp);
       document.addEventListener("pointercancel", onCancel);
+      if (e.pointerType === "touch") {
+        document.addEventListener("touchmove", onTouch, { passive: false });
+        document.addEventListener("touchstart", onTouch, { passive: false });
+      }
     },
     // startDrag must stay referentially stable (it rides in the memoized
     // commands, ADR 0014). onMove/onUp are recreated each render but read only
