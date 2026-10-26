@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.29.7
+
+### Patch Changes
+
+- 2203ed7: Keep typing responsive when a leaf stops matching a text or tag filter in an outline without mirrors.
+
 ## 1.29.6
 
 ### Patch Changes
