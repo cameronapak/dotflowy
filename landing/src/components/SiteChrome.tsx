@@ -153,6 +153,15 @@ export function Footer() {
         </nav>
       </div>
       <div className="mx-auto w-full max-w-2xl px-6 pb-6">
+        <p className="mb-4 text-sm text-muted-foreground">
+          Support:{" "}
+          <a
+            href="mailto:support@dotflowy.com"
+            className="underline underline-offset-2 transition-colors hover:text-foreground"
+          >
+            support@dotflowy.com
+          </a>
+        </p>
         <p className="text-xs text-muted-foreground/70">
           FAITH TOOLS SOFTWARE SOLUTIONS, LLC © {year}
         </p>
