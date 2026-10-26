@@ -155,7 +155,6 @@ interface DragState {
   moveHandler: (e: PointerEvent) => void;
   upHandler: (e: PointerEvent) => void;
   cancelHandler: (e: PointerEvent) => void;
-  touchHandler: (e: TouchEvent) => void;
 }
 
 export function useDragReorder(deps: DragDeps) {
@@ -180,8 +179,6 @@ export function useDragReorder(deps: DragDeps) {
     document.removeEventListener("pointermove", s.moveHandler);
     document.removeEventListener("pointerup", s.upHandler);
     document.removeEventListener("pointercancel", s.cancelHandler);
-    document.removeEventListener("touchmove", s.touchHandler);
-    document.removeEventListener("touchstart", s.touchHandler);
     state.current = null;
   }, []);
 
@@ -492,28 +489,31 @@ export function useDragReorder(deps: DragDeps) {
     project(e.clientX, e.clientY);
   }
 
-  function onTouch(e: TouchEvent) {
-    const s = state.current;
-    if (!s || s.pointerType !== "touch") return;
-    if (e.touches.length !== 1) {
-      consumed.current = true;
-      cleanup();
-      return;
-    }
-    // Pointer preventDefault cannot stop native touch panning. Take ownership
-    // only after the hold; before it, leave the browser free to scroll. A pan
-    // already claimed by the browser cannot be reclaimed mid-gesture.
-    if (
-      e.type === "touchmove" &&
-      performance.now() - s.pressedAt >= TOUCH_HOLD_MS
-    ) {
-      if (e.cancelable) e.preventDefault();
-      else {
+  const onTouch = useCallback(
+    (e: TouchEvent) => {
+      const s = state.current;
+      if (!s || s.pointerType !== "touch") return;
+      if (e.touches.length !== 1) {
         consumed.current = true;
         cleanup();
+        return;
       }
-    }
-  }
+      // Pointer preventDefault cannot stop native touch panning. Take ownership
+      // only after the hold; before it, leave the browser free to scroll. A pan
+      // already claimed by the browser cannot be reclaimed mid-gesture.
+      if (
+        e.type === "touchmove" &&
+        performance.now() - s.pressedAt >= TOUCH_HOLD_MS
+      ) {
+        if (e.cancelable) e.preventDefault();
+        else {
+          consumed.current = true;
+          cleanup();
+        }
+      }
+    },
+    [cleanup],
+  );
 
   function onUp(e: PointerEvent) {
     const s = state.current;
@@ -586,15 +586,10 @@ export function useDragReorder(deps: DragDeps) {
         moveHandler: onMove,
         upHandler: onUp,
         cancelHandler: onCancel,
-        touchHandler: onTouch,
       };
       document.addEventListener("pointermove", onMove, { passive: false });
       document.addEventListener("pointerup", onUp);
       document.addEventListener("pointercancel", onCancel);
-      if (e.pointerType === "touch") {
-        document.addEventListener("touchmove", onTouch, { passive: false });
-        document.addEventListener("touchstart", onTouch, { passive: false });
-      }
     },
     // startDrag must stay referentially stable (it rides in the memoized
     // commands, ADR 0014). onMove/onUp are recreated each render but read only
@@ -615,14 +610,19 @@ export function useDragReorder(deps: DragDeps) {
     return false;
   }, []);
 
-  // Unmount teardown. `cleanup` is otherwise only reached via `onUp`
-  // (pointerup/cancel); if this component unmounts mid-drag (the windowed source
-  // row scrolls out, a zoom/route change, a big sync re-render), the document
-  // pointer listeners + rAF loop + injected pill/indicator + `dragging-active`
-  // body class would all leak. An empty-dep effect whose cleanup runs only on
-  // unmount removes exactly that. cleanup() self-guards on a null drag, so this
-  // is a no-op when nothing is in flight. cleanup is stable ([] deps).
-  useEffect(() => cleanup, [cleanup]);
+  // Preinstall the guarded listener: WebKit propagates blocking touch regions
+  // asynchronously, so registering during pointerdown can be too late for the
+  // first move (WebKit bug 185656). Idle and pre-hold touches still scroll.
+  useEffect(() => {
+    document.addEventListener("touchmove", onTouch, { passive: false });
+    document.addEventListener("touchstart", onTouch, { passive: false });
+    return () => {
+      document.removeEventListener("touchmove", onTouch);
+      document.removeEventListener("touchstart", onTouch);
+      // Also tear down an in-flight drag on route change or editor unmount.
+      cleanup();
+    };
+  }, [cleanup, onTouch]);
 
   return { startDrag, consumeClick };
 }

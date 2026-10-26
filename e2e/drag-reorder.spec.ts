@@ -228,7 +228,7 @@ test.describe("touch drag", () => {
     const cdp = await page.context().newCDPSession(page);
     // A pickup close to its starting point is a no-op; cancellation after
     // leaving that gap also must not commit or leave gesture UI behind.
-    for (const cancel of [false, true]) {
+    for (const ending of ["same-spot", "cancel", "second-finger"]) {
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchStart",
         touchPoints: [{ x, y }],
@@ -236,11 +236,23 @@ test.describe("touch drag", () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchMove",
-        touchPoints: [{ x, y: cancel ? target.y : y + 6 }],
+        touchPoints: [{ x, y: ending === "same-spot" ? y + 6 : target.y }],
       });
       await expect(page.locator(".drag-pill")).toBeVisible();
+      if (ending === "second-finger") {
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchStart",
+          touchPoints: [
+            { x, y: target.y },
+            { x: x + 80, y: target.y },
+          ],
+        });
+        await expect(page.locator(".drag-pill, .drag-indicator")).toHaveCount(
+          0,
+        );
+      }
       await cdp.send("Input.dispatchTouchEvent", {
-        type: cancel ? "touchCancel" : "touchEnd",
+        type: ending === "cancel" ? "touchCancel" : "touchEnd",
         touchPoints: [],
       });
       await expect(page.locator(".drag-pill, .drag-indicator")).toHaveCount(0);
@@ -271,5 +283,28 @@ test.describe("touch drag", () => {
       .toEqual(["a0", "a1", "a3", "a4", "a5", "a2", "a6", "a7"]);
     await expect(page.locator(".node-text:focus")).toHaveCount(0);
     await expect(page).toHaveURL(/\/$/);
+
+    // A mouse on this same coarse-pointer device still drags immediately and
+    // focuses the landing row. Device-wide touch detection would get this wrong.
+    expect(
+      await page.evaluate(() => matchMedia("(pointer: coarse)").matches),
+    ).toBe(true);
+    const mouseStart = await page
+      .locator('li[data-node-id="a2"] .bullet')
+      .boundingBox();
+    if (!mouseStart) throw new Error("no bullet box");
+    const mouseTarget = await rowBox(page, "a1");
+    const mx = mouseStart.x + mouseStart.width / 2;
+    await page.mouse.move(mx, mouseStart.y + mouseStart.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(mx, mouseTarget.y, { steps: 5 });
+    await expect(page.locator(".drag-pill")).toBeVisible();
+    await page.mouse.up();
+    await expect
+      .poll(() => visibleOrder(page))
+      .toEqual(["a0", "a2", "a1", "a3", "a4", "a5", "a6", "a7"]);
+    await expect(
+      page.locator('li[data-node-id="a2"] .node-text'),
+    ).toBeFocused();
   });
 });

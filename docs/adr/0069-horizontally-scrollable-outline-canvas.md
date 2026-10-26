@@ -44,9 +44,14 @@ scrolling. A bullet tap zooms; a swipe beginning on the bullet also pans or
 scrolls. To reorder with touch, hold for 350ms within the existing 5px movement
 threshold, then move. Earlier movement cancels the pending drag and leaves
 scrolling to the browser. The bullet permits native panning and pinch zoom;
-a non-passive touchmove listener prevents panning only after the hold. A second
-finger or pointer cancellation abandons the drag. Mouse and pen retain the
-5px movement threshold without a hold.
+a non-passive touchmove listener prevents panning only after the hold. Install
+that guarded listener when the editor mounts, not during pointerdown: WebKit
+propagates blocking touch regions asynchronously, and a dynamically installed
+listener can miss the first cancellable move (WebKit bug 185656). This trades
+an idle blocking listener for reliable gesture ownership; idle touches still
+scroll because the handler does not cancel them. A second finger or pointer
+cancellation abandons the drag. Mouse and pen retain the 5px movement threshold
+without a hold.
 
 A touch drop flashes the landing row without requesting editor focus. The
 gesture's pointer type decides this, not the device's primary pointer, so a
