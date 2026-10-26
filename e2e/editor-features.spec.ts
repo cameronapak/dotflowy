@@ -38,6 +38,7 @@ test("Cmd+K plugin settings stay reachable when disabled and share Settings pref
   await action("Daily notes", "Turn on Daily notes");
   await action("Embeds", "Turn off Embeds");
   await page.goto("/settings");
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(
     page.getByRole("switch", { name: "Daily notes", exact: true }),
   ).toBeChecked();
@@ -58,6 +59,7 @@ test("Cmd+K plugin settings stay reachable when disabled and share Settings pref
     page.getByRole("switch", { name: "Week strip", exact: true }),
   ).not.toBeChecked();
   await page.reload();
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(
     page.getByRole("switch", { name: "Embeds", exact: true }),
   ).not.toBeChecked();
