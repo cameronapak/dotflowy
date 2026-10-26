@@ -32,9 +32,18 @@ different places, and it refuses the common "first child merges into its parent"
 
 ## Merging into a BLANK row removes the blank — it does not append onto it
 
-A merge normally keeps the target and deletes the source. When the target is **empty** the planner
+A merge normally keeps the target and deletes the source. When the target is an **empty leaf** the planner
 inverts that (`remove-empty-target`): the blank goes, and the edited node is left completely alone —
 same id, text, children, caret. On screen the two are indistinguishable. The difference is **identity**.
+
+Amended 2026-10-26 (#318): choose this removal before refusing a source with children.
+Enter at the start of an expanded or collapsed parent inserts a blank above it;
+Backspace removes that blank without moving the parent, its children, or its caret.
+The target must have no children: `removeNode` deletes a subtree, so deleting an
+empty ancestor or a collapsed blank parent would also delete content. Such targets
+stay eligible for an ordinary leaf-source join, which preserves their children.
+Mirror-source refusals, hidden-between checks, deletion guards, atomic persistence,
+and the existing render-key focus handoff still apply.
 
 This exists because of the arm directly above it in the same keymap: Enter at the start of a non-empty
 bullet inserts a blank sibling above and **leaves focus put** (#326), so Enter-then-Backspace is a pair
