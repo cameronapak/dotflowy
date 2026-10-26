@@ -950,9 +950,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     pendingFocusAtStart,
   ]);
   // scrollMargin = the list container's distance from the document top (header +
-  // title above it). Measured per zoom view; the editor remounts on zoom (route
-  // key), so a one-shot mount measure is current. listRef is set in the branch
-  // below, so this runs after the list paints once.
+  // title above it). Measure per zoom view and when loading ends: the initial
+  // layout effect can run while the skeleton is mounted and listRef is unset.
   const [scrollMargin, setScrollMargin] = useState(0);
   // The sticky header's height: a stream aligns sections just below it.
   const [headerHeight, setHeaderHeight] = useState(0);
@@ -997,7 +996,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       window.removeEventListener("resize", measure);
       ro?.disconnect();
     };
-  }, [rootId, zoomedNode?.id, stream]);
+  }, [rootId, zoomedNode?.id, stream, loading]);
   // row key -> flat index, for virtual-nav's off-screen scroll. Keyed by the
   // render ADDRESS (row.key), not the bare id: a source descendant appears under
   // every instance, so scrollRowIntoView/virtualRowRect must resolve the exact

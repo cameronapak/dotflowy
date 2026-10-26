@@ -100,6 +100,56 @@ test("the window bounds mounted rows, preserves depth, and follows scrolling", a
   await expect(page.locator('li[data-node-id="p0"]')).toBeVisible();
 });
 
+test("offscreen selection keeps its logical identity and Escape restores the focus-end caret", async ({
+  page,
+}) => {
+  await loadBig(page);
+  await placeCaret(text(page, "p0c2"), "start");
+  await page.keyboard.press("Shift+ArrowUp");
+  await page.keyboard.press("Shift+ArrowUp");
+  await page.keyboard.press("Shift+ArrowUp");
+
+  // Read the public selection model, not just mounted data-selected markers.
+  // The anchor and moving end differ so restoring the wrong end cannot pass.
+  const selection = () =>
+    page.evaluate(async () => {
+      const path = "/src/data/selection-state.ts";
+      const { getSelectionState } = await import(path);
+      return getSelectionState();
+    });
+  const expected = {
+    parentId: "p0",
+    anchorId: "p0c2",
+    focusId: "p0c0",
+    rootIds: ["p0c0", "p0c1", "p0c2"],
+  };
+  await expect.poll(selection).toEqual(expected);
+
+  await page.evaluate(() => window.scrollTo(0, 20000));
+  await expect(text(page, "p0c0")).toHaveCount(0);
+  await expect(text(page, "p0c2")).toHaveCount(0);
+  expect(await selection()).toEqual(expected);
+  expect(await rowCount(page)).toBeLessThan(100);
+
+  // Do not reveal the target in setup. Escape itself must scroll, remount and
+  // focus it after seeding its text, with a collapsed caret at the end.
+  await page.keyboard.press("Escape");
+  await expect.poll(selection).toBeNull();
+  await expect(text(page, "p0c0")).toBeFocused();
+  await page.keyboard.type(" appended");
+  await expect(text(page, "p0c0")).toHaveText("Item 0.0 appended");
+  await expect(text(page, "p0c1")).toHaveText("Item 0.1");
+  await expect(text(page, "p0c2")).toHaveText("Item 0.2");
+  await expect
+    .poll(async () => {
+      const nodes = await page.evaluate(async () =>
+        (await fetch("/api/nodes")).json(),
+      );
+      return nodes.find((node: SeedNode) => node.id === "p0c0")?.text;
+    })
+    .toBe("Item 0.0 appended");
+});
+
 test("typing reuses a wide parent's child list; completion and inserts invalidate it", async ({
   page,
 }) => {

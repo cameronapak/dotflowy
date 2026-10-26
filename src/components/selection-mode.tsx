@@ -59,6 +59,7 @@ import {
   getViewIsHidden,
   getViewRootId,
 } from "../data/view-state";
+import { scrollRowIntoView } from "../data/virtual-nav";
 import {
   findVisibleNeighbor,
   lastVisibleDescendant,
@@ -117,6 +118,11 @@ function makeSelectionOps({
     if (el) {
       el.focus();
       placeCaretAtEnd(el);
+    } else {
+      // Selection survives window eviction. Let the row claim focus after its
+      // text is seeded on remount, using the same address as the refs registry.
+      pendingFocus.current = id;
+      if (!scrollRowIntoView(id)) pendingFocus.current = null;
     }
   };
 

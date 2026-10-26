@@ -44,10 +44,25 @@ const visibleOrder = (page: Page) =>
       .map((r) => r.id),
   );
 
-test("the drop indicator tracks the hovered gap, not a shifted one", async ({
+test("after cold loading, the drop indicator and saved order match the hovered gap", async ({
   page,
 }) => {
-  await load(page);
+  const controller = await seedOutline(page, flatList());
+  const release = controller.holdSnapshots();
+  await page.goto("/");
+  await page
+    .getByRole("status", { name: "Loading outline" })
+    .waitFor({ state: "visible" });
+  // Let the loading layout and its initial ResizeObserver delivery finish
+  // before mounting the list. No resize or navigation may repair the geometry.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  release();
+  await expect(page.locator('li[data-node-id="a0"]')).toBeVisible();
 
   const bullet = page.locator('li[data-node-id="a0"] .bullet');
   const from = await bullet.boundingBox();
@@ -79,6 +94,14 @@ test("the drop indicator tracks the hovered gap, not a shifted one", async ({
   await expect
     .poll(() => visibleOrder(page))
     .toEqual(["a1", "a2", "a3", "a0", "a4", "a5", "a6", "a7"]);
+  await expect
+    .poll(async () => {
+      const nodes = await page.evaluate(async () =>
+        (await fetch("/api/nodes")).json(),
+      );
+      return nodes.find((node: SeedNode) => node.id === "a0")?.prevSiblingId;
+    })
+    .toBe("a3");
 });
 
 test("dragging right of a row nests the drop one level deeper", async ({
