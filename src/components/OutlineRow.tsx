@@ -1,21 +1,12 @@
 import { ChevronRight, LockIcon } from "lucide-react";
-import {
-  Fragment,
-  memo,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  type RefObject,
-} from "react";
+import { Fragment, memo, useLayoutEffect, useRef, type RefObject } from "react";
 
 import type { QueryFilter } from "../data/filter-query";
 import type { Node } from "../data/schema";
 import type { PluginContext, SlotSpec } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
-import { echoedTextFor } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
-import { getHistoryState } from "../data/history";
 import { useSelectionFill } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
 import {
@@ -34,16 +25,13 @@ import {
 import { hasFoldingToken } from "../plugins/registry";
 import { BulletGlyph } from "./bullet-glyph";
 import { focusTextFromRowTap } from "./caret-place";
-import { flashRow } from "./flash-node";
 import {
-  decorate,
-  getCaretOffset,
-  readSource,
-  revealLinkAtCaret,
-  setCaretOffset,
-  useEditorFeatureDecoration,
-  watchCaretReveal,
-} from "./inline-code";
+  useCaretReveal,
+  useInputDecoration,
+  useStoredTextDecoration,
+} from "./editor-decoration";
+import { flashRow } from "./flash-node";
+import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
 import { NodeBody } from "./node-body";
@@ -209,10 +197,14 @@ function RowChrome({
   measureRef,
 }: RowChromeProps) {
   const textRef = useRef<HTMLSpanElement | null>(null);
-  const syncedRef = useRef<string | null>(null);
-  const composingRef = useRef(false);
-  const caretWatchRef = useRef<(() => void) | null>(null);
-  useEditorFeatureDecoration(textRef, composingRef);
+  const {
+    syncedRef,
+    composingRef,
+    paintInput,
+    startComposition,
+    endComposition,
+  } = useInputDecoration(textRef);
+  const caretReveal = useCaretReveal(composingRef, syncedRef);
   const { slotsByPosition } = usePluginChrome();
 
   // Direct visible children of the CONTENT -- a mirror windows its source's
@@ -352,43 +344,12 @@ function RowChrome({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Push store text into the contentEditable when it changes from something
-  // other than this bullet's own typing (undo, programmatic setText, a genuine
-  // echo, OR a sibling instance of the same source editing it -- the live mirror
-  // sync). Focused-skip rationale: while THIS bullet is focused the DOM is the
-  // source of truth (onInput already wrote the latest text), and a store change
-  // that merely echoes the network back is a lagging/out-of-order echo of our
-  // own keystrokes -- repainting it scrambles characters and jumps the caret
-  // mid-type, so it's skipped; blur reconciles. See collection.ts `echoedText`.
-  useEffect(() => {
-    const el = textRef.current;
-    if (!el || composingRef.current) return;
-    if (syncedRef.current === content.text) return;
-    // Lunora owns the sticky optimistic hold across a missed shape poke. A DOM
-    // prefix guard here swallowed legitimate shrinks such as undo-to-empty.
-    if (
-      document.activeElement === el &&
-      !getHistoryState().busy &&
-      echoedTextFor(content.id) === content.text
-    ) {
-      return;
-    }
-    const focused = document.activeElement === el;
-    const revealOffset = focused ? getCaretOffset(el) : null;
-    decorate(el, content.text, revealOffset, focused);
-    syncedRef.current = content.text;
+  useStoredTextDecoration({
+    ref: textRef,
+    node: content,
+    syncedRef,
+    composingRef,
   });
-
-  // Unmount: tear down the caret-reveal watcher if it's still live. onBlur
-  // clears it too, but a windowed row can unmount while still focused (its
-  // bullet scrolls out of the window), and a blur isn't guaranteed on DOM
-  // disconnect -- so the document `selectionchange` listener would otherwise leak.
-  useEffect(() => {
-    return () => {
-      caretWatchRef.current?.();
-      caretWatchRef.current = null;
-    };
-  }, []);
 
   useBulletKeymap({
     node: content,
@@ -531,21 +492,13 @@ function RowChrome({
               commands.onTextChange(content.id, text);
               slash.handleInput();
               menus.handleInput();
-              if (!composingRef.current) {
-                decorate(el, text, getCaretOffset(el), true);
-                syncedRef.current = text;
-              }
+              paintInput(el, text);
             }}
-            onCompositionStart={() => {
-              composingRef.current = true;
-            }}
+            onCompositionStart={startComposition}
             onCompositionEnd={(e) => {
-              composingRef.current = false;
-              const el = e.currentTarget;
-              const text = readSource(el);
-              commands.onTextChange(content.id, text);
-              decorate(el, text, getCaretOffset(el), true);
-              syncedRef.current = text;
+              endComposition(e.currentTarget, (text) =>
+                commands.onTextChange(content.id, text),
+              );
             }}
             onPaste={(e) => {
               const el = e.currentTarget;
@@ -588,22 +541,13 @@ function RowChrome({
               if (e.target !== e.currentTarget) return;
               clearSelection();
               const el = e.currentTarget;
-              caretWatchRef.current?.();
-              caretWatchRef.current = watchCaretReveal(
-                el,
-                () => composingRef.current,
-              );
-              if (!hasFoldingToken(content.text)) return;
-              revealLinkAtCaret(el, (t) => {
-                syncedRef.current = t;
-              });
+              caretReveal.focus(el, content.text);
             }}
             onBlur={(e) => {
               if (e.target !== e.currentTarget) return;
               slash.close();
               menus.close();
-              caretWatchRef.current?.();
-              caretWatchRef.current = null;
+              caretReveal.blur();
               const el = e.currentTarget;
               if (
                 e.relatedTarget instanceof HTMLElement &&

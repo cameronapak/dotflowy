@@ -48,12 +48,11 @@ import type {
 } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
-import { echoedTextFor } from "../data/collection";
 import { setNodeActionBridge } from "../data/command-bridge";
 import { embedUrl } from "../data/embed-url";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
-import { capture, getHistoryState } from "../data/history";
+import { capture } from "../data/history";
 import { planJoinPrevious } from "../data/join-previous";
 import { getLiveNodes } from "../data/live-nodes";
 import {
@@ -160,19 +159,20 @@ import {
   DELETE_CONFIRM_THRESHOLD,
   openDeleteConfirm,
 } from "./delete-confirm-opener";
+import {
+  useCaretReveal,
+  useInputDecoration,
+  useStoredTextDecoration,
+} from "./editor-decoration";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
 import { captureTextHistory, runHistoryRestore } from "./history-restore";
 import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
 import {
   decorate,
-  getCaretOffset,
   getSelectedAtom,
   readSource,
-  revealLinkAtCaret,
   setCaretOffset,
-  useEditorFeatureDecoration,
-  watchCaretReveal,
 } from "./inline-code";
 import { signalJoinRefusal } from "./join-refusal";
 import { openInlineTargetAtCaret } from "./link-keymap";
@@ -3368,19 +3368,14 @@ function ZoomedTitle({
   setPendingFocus: (key: string, offset: number) => void;
 }) {
   const ref = useRef<HTMLSpanElement | null>(null);
-  // Mirror OutlineRow's live inline-`code` decoration so a backtick run in the
-  // title renders as a mono chip too. See inline-code.ts and OutlineRow.
-  const syncedRef = useRef<string | null>(null);
-  const composingRef = useRef(false);
-  const caretWatchRef = useRef<(() => void) | null>(null);
-  // Navigation can remove the focused title without firing blur.
-  useEffect(() => {
-    return () => {
-      caretWatchRef.current?.();
-      caretWatchRef.current = null;
-    };
-  }, []);
-  useEditorFeatureDecoration(ref, composingRef);
+  const {
+    syncedRef,
+    composingRef,
+    paintInput,
+    startComposition,
+    endComposition,
+  } = useInputDecoration(ref);
+  const caretReveal = useCaretReveal(composingRef, syncedRef);
   const { slotsByPosition } = usePluginChrome();
   // The protection rules (no delete/blank/to-do/complete) apply to the zoomed
   // node just as on a list bullet, so it wears the same indicator when zoomed.
@@ -3436,21 +3431,12 @@ function ZoomedTitle({
     },
   ];
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || composingRef.current) return;
-    if (syncedRef.current === node.text) return;
-    // Same focused-skip as OutlineRow: don't paint a lagging/stale store over
-    // local typing (classic echoedText + Lunora overlay gap).
-    if (document.activeElement === el && !getHistoryState().busy) {
-      if (echoedTextFor(node.id) === node.text) return;
-      const dom = readSource(el);
-      if (dom !== node.text && dom.startsWith(node.text)) return;
-    }
-    const focused = document.activeElement === el;
-    const revealOffset = focused ? getCaretOffset(el) : null;
-    decorate(el, node.text, revealOffset, focused);
-    syncedRef.current = node.text;
+  useStoredTextDecoration({
+    ref,
+    node,
+    syncedRef,
+    composingRef,
+    keepFocusedPrefix: true,
   });
 
   // The `/` palette (Seam C) on the zoomed title too, mirroring OutlineRow --
@@ -3557,23 +3543,11 @@ function ZoomedTitle({
               onTextChange(text);
               slash.handleInput();
               menus.handleInput();
-              // Re-decorate live, revealing the link under the caret. Suspended
-              // during IME composition; compositionend handles that case.
-              if (!composingRef.current) {
-                decorate(el, text, getCaretOffset(el), true);
-                syncedRef.current = text;
-              }
+              paintInput(el, text);
             }}
-            onCompositionStart={() => {
-              composingRef.current = true;
-            }}
+            onCompositionStart={startComposition}
             onCompositionEnd={(e) => {
-              composingRef.current = false;
-              const el = e.currentTarget;
-              const text = readSource(el);
-              onTextChange(text);
-              decorate(el, text, getCaretOffset(el), true);
-              syncedRef.current = text;
+              endComposition(e.currentTarget, onTextChange);
             }}
             onPaste={(e) => {
               const el = e.currentTarget;
@@ -3615,29 +3589,15 @@ function ZoomedTitle({
               // Caret and node selection are mutually exclusive (ADR 0018): focusing
               // the title leaves selection mode.
               clearSelection();
-              // Per-link reveal in the title (ADR 0005): watch the caret, and
-              // reveal the link it's currently on. Link-free is a no-op so the
-              // native caret stands.
               const el = e.currentTarget;
-              caretWatchRef.current?.();
-              caretWatchRef.current = watchCaretReveal(
-                el,
-                () => composingRef.current,
-              );
-              // Deferred to the next frame so a CLICK at the title's end settles on
-              // the folded layout before the link expands; see revealLinkAtCaret.
-              if (!hasFoldingToken(node.text)) return;
-              revealLinkAtCaret(el, (t) => {
-                syncedRef.current = t;
-              });
+              caretReveal.focus(el, node.text);
             }}
             onBlur={(e) => {
               if (e.target !== e.currentTarget) return;
               slash.close();
               menus.close();
               const el = e.currentTarget;
-              caretWatchRef.current?.();
-              caretWatchRef.current = null;
+              caretReveal.blur();
               if (
                 e.relatedTarget instanceof HTMLElement &&
                 el.contains(e.relatedTarget)

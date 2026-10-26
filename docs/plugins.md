@@ -102,6 +102,35 @@ Read with `readSource(el)`. Caret offsets are SOURCE offsets through
 `getCaretOffset` / `setCaretOffset` ([ADR 0005](./adr/0005-rich-links-source-offset-caret.md)).
 Stored text writes to the DOM only when it differs.
 
+`editor-decoration.ts` shares three responsibilities without owning the editor
+DOM, mutations, history, or keymaps:
+
+- `useInputDecoration` pauses input decoration during composition, then reads
+  source, writes it through the surface's callback, and decorates on composition
+  end. Input writes and menu updates still happen during composition. Only rows
+  run autoformat. All source/range math stays in `inline-code.ts`; decoration
+  preserves both selection endpoints and forward/backward direction.
+- `useCaretReveal` replaces the previous watcher on focus and disposes it on
+  blur or unmount, including disconnects without blur. Deferred focus reveal
+  still reads live source at frame time. Rows and titles check stored text for
+  folding tokens; Quick-add checks its draft DOM.
+- `useStoredTextDecoration` reconciles rows and titles after every render,
+  skipping composition, already-painted text, and focused echoes unless history
+  is restoring. The title retains its existing focused-prefix hold; rows accept
+  local shrinks. Quick-add does not use store-to-DOM reconciliation: its draft
+  adoption, clearing, restoration, and history scope remain capture-owned.
+
+Row mount-time seeding still precedes virtualized pending-focus claims. Mirror
+text writes use the content id; focus uses the render path. Enter/type/Enter
+stays synchronous, and persistence ordering and rollback remain data-layer
+responsibilities. No host reuse or DOM attribute changes belong in these hooks.
+
+Regression coverage: `emphasis.spec.ts` and `enter-split.spec.ts` cover source
+ranges and immediate typing; `quick-add.spec.ts` covers listener lifetime and
+capture adoption; `undo-redo.spec.ts` covers IME, rollback, and history isolation;
+`mirror-editing.spec.ts`, `multi-frame-echo.spec.ts`, and
+`virtualized-windowing.spec.ts` cover mirrors, echoes, and offscreen focus.
+
 `OutlineEditor` and `SwitcherDialog` carry `"use no memo"`. Keep the hand-tuned
 `memo` / `useMemo` on the contentEditable hot path.
 

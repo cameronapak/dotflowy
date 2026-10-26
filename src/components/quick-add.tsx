@@ -112,20 +112,13 @@ import {
   keymapSpecs,
   usePluginChrome,
 } from "../plugins/registry";
+import { useCaretReveal, useInputDecoration } from "./editor-decoration";
 import {
   captureTextHistory,
   runHistoryRestoreE,
   takeTextHistory,
 } from "./history-restore";
-import {
-  decorate,
-  getCaretOffset,
-  setSelectionOffsets,
-  readSource,
-  revealLinkAtCaret,
-  useEditorFeatureDecoration,
-  watchCaretReveal,
-} from "./inline-code";
+import { decorate, setSelectionOffsets, readSource } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import {
   buildTargetCandidates,
@@ -253,17 +246,14 @@ const MiniNodeEditor = forwardRef<
   handle,
 ) {
   const ref = useRef<HTMLSpanElement | null>(null);
-  const syncedRef = useRef<string | null>(null);
-  const composingRef = useRef(false);
-  const caretWatchRef = useRef<(() => void) | null>(null);
-  // Closing capture can remove the focused editor without firing blur.
-  useEffect(() => {
-    return () => {
-      caretWatchRef.current?.();
-      caretWatchRef.current = null;
-    };
-  }, []);
-  useEditorFeatureDecoration(ref, composingRef);
+  const {
+    syncedRef,
+    composingRef,
+    paintInput,
+    startComposition,
+    endComposition,
+  } = useInputDecoration(ref);
+  const caretReveal = useCaretReveal(composingRef, syncedRef);
   const { slotsByPosition } = usePluginChrome();
   const ownsFormatEditable = useCallback(
     (el: HTMLElement) => ref.current === el,
@@ -301,7 +291,7 @@ const MiniNodeEditor = forwardRef<
         );
       },
     }),
-    [],
+    [syncedRef],
   );
 
   // The `/` palette (Seam C), curated to text-authoring commands. Same wiring as
@@ -387,21 +377,11 @@ const MiniNodeEditor = forwardRef<
           onText(text);
           slash.handleInput();
           menus.handleInput();
-          if (!composingRef.current) {
-            decorate(el, text, getCaretOffset(el), true);
-            syncedRef.current = text;
-          }
+          paintInput(el, text);
         }}
-        onCompositionStart={() => {
-          composingRef.current = true;
-        }}
+        onCompositionStart={startComposition}
         onCompositionEnd={(e) => {
-          composingRef.current = false;
-          const el = e.currentTarget;
-          const text = readSource(el);
-          onText(text);
-          decorate(el, text, getCaretOffset(el), true);
-          syncedRef.current = text;
+          endComposition(e.currentTarget, onText);
         }}
         onPaste={(e) => {
           const el = e.currentTarget;
@@ -429,23 +409,14 @@ const MiniNodeEditor = forwardRef<
         onFocus={(e) => {
           if (e.target !== e.currentTarget) return;
           const el = e.currentTarget;
-          caretWatchRef.current?.();
-          caretWatchRef.current = watchCaretReveal(
-            el,
-            () => composingRef.current,
-          );
-          if (!hasFoldingToken(readSource(el))) return;
-          revealLinkAtCaret(el, (t) => {
-            syncedRef.current = t;
-          });
+          caretReveal.focus(el, readSource(el));
         }}
         onBlur={(e) => {
           if (e.target !== e.currentTarget) return;
           slash.close();
           menus.close();
           const el = e.currentTarget;
-          caretWatchRef.current?.();
-          caretWatchRef.current = null;
+          caretReveal.blur();
           if (
             e.relatedTarget instanceof HTMLElement &&
             el.contains(e.relatedTarget)

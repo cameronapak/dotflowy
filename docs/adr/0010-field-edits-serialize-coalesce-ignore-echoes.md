@@ -30,14 +30,20 @@ closes for structural writes (see [ADR 0009: Atomic structural writes](./0009-at
   lever:** a burst of N keystrokes costs ~1 Worker+DO round trip per RTT instead of N — a 40-char
   bullet bills a handful of requests, not 40. There is **no artificial debounce latency**: the
   optimistic overlay is already on screen, and we only ever batch what is already in flight.
-- **Ignore echo-driven repaints on the focused bullet (`collection.ts` `echoedText` + `OutlineNode`
-  store-sync effect).** The sync path records the last server-echoed text per node (`echoedTextFor`).
+- **Ignore echo-driven repaints on the focused bullet (`collection.ts` `echoedText` +
+  `editor-decoration.ts` `useStoredTextDecoration`).** The sync path records the last server-echoed text per node (`echoedTextFor`).
   While THIS bullet is focused the `contentEditable` is the source of truth, so the effect skips its
   repaint when the incoming `node.text` equals that last echo — i.e. the network reflecting your own
   (possibly stale/out-of-order) keystrokes back. The discriminator works because a LOCAL change
   (undo/redo restore, a slash insert) writes a value that does NOT match the latest echo and so still
   repaints; the echo only matches AFTER the local change has itself echoed. Reconciliation for the
   skipped case resumes on blur (`onBlur` re-reads the DOM).
+
+Rows and zoomed titles share that effect. History restoration bypasses the
+focused-echo guard. The title also retains its existing focused-prefix hold;
+rows do not, so local shrinks remain visible. Quick-add keeps its separate draft
+adoption path rather than applying stored text over its live draft. These are
+preserved differences, not a new synchronization policy.
 
 **This does NOT walk back "field edits must not await an echo."** The overlay still drops on the
 PATCH ack (snappy typing, no `waitForSeq`); the focused-bullet guard is what makes the surviving
