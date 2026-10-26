@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  mockKeyboardViewport,
   placeCaret,
   seedOutline,
   STANDARD_TREE,
@@ -61,6 +62,115 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     viewport: { width: 412, height: 900 },
   });
 
+  test.beforeEach(async ({ page }) => mockKeyboardViewport(page));
+
+  test("keyboard dismissal hides actions even when the input retains DOM focus", async ({
+    page,
+  }) => {
+    await load(page);
+    await page.evaluate(() => {
+      Object.defineProperty(visualViewport!, "height", {
+        configurable: true,
+        value: 900,
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    await text(page, "alpha").tap();
+    // DOM focus before the keyboard opens (or with a hardware keyboard) is not
+    // enough. A small browser-chrome change is not a keyboard either.
+    await expect(text(page, "alpha")).toBeFocused();
+    await expect(bar(page)).toHaveCount(0);
+    await page.evaluate(() => {
+      Object.defineProperty(visualViewport!, "height", {
+        configurable: true,
+        value: 850,
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    await expect(bar(page)).toHaveCount(0);
+    await page.evaluate(() => {
+      Object.defineProperty(visualViewport!, "height", {
+        configurable: true,
+        value: 537,
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    await expect(bar(page)).toBeVisible();
+    await page.evaluate(() => {
+      Object.defineProperty(visualViewport!, "height", {
+        configurable: true,
+        value: 900,
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    await expect(text(page, "alpha")).toBeFocused();
+    await expect(bar(page)).toHaveCount(0);
+    // Pinch zoom without a keyboard must not bring it back.
+    await page.evaluate(() => {
+      Object.defineProperties(visualViewport!, {
+        height: { configurable: true, value: 450 },
+        scale: { configurable: true, value: 2 },
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    await expect(bar(page)).toHaveCount(0);
+    // Reopening the keyboard on the same input has no new focusin event.
+    await page.evaluate(() => {
+      Object.defineProperties(visualViewport!, {
+        height: { configurable: true, value: 537 },
+        scale: { configurable: true, value: 1 },
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    await expect(bar(page)).toBeVisible();
+    await page.keyboard.insertText(" resumed");
+    await expect(text(page, "alpha")).toContainText("resumed");
+  });
+
+  test("virtualizing away the input hides actions and refocusing restores them", async ({
+    page,
+  }) => {
+    await seedOutline(
+      page,
+      Array.from({ length: 500 }, (_, i) => ({
+        id: `row-${i}`,
+        parentId: null,
+        prevSiblingId: i ? `row-${i - 1}` : null,
+        text: `Reading row ${i}`,
+      })),
+    );
+    await page.goto("/");
+    await text(page, "row-0").tap();
+    await page.evaluate(() => {
+      Object.defineProperty(visualViewport!, "height", {
+        configurable: true,
+        value: 537,
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    await expect(bar(page)).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 20000));
+    await expect(text(page, "row-0")).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.activeElement === document.body),
+    ).toBe(true);
+    await expect(bar(page)).toHaveCount(0);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await text(page, "row-0").tap();
+    await expect(text(page, "row-0")).toBeFocused();
+    await expect(bar(page)).toBeVisible();
+    await placeCaret(text(page, "row-0"), "end");
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(bar(page)).toHaveCount(0);
+    await expect(page.locator('li[data-node-id="row-0"]')).toHaveAttribute(
+      "data-selected",
+      "single",
+    );
+    await page.keyboard.press("Escape");
+    await expect(text(page, "row-0")).toBeFocused();
+    await expect(bar(page)).toBeVisible();
+  });
+
   test("on a coarse pointer the bar appears only while a bullet is focused", async ({
     page,
   }) => {
@@ -74,7 +184,7 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(bar(page)).toHaveCount(0);
     await text(page, "alpha").click();
     await expect(bar(page)).toBeVisible();
-    // System Done/back dismisses the keyboard by blurring the editable span.
+    // Explicit blur must hide the bar even before the keyboard has resized.
     // SAFETY: text() selects the outline row's contentEditable HTML span.
     await text(page, "alpha").evaluate((el) => (el as HTMLElement).blur());
     await expect(bar(page)).toHaveCount(0);
@@ -119,16 +229,15 @@ test.describe("mobile actions bar (coarse pointer)", () => {
       page.locator('li[data-node-id="alpha-2"][data-parent-id="alpha-1"]'),
     ).toBeVisible();
 
-    // Closing the keyboard restores the original bottom anchor.
+    // Closing the keyboard removes the bar even if DOM focus stays put.
     await page.evaluate(() => {
       const vv = window.visualViewport!;
       Object.defineProperty(vv, "height", { configurable: true, value: 900 });
       Object.defineProperty(vv, "offsetTop", { configurable: true, value: 0 });
       vv.dispatchEvent(new Event("resize"));
     });
-    await expect
-      .poll(() => bar(page).evaluate((el) => el.getBoundingClientRect().bottom))
-      .toBe(894);
+    await expect(text(page, "alpha-2")).toBeFocused();
+    await expect(bar(page)).toHaveCount(0);
   });
 
   test("pinch zoom does not masquerade as a keyboard resize or pan", async ({
@@ -153,7 +262,7 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     );
     expect(
       await bar(page).evaluate((el) => el.getBoundingClientRect().bottom),
-    ).toBe(894);
+    ).toBe(594); // Keyboard-open frame is unchanged by pinch zoom.
   });
 
   test("falls back to window resizing without the Visual Viewport API", async ({
@@ -420,11 +529,14 @@ test.describe("mobile actions bar (coarse pointer)", () => {
       .toBe(true);
     const url = sheet.getByLabel("Link URL");
     await expect(url).toBeFocused();
+    await expect(bar(page)).toHaveCount(0);
     await url.fill("https://example.com");
     await expect(sheet.getByRole("heading")).toHaveText("Add link");
     await done.click();
     // Done animates the sheet out, then the overlay unmounts.
     await expect(sheet).toHaveCount(0);
+    await expect(text(page, "n")).toBeFocused();
+    await expect(bar(page)).toBeVisible();
     // The caret is back inside the new link, so it renders revealed: the label
     // as text and the url as a chip.
     await expect(text(page, "n").locator(".link-label")).toHaveText(
@@ -434,6 +546,20 @@ test.describe("mobile actions bar (coarse pointer)", () => {
       text(page, "n").locator('.link-url-chip[data-src="https://example.com"]'),
     ).toHaveCount(1);
   });
+});
+
+test("a fine pointer never shows mobile actions, even in a narrow keyboard-sized viewport", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 412, height: 900 });
+  await mockKeyboardViewport(page);
+  await load(page);
+  await text(page, "alpha").click();
+  expect(await page.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(
+    true,
+  );
+  await expect(text(page, "alpha")).toBeFocused();
+  await expect(bar(page)).toHaveCount(0);
 });
 
 // Native formatting input (ADR 0069): the iOS selection menu's Format items

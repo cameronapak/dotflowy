@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  mockKeyboardViewport,
   openSeededOutline,
   placeCaret,
   seedOutline,
@@ -181,6 +182,8 @@ test.describe("day navigation on touch", () => {
     hasTouch: true,
     isMobile: true,
   });
+
+  test.beforeEach(async ({ page }) => mockKeyboardViewport(page));
 
   for (const spotlight of [false, true]) {
     test(`Today owns the title until editing takes over, spotlight ${spotlight}`, async ({
@@ -434,9 +437,10 @@ test.describe("day navigation on touch", () => {
       );
       // A reduced viewport puts this short day's last line inside the screen
       // but behind the toolbar, unlike the long day's fully offscreen caret.
+      // The fixture reserves 300px of the layout viewport for the keyboard.
       await page.setViewportSize({
         width: 390,
-        height: Math.ceil(caretBottom + 8),
+        height: Math.ceil(caretBottom + 8 + 300),
       });
       const caretClear = () =>
         editor.evaluate((el) => {
@@ -445,7 +449,7 @@ test.describe("day navigation on touch", () => {
             .querySelector("[data-mobile-bar]")!
             .getBoundingClientRect();
           return {
-            inViewport: caret.top >= 0 && caret.bottom < innerHeight,
+            inViewport: caret.top >= 0 && caret.bottom < visualViewport!.height,
             aboveToolbar: caret.bottom < bar.top,
           };
         });
@@ -507,7 +511,9 @@ test.describe("day navigation on touch", () => {
       await page.setViewportSize({
         width: 390,
         height: Math.ceil(
-          await editor.evaluate((el) => el.getBoundingClientRect().bottom + 8),
+          await editor.evaluate(
+            (el) => el.getBoundingClientRect().bottom + 8 + 300,
+          ),
         ),
       });
       const caretClear = () =>
@@ -530,8 +536,8 @@ test.describe("day navigation on touch", () => {
             // satisfy that too, before the resized title has been seated.
             return (
               caret.top >= 0 &&
-              caret.bottom <= innerHeight &&
-              (bar.top > innerHeight || caret.bottom > bar.top)
+              caret.bottom <= visualViewport!.height &&
+              (bar.top > visualViewport!.height || caret.bottom > bar.top)
             );
           });
         })
@@ -575,7 +581,10 @@ test.describe("day navigation on touch", () => {
         .poll(() =>
           page
             .getByRole("toolbar", { name: "Editing actions" })
-            .evaluate((el) => el.getBoundingClientRect().bottom <= innerHeight),
+            .evaluate(
+              (el) =>
+                el.getBoundingClientRect().bottom <= visualViewport!.height,
+            ),
         )
         .toBe(true);
       await expect.poll(caretClear).toBe(true);

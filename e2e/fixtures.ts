@@ -16,6 +16,18 @@ import {
 export const text = (page: Page, id: string): Locator =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
 
+/** Desktop browser engines cannot open a software keyboard. Model its viewport
+ * reduction explicitly for toolbar journeys; this is not native-device proof. */
+export async function mockKeyboardViewport(page: Page) {
+  await page.addInitScript(() => {
+    if (!window.visualViewport) return;
+    Object.defineProperty(window.visualViewport, "height", {
+      configurable: true,
+      get: () => window.innerHeight - 300,
+    });
+  });
+}
+
 /**
  * Focus `target` and collapse the caret at a source offset, or at either edge.
  * Set the Selection directly instead of pressing Home/End or clicking at a

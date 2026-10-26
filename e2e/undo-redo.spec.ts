@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   holdDailyClaims,
+  mockKeyboardViewport,
   placeCaret,
   seedOutline,
   STANDARD_TREE,
@@ -614,6 +615,7 @@ test.describe("mobile history actions", () => {
     page,
   }) => {
     test.setTimeout(90_000);
+    await mockKeyboardViewport(page);
     await seedOutline(page, STANDARD_TREE);
     await page.goto("/");
     const alpha = page.locator(

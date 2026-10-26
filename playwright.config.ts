@@ -31,6 +31,12 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     {
+      name: "mobile-toolbar-webkit",
+      testMatch: "mobile-actions-bar.spec.ts",
+      grep: /mobile actions bar \(coarse pointer\)/,
+      use: { ...devices["iPhone 13"] },
+    },
+    {
       name: "day-stream-webkit",
       testMatch: "day-stream.spec.ts",
       grep: /day navigation on touch/,

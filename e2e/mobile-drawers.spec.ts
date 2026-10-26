@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { mockKeyboardViewport, seedOutline, type SeedNode } from "./fixtures";
 
 // Include desktop scrollbar gutters in the narrow-window keyboard check.
 test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } });
@@ -182,6 +182,7 @@ test.describe("narrow-screen drawers", () => {
   test("typing suggestions replace the toolbar, scroll options, and dismiss outside", async ({
     page,
   }) => {
+    await mockKeyboardViewport(page);
     await load(page);
     await editor(page).tap();
     await page.keyboard.type("/");
