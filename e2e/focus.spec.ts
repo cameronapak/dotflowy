@@ -301,6 +301,9 @@ test("slash start, remembered custom length, cross-tab pause, reload, extension 
     .click();
   await expect(band(page)).toContainText("Paused");
   await page.reload();
+  // As on initial navigation, document load precedes the lazy editor and sync.
+  // Give readiness the test budget before asserting the restored session state.
+  await text(page, "draft").waitFor({ state: "visible" });
   await expect(band(page)).toContainText("Paused");
   await picker(page, "other");
   await expect(
