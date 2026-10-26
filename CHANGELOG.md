@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.29.2
+
+### Patch Changes
+
+- 0c2e9db: Fix spotlight centering when a row receives focus during startup.
+
 ## 1.29.1
 
 ### Patch Changes
