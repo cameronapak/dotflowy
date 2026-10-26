@@ -125,7 +125,7 @@ export function runStructuralTracked<T>(
       // A captured-but-no-op command (e.g. indent at the top of a list) makes no
       // mutations; skip the network round-trip entirely.
       if (ops.length === 0) return;
-      // P1 (atomic, writeSem-serialized send) → P2 (hold optimistic until the
+      // P1 (atomic, ordered send) → P2 (hold optimistic until the
       // echo) as ONE Effect program, bridged once here at the async mutationFn
       // seam (ADR 0021). waitForSeqE never fails, so the only rejection — which
       // rolls the transaction back — comes from the batch send (incl. the free
