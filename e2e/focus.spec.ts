@@ -274,6 +274,10 @@ test("View actions target the page, hide at Home, and Locked Done cannot complet
 test("slash start, remembered custom length, cross-tab pause, reload, extension and PiP reflection", async ({
   page,
 }) => {
+  // Three editor loads plus Settings/PiP interactions share this one journey.
+  // Cold-shard traces spend over 20s loading those pages alone; assertions keep
+  // their normal 5s budget and this workflow still runs without retries.
+  test.setTimeout(60_000);
   await page.clock.install();
   const outline = await seedOutline(page, TREE);
   await openSeededOutline(page, { anchorId: "draft" });
@@ -405,6 +409,7 @@ test("slash start, remembered custom length, cross-tab pause, reload, extension 
   await popup.close();
   await other.close();
   await page.goto("/settings");
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(
     page.getByRole("spinbutton", { name: "Focus minutes", exact: true }),
   ).toHaveValue("3");
