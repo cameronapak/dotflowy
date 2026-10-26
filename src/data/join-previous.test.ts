@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { buildFilterOperatorMap, buildQueryFilter } from "./filter-query";
 import { planJoinPrevious } from "./join-previous";
 import { buildTreeIndex, createNode } from "./tree";
+import { rowKeyFor } from "./visible-order";
 
 const show = () => false; // nothing hidden
 const hideCompleted = (n: { completed: boolean }) => n.completed;
@@ -106,7 +107,13 @@ describe("planJoinPrevious — refusals", () => {
   const index = buildTreeIndex(tree);
 
   test("has-children: a bullet with children is refused, never reparented", () => {
-    expect(planJoinPrevious(index, "A", null, show, null, false)).toEqual({
+    const withChildren = buildTreeIndex([
+      ...tree,
+      createNode({ id: "b1", parentId: "B", text: "child" }),
+    ]);
+    expect(
+      planJoinPrevious(withChildren, "B", null, show, null, false),
+    ).toEqual({
       kind: "refuse",
       reason: "has-children",
     });
@@ -295,5 +302,121 @@ describe("planJoinPrevious — refusals", () => {
       kind: "refuse",
       reason: "mirror-row",
     });
+  });
+});
+
+test.each([false, true])(
+  "removing a blank above a parent preserves its subtree (collapsed=%s)",
+  (collapsed) => {
+    const index = buildTreeIndex([
+      createNode({ id: "blank", text: "" }),
+      createNode({
+        id: "parent",
+        prevSiblingId: "blank",
+        text: "parent",
+        collapsed,
+      }),
+      createNode({ id: "child", parentId: "parent", text: "child" }),
+    ]);
+    expect(planJoinPrevious(index, "parent", null, show, null, false)).toEqual({
+      kind: "remove-empty-target",
+      targetKey: "blank",
+      targetId: "blank",
+      targetContentId: "blank",
+    });
+  },
+);
+
+test.each([" ", "previous"])(
+  "a parent cannot join into nonempty text %j",
+  (text) => {
+    const index = buildTreeIndex([
+      createNode({ id: "previous", text }),
+      createNode({ id: "parent", prevSiblingId: "previous", text: "parent" }),
+      createNode({ id: "child", parentId: "parent", text: "child" }),
+    ]);
+    expect(planJoinPrevious(index, "parent", null, show, null, false)).toEqual({
+      kind: "refuse",
+      reason: "has-children",
+    });
+  },
+);
+
+test.each([false, true])(
+  "a blank with children is not deleted (collapsed=%s)",
+  (collapsed) => {
+    const index = buildTreeIndex([
+      createNode({ id: "blank", text: "", collapsed }),
+      createNode({ id: "child", parentId: "blank", text: "child" }),
+      createNode({ id: "parent", prevSiblingId: "blank", text: "parent" }),
+      createNode({ id: "grandchild", parentId: "parent", text: "grandchild" }),
+    ]);
+    expect(planJoinPrevious(index, "parent", null, show, null, false)).toEqual({
+      kind: "refuse",
+      reason: "has-children",
+    });
+    // A leaf may still join into its empty parent, but must not delete the parent
+    // (and recursively itself) through the blank-removal plan.
+    if (!collapsed)
+      expect(
+        planJoinPrevious(index, "child", null, show, null, false),
+      ).toMatchObject({ kind: "join", targetId: "blank", seamOffset: 0 });
+  },
+);
+
+test("a parent cannot remove a blank across a hidden row or a filter gap", () => {
+  const index = buildTreeIndex([
+    createNode({ id: "blank", text: "" }),
+    createNode({
+      id: "hidden",
+      prevSiblingId: "blank",
+      text: "hidden",
+      completed: true,
+    }),
+    createNode({ id: "parent", prevSiblingId: "hidden", text: "parent" }),
+    createNode({ id: "child", parentId: "parent", text: "child" }),
+  ]);
+  expect(
+    planJoinPrevious(index, "parent", null, hideCompleted, null, false),
+  ).toEqual({ kind: "refuse", reason: "hidden-between" });
+  const filter = buildQueryFilter(
+    index,
+    null,
+    "-hidden",
+    show,
+    buildFilterOperatorMap([]),
+  )!;
+  expect(planJoinPrevious(index, "parent", null, show, filter, false)).toEqual({
+    kind: "refuse",
+    reason: "hidden-between",
+  });
+});
+
+test("blank removal inside a mirror keeps the target's render path", () => {
+  const index = buildTreeIndex([
+    createNode({ id: "source", text: "source" }),
+    createNode({ id: "blank", parentId: "source", text: "" }),
+    createNode({
+      id: "parent",
+      parentId: "source",
+      prevSiblingId: "blank",
+      text: "parent",
+    }),
+    createNode({ id: "child", parentId: "parent", text: "child" }),
+    createNode({ id: "mirror", prevSiblingId: "source", mirrorOf: "source" }),
+  ]);
+  const plan = planJoinPrevious(
+    index,
+    rowKeyFor("mirror", "parent"),
+    null,
+    show,
+    null,
+    true,
+  );
+  expect(plan).toEqual({
+    kind: "remove-empty-target",
+    targetKey: rowKeyFor("mirror", "blank"),
+    targetId: "blank",
+    targetContentId: "blank",
   });
 });

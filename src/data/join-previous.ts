@@ -76,21 +76,19 @@ const NOTHING_HIDDEN: (n: Node) => boolean = () => false;
  *
  * The eligibility walk, in order:
  *
- * 1. **has-children** -- a bullet with children is refused, never reparented.
- *    The children are on screen, so the reason is self-evident.
- * 2. **mirror-row** -- the row being merged AWAY must not be a mirror instance:
+ * 1. **mirror-row** -- the row being merged AWAY must not be a mirror instance:
  *    its text belongs to a shared source that survives the join, so the merge
  *    would copy the text into the target while it still exists everywhere else.
  *    (A mirror as the *target* is fine -- appending edits the shared source,
  *    which is exactly how editing a mirror already works.)
- * 3. **hidden-between** -- two walks: what the user SEES (collapse +
+ * 2. **hidden-between** -- two walks: what the user SEES (collapse +
  *    hide-completed + an active `?q=`) versus what they'd see with only collapse
  *    applied. When they disagree, something invisible sits between the two rows
  *    and a merge would relocate text past a node the user can't see. Collapse is
  *    deliberately NOT disqualifying: a collapsed node's descendants aren't
  *    visible rows in either walk, so both land on the collapsed node itself --
  *    which is the right target.
- * 4. **no-target** -- nothing above (the first row under a zoom root already
+ * 3. **no-target** -- nothing above (the first row under a zoom root already
  *    resolves to the root's own title key, which IS a legal target). Also the
  *    self-referential shape: a mirror of THIS node rendering directly above it
  *    resolves its content back to us, which would be a write-then-delete of one
@@ -98,9 +96,11 @@ const NOTHING_HIDDEN: (n: Node) => boolean = () => false;
  *
  * Then one of two plans, depending on the target:
  *
- * - **remove-empty-target** -- the row above is empty, so the blank goes and
- *   this node is left untouched. Identical on screen to appending onto it, but
- *   identity stays with the text (see the kind's own doc comment).
+ * - **remove-empty-target** -- the row above is an empty leaf, so the blank
+ *   goes and this node is left untouched, even if it has children. Identity
+ *   stays with the text (see the kind's own doc comment).
+ * - **has-children** -- otherwise a bullet with children is refused, never
+ *   deleted or reparented by a join.
  * - **join** -- the ordinary merge: the target keeps its id and gains this
  *   node's text, this row disappears, and the caret lands at the seam.
  *
@@ -126,9 +126,6 @@ export function planJoinPrevious(
   const content = index.byId.get(contentId);
   if (!content) return { kind: "refuse", reason: "no-target" };
 
-  if (childrenOf(index, contentId).length > 0) {
-    return { kind: "refuse", reason: "has-children" };
-  }
   if (contentId !== instanceId) {
     return { kind: "refuse", reason: "mirror-row" };
   }
@@ -176,14 +173,23 @@ export function planJoinPrevious(
   }
 
   // Merging INTO a blank line is just "remove the blank line" -- same result on
-  // screen, but this node keeps its id (see the kind's own doc comment).
-  if (target.text.length === 0) {
+  // screen, but this node keeps its id AND children. The target must be a leaf:
+  // removeNode deletes recursively, including hidden children or this very row
+  // when the target is its empty parent.
+  if (
+    target.text.length === 0 &&
+    childrenOf(index, targetContentId).length === 0
+  ) {
     return {
       kind: "remove-empty-target",
       targetKey,
       targetId,
       targetContentId,
     };
+  }
+
+  if (childrenOf(index, contentId).length > 0) {
+    return { kind: "refuse", reason: "has-children" };
   }
 
   return {
