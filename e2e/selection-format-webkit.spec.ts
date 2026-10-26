@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { seedOutline, text } from "./fixtures";
+import { mockKeyboardViewport, seedOutline, text } from "./fixtures";
 
 // Touch formatting (ADR 0069) in WebKit, iOS Safari's engine, with real taps:
 // the bar's preventDefault-on-pointerdown must keep the selection alive across
@@ -12,6 +12,8 @@ test.use({
   isMobile: true,
   viewport: { width: 390, height: 844 },
 });
+
+test.beforeEach(async ({ page }) => mockKeyboardViewport(page));
 
 test("tapping Bold over a selection toggles it on and off", async ({
   page,

@@ -13,17 +13,26 @@ deleted once dogfooded (2026-07-12) — the bar now mounts unconditionally and s
 selection inside one bullet swaps these buttons for the formatting set
 ([ADR 0069](./0069-touch-selection-formatting.md)).
 
-**Signal assignment (the load-bearing decision).** Three orthogonal browser signals drive three orthogonal
-behaviors, and keeping them separate is what makes the bar robust:
+**Signal assignment.** Pointer type gates presence; DOM focus and keyboard geometry gate visibility;
+the visual viewport positions the bar:
 
 - **Presence = pointer type.** `matchMedia("(pointer: coarse)")` gates whether the bar exists at all
   (mirrored by a CSS `@media` defense). Pointer type, not viewport width, is the honest "this is a finger"
   signal — the same seam ADR 0029 already uses for the right-edge chevron. A mouse user in a narrow window
   never sees it; a phone always does.
-- **Visibility = focus.** The bar shows only while an outline contentEditable span is focused (keyboard-up
-  state) and hides on blur. This is not cosmetic: it guarantees every button has a valid target by
-  construction — `findFocusedId()` is non-null whenever the bar is visible, so each zero-arg action can
-  resolve the node it operates on with no ambiguity and no "nothing selected" state to design around.
+- **Visibility = live editable focus + keyboard-up viewport.** `findFocusedId()` must resolve the actual
+  `document.activeElement`, which must still be editable, in an active, visible document. Logical node
+  selection is not input focus. A keyboard can close without blur; WebKit can also remove a focused
+  virtualized row without emitting blur. The bar rechecks viewport and document lifecycle events and
+  observes removal along the focused input's ancestor chain, without observing text mutations or
+  changing selection, composition, or focus restoration.
+  With Visual Viewport support, the layout height must exceed `height * scale` by more than 100 CSS
+  pixels. Scaling removes pinch zoom from that estimate; ignoring small differences avoids mistaking
+  browser chrome for a keyboard. Panning does not subtract from keyboard size. This is a heuristic for
+  docked keyboards, not a universal keyboard visibility API: floating/overlay keyboards and hardware
+  keyboards do not produce the required reduction. Engines without Visual Viewport and embedded frames
+  (including the landing demo) retain focus-only visibility as a compatibility fallback. Iframe visual
+  viewport dimensions always match their layout viewport, so they cannot detect keyboard dismissal.
 - **Position = visual viewport.** `useKeyboardViewport` uses Adobe's `useViewportSize` from
   `@react-aria/utils` for keyboard-aware height and tracks `visualViewport.offsetTop` on rAF-throttled
   resize/scroll events. A fixed, pointer-transparent frame fits that visible band, with the interactive
@@ -99,5 +108,6 @@ API first.
 **Manual iPhone checklist in the PR:** real keyboard animation, iOS contentEditable focus-preservation under
 `preventDefault`, and how the glass capsule reads stacked above the system accessory pill. Playwright can't
 drive a real software keyboard or render the iOS accessory bar. The e2e suite (`e2e/mobile-actions-bar.spec.ts`)
-checks geometry with synthetic visual-viewport resize/scroll events, including keyboard close, pinch zoom,
-and the no-API fallback, alongside coarse-only mount, focus/blur visibility, and each button's action wiring.
+checks geometry with synthetic visual-viewport resize/scroll events in Chromium and WebKit, including
+keyboard close/reopen without blur, pinch zoom, and the no-API fallback. It also checks virtualized input
+removal, logical selection, focus restoration, coarse-only mount, sheets, and each button's action wiring.

@@ -41,26 +41,90 @@ export interface MobileBarActions {
 }
 
 /**
- * Whether an outline contentEditable span is currently focused (keyboard-up
- * state). `findFocusedId()` is non-null exactly when the active element is a
- * registered outline span, so it doubles as the "is editing" probe (ADR 0030).
- * focusout fires BEFORE the next focusin when moving between bullets, so we
- * re-check on the next frame to avoid a flicker when focus hops span-to-span.
+ * DOM focus and a keyboard-sized viewport reduction are separate requirements:
+ * dismissing the software keyboard need not blur its input. Never change the
+ * editor's logical selection or blur an input just to hide this chrome.
  */
-function useOutlineEditing(findFocusedId: () => string | null): boolean {
+function useOutlineEditing(
+  coarse: boolean,
+  findFocusedId: () => string | null,
+): boolean {
   const [editing, setEditing] = useState(false);
   useEffect(() => {
-    const update = () => setEditing(findFocusedId() !== null);
-    const onFocusOut = () => requestAnimationFrame(update);
+    if (!coarse) return;
+    // Iframes (the landing demo) have no distinct visual viewport. Preserve
+    // their focus-only behavior rather than permanently hiding their actions.
+    const viewport = window.top === window ? window.visualViewport : null;
+    let raf = 0;
+    let observed: HTMLElement | null = null;
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    const observer = new MutationObserver(schedule);
+    const update = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      const active = document.activeElement;
+      const input =
+        active instanceof HTMLElement &&
+        active.isContentEditable &&
+        findFocusedId() !== null
+          ? active
+          : null;
+      if (input !== observed) {
+        observer.disconnect();
+        observed = input;
+        if (input) {
+          observer.observe(input, {
+            attributes: true,
+            attributeFilter: ["contenteditable"],
+          });
+          // WebKit does not emit blur when a virtualized focused row is removed.
+          // Watch its ancestor chain, not the outline subtree or text mutations.
+          for (
+            let parent = input.parentElement;
+            parent;
+            parent = parent.parentElement
+          ) {
+            observer.observe(parent, { childList: true });
+          }
+        }
+      }
+      // Normalize pinch zoom so zoom alone cannot look like a keyboard. Ignore
+      // small browser-chrome differences; viewport panning is not keyboard size.
+      // Older engines without this API retain the focus-only fallback.
+      const keyboard =
+        !viewport ||
+        window.innerHeight - viewport.height * viewport.scale > 100;
+      setEditing(
+        !!input && document.hasFocus() && !document.hidden && keyboard,
+      );
+    };
     update();
     document.addEventListener("focusin", update);
-    document.addEventListener("focusout", onFocusOut);
+    document.addEventListener("focusout", schedule);
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    window.addEventListener("pageshow", update);
+    window.addEventListener("resize", schedule);
+    viewport?.addEventListener("resize", schedule);
+    viewport?.addEventListener("scroll", schedule);
     return () => {
+      observer.disconnect();
+      if (raf) cancelAnimationFrame(raf);
       document.removeEventListener("focusin", update);
-      document.removeEventListener("focusout", onFocusOut);
+      document.removeEventListener("focusout", schedule);
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+      window.removeEventListener("pageshow", update);
+      window.removeEventListener("resize", schedule);
+      viewport?.removeEventListener("resize", schedule);
+      viewport?.removeEventListener("scroll", schedule);
     };
-  }, [findFocusedId]);
-  return editing;
+  }, [coarse, findFocusedId]);
+  return coarse && editing;
 }
 
 function sameKeys(a: Set<string> | null, b: Set<string> | null): boolean {
@@ -185,9 +249,8 @@ function Divider() {
 
 /**
  * Mobile-only, keyboard-anchored action strip (ADR 0030). Mounts ONLY on a coarse
- * pointer and shows ONLY while a bullet is focused; rides above the software
- * keyboard via visualViewport. Presence = pointer, visibility = focus, position =
- * viewport — three orthogonal signals, kept separate on purpose.
+ * pointer and shows ONLY while an editable bullet has DOM focus and the software
+ * keyboard reduces the visual viewport. Position still follows useKeyboardViewport.
  *
  * Styled as a floating frosted-glass CAPSULE, not a full-width edge bar, so it
  * reads as a sibling of iOS's own keyboard accessory pill (which the web can't
@@ -205,7 +268,7 @@ export function MobileActionsBar({
   findFocusedId: () => string | null;
 }) {
   const coarse = useCoarsePointer();
-  const editing = useOutlineEditing(findFocusedId);
+  const editing = useOutlineEditing(coarse, findFocusedId);
   const { height, offsetTop } = useKeyboardViewport();
   const history = useHistoryState();
   // Format mode (ADR 0069): a text selection inside one bullet swaps the node
