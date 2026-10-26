@@ -397,10 +397,11 @@ describe("caret nav under an active ?q= filter (render parity, ADR 0047)", () =>
   });
 
   test("lastVisibleDescendant descends a collapsed context ancestor to its revealed match", () => {
-    expect(lastVisibleDescendant(index, "P2", show, filter)).toBe("D");
+    const rows = buildVisibleRows(index, null, show, filter);
+    expect(lastVisibleDescendant(rows, "P2")).toBe("D");
     // ...but stops at children the filter prunes: B has none visible anyway,
     // and P's only child K is visible, so parity holds there too.
-    expect(lastVisibleDescendant(index, "P", show, filter)).toBe("K");
+    expect(lastVisibleDescendant(rows, "P")).toBe("K");
   });
 
   test("lastVisibleDescendant stops at a COLLAPSED MATCH (its children aren't revealed)", () => {
@@ -428,12 +429,16 @@ describe("caret nav under an active ?q= filter (render parity, ADR 0047)", () =>
       show,
       buildFilterOperatorMap([]),
     )!;
-    expect(lastVisibleDescendant(i2, "M", show, f2)).toBe("M");
+    expect(
+      lastVisibleDescendant(buildVisibleRows(i2, null, show, f2), "M"),
+    ).toBe("M");
   });
 
   test("no filter (null) keeps today's unfiltered behavior byte-for-byte", () => {
     expect(findVisibleNeighbor(index, null, "K", "down", show)).toBe("B");
-    expect(lastVisibleDescendant(index, "P2", show)).toBe("P2");
+    expect(
+      lastVisibleDescendant(buildVisibleRows(index, null, show), "P2"),
+    ).toBe("P2");
   });
 });
 
@@ -553,4 +558,91 @@ test("nested mirrors keep revealed children separate from dimmed context on anot
   ]);
   expect(filter?.matchIds.has("container")).toBe(false);
   expect(filter?.matchIds.has(nestedKey)).toBe(true);
+});
+
+test.each([
+  {
+    mirrors: false,
+    collapsed: false,
+    query: "",
+    sourceBottom: "deep",
+    mirrorBottom: "M",
+  },
+  {
+    mirrors: true,
+    collapsed: false,
+    query: "",
+    sourceBottom: "deep",
+    mirrorBottom: "M\u0001child\u0001deep",
+  },
+  {
+    mirrors: true,
+    collapsed: true,
+    query: "",
+    sourceBottom: "deep",
+    mirrorBottom: "M",
+  },
+  // A deep match reveals a collapsed mirror, but a match on that mirror keeps
+  // its own collapse. Both are decisions made by the render filter, not nav.
+  {
+    mirrors: true,
+    collapsed: true,
+    query: "#deep",
+    sourceBottom: "deep",
+    mirrorBottom: "M\u0001child\u0001deep",
+  },
+  {
+    mirrors: true,
+    collapsed: true,
+    query: "#root",
+    sourceBottom: "deep",
+    mirrorBottom: "M",
+  },
+])(
+  "subtree bottoms follow rendered source/mirror paths: %j",
+  ({ mirrors, collapsed, query, sourceBottom, mirrorBottom }) => {
+    const index = buildTreeIndex([
+      createNode({ id: "A", text: "Source #root" }),
+      createNode({ id: "child", parentId: "A" }),
+      createNode({ id: "deep", parentId: "child", text: "#deep" }),
+      createNode({
+        id: "hidden",
+        parentId: "A",
+        prevSiblingId: "child",
+        completed: true,
+      }),
+      createNode({ id: "M", prevSiblingId: "A", mirrorOf: "A", collapsed }),
+      createNode({ id: "after", prevSiblingId: "M", text: "#root #deep" }),
+    ]);
+    const filter = query
+      ? buildQueryFilter(index, null, query, hideCompleted, queryOperators)
+      : null;
+    const rows = buildVisibleRows(index, null, hideCompleted, filter, mirrors);
+    expect(lastVisibleDescendant(rows, "A")).toBe(sourceBottom);
+    expect(lastVisibleDescendant(rows, "M")).toBe(mirrorBottom);
+    expect(lastVisibleDescendant(rows, "after")).toBe("after");
+    expect(lastVisibleDescendant(rows, "hidden")).toBe("hidden");
+  },
+);
+
+test("subtree bottoms keep nested mirror paths and stop at cycle caps and broken sources", () => {
+  const index = buildTreeIndex([
+    createNode({ id: "A" }),
+    createNode({ id: "loop", parentId: "A", mirrorOf: "A" }),
+    createNode({ id: "P", prevSiblingId: "A" }),
+    createNode({ id: "M", parentId: "P", mirrorOf: "A" }),
+    createNode({ id: "outer", prevSiblingId: "P", mirrorOf: "P" }),
+    createNode({ id: "broken", prevSiblingId: "outer", mirrorOf: "missing" }),
+  ]);
+  const rows = buildVisibleRows(index, null, show, null, true);
+  expect(lastVisibleDescendant(rows, "A")).toBe("loop");
+  expect(lastVisibleDescendant(rows, "P")).toBe("M\u0001loop");
+  expect(lastVisibleDescendant(rows, "outer")).toBe("outer\u0001M\u0001loop");
+  expect(lastVisibleDescendant(rows, "outer\u0001M")).toBe(
+    "outer\u0001M\u0001loop",
+  );
+  expect(lastVisibleDescendant(rows, "outer\u0001M\u0001loop")).toBe(
+    "outer\u0001M\u0001loop",
+  );
+  expect(lastVisibleDescendant(rows, "broken")).toBe("broken");
 });
