@@ -52,7 +52,7 @@ import { setNodeActionBridge } from "../data/command-bridge";
 import { embedUrl } from "../data/embed-url";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
-import { capture, drop, getHistoryState } from "../data/history";
+import { capture, getHistoryState } from "../data/history";
 import { planJoinPrevious } from "../data/join-previous";
 import { getLiveNodes } from "../data/live-nodes";
 import {
@@ -549,7 +549,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
             ? (index.byId.get(newParentInstanceId)?.mirrorOf ??
               newParentInstanceId)
             : newParentInstanceId;
-        capture(index, instanceId, null, { label: "move" });
+        const drop = capture(index, instanceId, null, { label: "move" });
         const moved = moveNode(index, instanceId, newParentId, afterSiblingId);
         if (moved) {
           // Land focus + flash in the instance that was dragged (re-derived from
@@ -2816,7 +2816,9 @@ function useNodeCommands({
               const activeKey = findFocusedId() ?? id;
               const instanceId = instanceIdForKey(activeKey);
               // Moving the node reparents it, which drops focus. Re-focus after render.
-              capture(getTreeIndex(), activeKey, null, { label: "indent" });
+              const drop = capture(getTreeIndex(), activeKey, null, {
+                label: "indent",
+              });
               if (indent(getTreeIndex(), instanceId, isMirrorsEnabled()))
                 return { instanceId, activeKey };
               drop(); // no move happened; discard the redundant undo point
@@ -2840,7 +2842,9 @@ function useNodeCommands({
               const node = getTreeIndex().byId.get(instanceId);
               if (node && node.parentId === getViewRootId()) return null;
               // Same remount-drops-focus issue as indent; re-focus on a real move.
-              capture(getTreeIndex(), activeKey, null, { label: "outdent" });
+              const drop = capture(getTreeIndex(), activeKey, null, {
+                label: "outdent",
+              });
               if (outdent(getTreeIndex(), instanceId))
                 return { instanceId, activeKey };
               drop();
@@ -2862,7 +2866,9 @@ function useNodeCommands({
               const activeKey = findFocusedId() ?? id;
               const instanceId = instanceIdForKey(activeKey);
               // Reorder/outdent remounts the contentEditable; re-focus on a real move.
-              capture(getTreeIndex(), activeKey, null, { label: "move" });
+              const drop = capture(getTreeIndex(), activeKey, null, {
+                label: "move",
+              });
               const moved = moveUp(getTreeIndex(), instanceId, {
                 isVisible: (n) => !getViewIsHidden()(n),
                 rootId: getViewRootId(),
@@ -2889,7 +2895,9 @@ function useNodeCommands({
             (): { instanceId: string; activeKey: string } | null => {
               const activeKey = findFocusedId() ?? id;
               const instanceId = instanceIdForKey(activeKey);
-              capture(getTreeIndex(), activeKey, null, { label: "move" });
+              const drop = capture(getTreeIndex(), activeKey, null, {
+                label: "move",
+              });
               const moved = moveDown(getTreeIndex(), instanceId, {
                 isVisible: (n) => !getViewIsHidden()(n),
                 rootId: getViewRootId(),
@@ -2962,7 +2970,7 @@ function useNodeCommands({
             return;
           }
           runStructural(() => {
-            capture(idx, activeKey, null, { label: "delete" });
+            const drop = capture(idx, activeKey, null, { label: "delete" });
             // Focus the row directly ABOVE the deleted one (Workflowy backspace
             // behavior), computed before the mutation so the neighbor still
             // exists. Fall back to removeNode's structural pick (next sibling /

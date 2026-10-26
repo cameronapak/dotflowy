@@ -29,7 +29,7 @@ import {
   unlockCommand,
 } from "../data/core-commands";
 import { isMirrorsEnabled } from "../data/flags";
-import { capture, drop } from "../data/history";
+import { capture } from "../data/history";
 import { outlineToMarkdown } from "../data/markdown";
 import {
   indentManyNodes,
@@ -251,7 +251,7 @@ function makeSelectionOps({
     const ids = getSelectionRootIds();
     if (ids.length === 0) return;
     runStructural(() => {
-      capture(getTreeIndex(), ids[0]!, null, { label: "indent" });
+      const drop = capture(getTreeIndex(), ids[0]!, null, { label: "indent" });
       if (indentManyNodes(ids, isMirrorsEnabled())) refreshSelection();
       else drop();
     });
@@ -267,7 +267,7 @@ function makeSelectionOps({
     if (!state || state.parentId === null || state.parentId === getViewRootId())
       return;
     runStructural(() => {
-      capture(getTreeIndex(), ids[0]!, null, { label: "outdent" });
+      const drop = capture(getTreeIndex(), ids[0]!, null, { label: "outdent" });
       if (outdentManyNodes(ids)) refreshSelection();
       else drop();
     });

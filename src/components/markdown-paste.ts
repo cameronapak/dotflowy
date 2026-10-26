@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import { nodesCollection } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
-import { capture, drop, RESTORE_SLICE_OPS } from "../data/history";
+import { capture, RESTORE_SLICE_OPS } from "../data/history";
 import { getLiveNodes } from "../data/live-nodes";
 import {
   countForest,
@@ -170,7 +170,7 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
   };
 
   // ONE undo point BEFORE the batch: a single Cmd+Z removes the whole paste.
-  capture(index, activeKey, null, { label: "paste" });
+  const drop = capture(index, activeKey, null, { label: "paste" });
 
   const notify = () => {
     const literalIds = new Set(plan.literalIds);
@@ -226,6 +226,7 @@ export function pasteMarkdownTree(args: MarkdownPasteArgs): boolean {
     writeInserts,
     writeRepoints,
     count,
+    drop,
   }).then((applied) => {
     if (applied) notify();
   });
@@ -285,6 +286,7 @@ async function runSliced(
     writeInserts: (start: number, end: number) => void;
     writeRepoints: () => void;
     count: number;
+    drop: () => void;
   },
 ): Promise<boolean> {
   let applied = 0;
@@ -326,7 +328,7 @@ async function runSliced(
   } catch {
     // The transaction rolled back, so the outline already matches the captured
     // snapshot -- drop the redundant undo point (the OPML dialog's `drop()`).
-    drop();
+    w.drop();
     setRestoreProgress({ kind: "closed" });
     toast.error("The paste could not be saved. Nothing was pasted.");
     return false;

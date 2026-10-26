@@ -4,7 +4,7 @@ import { CircleCheckIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { nodesCollection } from "../data/collection";
-import { capture, drop } from "../data/history";
+import { capture } from "../data/history";
 import {
   OPML_APP_MAX_NODES,
   OpmlEmpty,
@@ -230,7 +230,7 @@ export function OpmlImportDialog() {
     }
 
     // ONE undo point BEFORE the batch: a single Cmd+Z removes the whole import.
-    capture(index, null, null, { label: "import" });
+    const drop = capture(index, null, null, { label: "import" });
 
     // The plan is insert-only, emitted depth-first pre-order with the sibling
     // chain wired by construction — replayed verbatim into the collection, in

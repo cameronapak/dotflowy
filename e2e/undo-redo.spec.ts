@@ -249,6 +249,37 @@ test("Cmd+K exposes disabled history, then typing can be undone and redone", asy
   await page.getByPlaceholder("Search nodes and actions...").fill("redo");
   await page.getByRole("option", { name: /^Redo typing/ }).click();
   await expect(alpha).toHaveText("Alpha updated");
+
+  // The DOM updates before restore's caret/paint work releases the edit gate.
+  const pressWhenReady = async (key: string) => {
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const path = "/src/data/history.ts";
+          return (await import(path)).getHistoryState().busy;
+        }),
+      )
+      .toBe(false);
+    await page.keyboard.press(key);
+  };
+  await pressWhenReady("ControlOrMeta+z");
+  await expect(alpha).toHaveText("Alpha");
+  // Indenting the first root is a captured no-op, not a new timeline.
+  await placeCaret(alpha, "end");
+  await pressWhenReady("Tab");
+  await pressWhenReady("ControlOrMeta+Shift+z");
+  await expect(alpha).toHaveText("Alpha updated");
+  await pressWhenReady("ControlOrMeta+z");
+  await expect(alpha).toHaveText("Alpha");
+  await pressWhenReady("End");
+  await page.keyboard.type(" branch");
+  await page.keyboard.type(" continued");
+  await pressWhenReady("ControlOrMeta+Shift+z");
+  await expect(alpha).toHaveText("Alpha branch continued");
+  await pressWhenReady("ControlOrMeta+z");
+  await expect(alpha).toHaveText("Alpha");
+  await pressWhenReady("ControlOrMeta+Shift+z");
+  await expect(alpha).toHaveText("Alpha branch continued");
 });
 
 test("title undo returns to the editing root and Cmd+K can redo it", async ({

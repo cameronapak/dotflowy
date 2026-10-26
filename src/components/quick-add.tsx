@@ -75,7 +75,6 @@ import type { NodeCommands } from "./node-commands";
 import { loadEditorFeatures, useEditorFeatures } from "../data/editor-features";
 import {
   capture,
-  drop,
   finishHistoryScope,
   trackPendingCapture,
 } from "../data/history";
@@ -774,8 +773,8 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       const index = getTreeIndex();
       const kids = childrenOf(index, parentId);
       const after = kids.length ? kids[kids.length - 1]!.id : null;
+      const drop = capture(index, id, null, { label: "move", scope });
       const moved = runStructural(() => {
-        capture(index, id, null, { label: "move", scope });
         return moveNode(index, id, parentId, after);
       });
       if (!moved) drop();
