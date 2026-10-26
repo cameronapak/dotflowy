@@ -185,6 +185,16 @@ test("sliced paste batches notifications, restores exact rows, and rolls back a 
   });
   const saved = (): Promise<ApiNode[]> =>
     page.evaluate(async () => (await fetch("/api/nodes")).json());
+  // Saved rows and the closed dialog precede restore's final caret/paint work.
+  const waitForHistoryIdle = () =>
+    expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const path = "/src/data/history.ts";
+          return (await import(path)).getHistoryState().busy;
+        }),
+      )
+      .toBe(false);
   const authoring = (nodes: ApiNode[]) =>
     nodes
       .map((node) => ({ ...node, updatedAt: 0 }))
@@ -206,15 +216,18 @@ test("sliced paste batches notifications, restores exact rows, and rolls back a 
   expect(
     Number(await page.locator("html").getAttribute("data-delete")),
   ).toBeGreaterThanOrEqual(500);
+  await waitForHistoryIdle();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder("Search nodes and actions...").fill("redo");
   await page.getByRole("option", { name: /^Redo/ }).click();
   await expect.poll(async () => authoring(await saved())).toEqual(pasted);
   await expect(page.getByTestId("history-restore-dialog")).toHaveCount(0);
+  await waitForHistoryIdle();
   await caretAt(page, "n", 0);
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(async () => authoring(await saved())).toEqual(original);
   await expect(page.getByTestId("history-restore-dialog")).toHaveCount(0);
+  await waitForHistoryIdle();
   await caretAt(page, "n", 0);
   server.failNextWrite();
   await pasteInto(text(page, "n"), input);
@@ -227,6 +240,7 @@ test("sliced paste batches notifications, restores exact rows, and rolls back a 
   await page.getByPlaceholder("Search nodes and actions...").fill("redo");
   await page.getByRole("option", { name: /^Redo paste/ }).click();
   await expect.poll(async () => authoring(await saved())).toEqual(pasted);
+  await waitForHistoryIdle();
   // Reload verifies the persisted graph, not only the optimistic DOM.
   await page.reload();
   await text(page, "n").waitFor({ state: "visible" });
