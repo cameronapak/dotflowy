@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.29.9
+
+### Patch Changes
+
+- 511f103: Backspace removes the empty line inserted above a parent by Enter, preserving its children and caret. Empty parents are no longer mistaken for disposable blank lines.
+
 ## 1.29.8
 
 ### Patch Changes
