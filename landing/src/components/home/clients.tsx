@@ -62,11 +62,15 @@ export function ClientRow({ className }: { className?: string }) {
                   <img
                     src={c.image.light}
                     alt={c.name}
+                    width={364}
+                    height={100}
                     className="h-5 w-auto dark:hidden"
                   />
                   <img
                     src={c.image.dark}
                     alt={c.name}
+                    width={364}
+                    height={100}
                     className="hidden h-5 w-auto dark:block"
                   />
                 </>

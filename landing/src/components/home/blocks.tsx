@@ -133,6 +133,13 @@ export const APP_JSON_LD = {
     { "@type": "Offer", name: "Founding", price: "99", priceCurrency: "USD" },
   ],
   author: { "@type": "Person", name: "Cameron Pak" },
+  publisher: {
+    "@type": "Organization",
+    "@id": "https://dotflowy.com/#publisher",
+    name: "FAITH TOOLS SOFTWARE SOLUTIONS, LLC",
+    url: "https://dotflowy.com",
+    email: "support@dotflowy.com",
+  },
 };
 
 /** The three plans as one compact, scannable block. */

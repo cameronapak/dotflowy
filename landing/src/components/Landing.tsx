@@ -137,8 +137,14 @@ export function Landing() {
   const shipped = recentReleaseCount();
   return (
     <div className="flex min-h-screen flex-col">
+      <a
+        href="#main-content"
+        className="sr-only rounded-md bg-background text-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-3 focus:outline-2 focus:outline-offset-2 focus:outline-foreground"
+      >
+        Skip to content
+      </a>
       <Nav />
-      <main className="flex-1">
+      <main id="main-content" tabIndex={-1} className="flex-1">
         <Hero />
 
         <Section className="max-w-5xl">
@@ -166,7 +172,7 @@ export function Landing() {
           <p className="text-brand-blue mb-3 text-sm font-medium">
             AI agents · Unlimited and Founding
           </p>
-          <H2>Let your AI agent tidy your outline. Keep your secrets.</H2>
+          <H2>Let your AI agent tidy your outline.</H2>
           <Lede>
             Connect ChatGPT, Claude, Cursor, or any MCP client and approve it
             once. Ask it to sort today&apos;s notes, plan under a bullet, or
@@ -200,7 +206,7 @@ export function Landing() {
             <li className="flex items-start gap-2.5">
               <Dot className="mt-2" />
               Text in a spoiler reaches agents redacted. You can still search
-              it.
+              it. Spoilers are not access control.
             </li>
             <li className="flex items-start gap-2.5">
               <Dot className="mt-2" />

@@ -1,0 +1,3 @@
+# Host-only HSTS for the landing Worker. Subdomain coverage is not verified.
+/*
+  Strict-Transport-Security: max-age=86400
