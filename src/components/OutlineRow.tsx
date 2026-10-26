@@ -34,15 +34,14 @@ import {
 import { hasFoldingToken } from "../plugins/registry";
 import { BulletGlyph } from "./bullet-glyph";
 import { focusTextFromRowTap } from "./caret-place";
+import { useCaretReveal } from "./editor-decoration";
 import { flashRow } from "./flash-node";
 import {
   decorate,
   getCaretOffset,
   readSource,
-  revealLinkAtCaret,
   setCaretOffset,
   useEditorFeatureDecoration,
-  watchCaretReveal,
 } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
@@ -211,7 +210,7 @@ function RowChrome({
   const textRef = useRef<HTMLSpanElement | null>(null);
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
-  const caretWatchRef = useRef<(() => void) | null>(null);
+  const caretReveal = useCaretReveal(composingRef, syncedRef);
   useEditorFeatureDecoration(textRef, composingRef);
   const { slotsByPosition } = usePluginChrome();
 
@@ -378,17 +377,6 @@ function RowChrome({
     decorate(el, content.text, revealOffset, focused);
     syncedRef.current = content.text;
   });
-
-  // Unmount: tear down the caret-reveal watcher if it's still live. onBlur
-  // clears it too, but a windowed row can unmount while still focused (its
-  // bullet scrolls out of the window), and a blur isn't guaranteed on DOM
-  // disconnect -- so the document `selectionchange` listener would otherwise leak.
-  useEffect(() => {
-    return () => {
-      caretWatchRef.current?.();
-      caretWatchRef.current = null;
-    };
-  }, []);
 
   useBulletKeymap({
     node: content,
@@ -588,22 +576,13 @@ function RowChrome({
               if (e.target !== e.currentTarget) return;
               clearSelection();
               const el = e.currentTarget;
-              caretWatchRef.current?.();
-              caretWatchRef.current = watchCaretReveal(
-                el,
-                () => composingRef.current,
-              );
-              if (!hasFoldingToken(content.text)) return;
-              revealLinkAtCaret(el, (t) => {
-                syncedRef.current = t;
-              });
+              caretReveal.focus(el, content.text);
             }}
             onBlur={(e) => {
               if (e.target !== e.currentTarget) return;
               slash.close();
               menus.close();
-              caretWatchRef.current?.();
-              caretWatchRef.current = null;
+              caretReveal.blur();
               const el = e.currentTarget;
               if (
                 e.relatedTarget instanceof HTMLElement &&

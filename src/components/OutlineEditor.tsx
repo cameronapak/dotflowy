@@ -160,6 +160,7 @@ import {
   DELETE_CONFIRM_THRESHOLD,
   openDeleteConfirm,
 } from "./delete-confirm-opener";
+import { useCaretReveal } from "./editor-decoration";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
 import { captureTextHistory, runHistoryRestore } from "./history-restore";
@@ -169,10 +170,8 @@ import {
   getCaretOffset,
   getSelectedAtom,
   readSource,
-  revealLinkAtCaret,
   setCaretOffset,
   useEditorFeatureDecoration,
-  watchCaretReveal,
 } from "./inline-code";
 import { signalJoinRefusal } from "./join-refusal";
 import { openInlineTargetAtCaret } from "./link-keymap";
@@ -3372,14 +3371,7 @@ function ZoomedTitle({
   // title renders as a mono chip too. See inline-code.ts and OutlineRow.
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
-  const caretWatchRef = useRef<(() => void) | null>(null);
-  // Navigation can remove the focused title without firing blur.
-  useEffect(() => {
-    return () => {
-      caretWatchRef.current?.();
-      caretWatchRef.current = null;
-    };
-  }, []);
+  const caretReveal = useCaretReveal(composingRef, syncedRef);
   useEditorFeatureDecoration(ref, composingRef);
   const { slotsByPosition } = usePluginChrome();
   // The protection rules (no delete/blank/to-do/complete) apply to the zoomed
@@ -3615,29 +3607,15 @@ function ZoomedTitle({
               // Caret and node selection are mutually exclusive (ADR 0018): focusing
               // the title leaves selection mode.
               clearSelection();
-              // Per-link reveal in the title (ADR 0005): watch the caret, and
-              // reveal the link it's currently on. Link-free is a no-op so the
-              // native caret stands.
               const el = e.currentTarget;
-              caretWatchRef.current?.();
-              caretWatchRef.current = watchCaretReveal(
-                el,
-                () => composingRef.current,
-              );
-              // Deferred to the next frame so a CLICK at the title's end settles on
-              // the folded layout before the link expands; see revealLinkAtCaret.
-              if (!hasFoldingToken(node.text)) return;
-              revealLinkAtCaret(el, (t) => {
-                syncedRef.current = t;
-              });
+              caretReveal.focus(el, node.text);
             }}
             onBlur={(e) => {
               if (e.target !== e.currentTarget) return;
               slash.close();
               menus.close();
               const el = e.currentTarget;
-              caretWatchRef.current?.();
-              caretWatchRef.current = null;
+              caretReveal.blur();
               if (
                 e.relatedTarget instanceof HTMLElement &&
                 el.contains(e.relatedTarget)

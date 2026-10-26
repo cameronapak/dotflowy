@@ -112,6 +112,7 @@ import {
   keymapSpecs,
   usePluginChrome,
 } from "../plugins/registry";
+import { useCaretReveal } from "./editor-decoration";
 import {
   captureTextHistory,
   runHistoryRestoreE,
@@ -122,9 +123,7 @@ import {
   getCaretOffset,
   setSelectionOffsets,
   readSource,
-  revealLinkAtCaret,
   useEditorFeatureDecoration,
-  watchCaretReveal,
 } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import {
@@ -255,14 +254,7 @@ const MiniNodeEditor = forwardRef<
   const ref = useRef<HTMLSpanElement | null>(null);
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
-  const caretWatchRef = useRef<(() => void) | null>(null);
-  // Closing capture can remove the focused editor without firing blur.
-  useEffect(() => {
-    return () => {
-      caretWatchRef.current?.();
-      caretWatchRef.current = null;
-    };
-  }, []);
+  const caretReveal = useCaretReveal(composingRef, syncedRef);
   useEditorFeatureDecoration(ref, composingRef);
   const { slotsByPosition } = usePluginChrome();
   const ownsFormatEditable = useCallback(
@@ -429,23 +421,14 @@ const MiniNodeEditor = forwardRef<
         onFocus={(e) => {
           if (e.target !== e.currentTarget) return;
           const el = e.currentTarget;
-          caretWatchRef.current?.();
-          caretWatchRef.current = watchCaretReveal(
-            el,
-            () => composingRef.current,
-          );
-          if (!hasFoldingToken(readSource(el))) return;
-          revealLinkAtCaret(el, (t) => {
-            syncedRef.current = t;
-          });
+          caretReveal.focus(el, readSource(el));
         }}
         onBlur={(e) => {
           if (e.target !== e.currentTarget) return;
           slash.close();
           menus.close();
           const el = e.currentTarget;
-          caretWatchRef.current?.();
-          caretWatchRef.current = null;
+          caretReveal.blur();
           if (
             e.relatedTarget instanceof HTMLElement &&
             el.contains(e.relatedTarget)
