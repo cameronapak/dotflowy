@@ -18,7 +18,7 @@ const AMP_WORDMARK =
 
 type Client =
   | { name: string; icon: string }
-  | { name: string; image: string }
+  | { name: string; image: { light: string; dark: string } }
   | { name: string; wordmark: { path: string; viewBox: string } };
 
 const CLIENTS: Client[] = [
@@ -26,8 +26,15 @@ const CLIENTS: Client[] = [
   { name: "ChatGPT", icon: OPENAI },
   { name: "Claude", icon: CLAUDE },
   { name: "Cursor", icon: CURSOR },
-  // kody.codes/images/kody-mark.png: a raster mascot, so an <img>.
-  { name: "Kody", image: "/kody-mark.png" },
+  // Official logos from https://kody.codes/brand-guide, used without alteration.
+  // The 20px mark has at least 5px clear space inside the 36px pill.
+  {
+    name: "Kody",
+    image: {
+      light: "/kody-logo-outlined.svg",
+      dark: "/kody-logo-white.svg",
+    },
+  },
 ];
 
 export function ClientRow({ className }: { className?: string }) {
@@ -50,25 +57,28 @@ export function ClientRow({ className }: { className?: string }) {
                 >
                   <path d={c.wordmark.path} />
                 </svg>
+              ) : "image" in c ? (
+                <>
+                  <img
+                    src={c.image.light}
+                    alt={c.name}
+                    className="h-5 w-auto dark:hidden"
+                  />
+                  <img
+                    src={c.image.dark}
+                    alt={c.name}
+                    className="hidden h-5 w-auto dark:block"
+                  />
+                </>
               ) : (
                 <>
-                  {"icon" in c ? (
-                    <svg
-                      viewBox="0 0 24 24"
-                      aria-hidden
-                      className="size-4 fill-current"
-                    >
-                      <path d={c.icon} />
-                    </svg>
-                  ) : (
-                    <img
-                      src={c.image}
-                      alt=""
-                      width={16}
-                      height={16}
-                      className="size-4 object-contain"
-                    />
-                  )}
+                  <svg
+                    viewBox="0 0 24 24"
+                    aria-hidden
+                    className="size-4 fill-current"
+                  >
+                    <path d={c.icon} />
+                  </svg>
                   {c.name}
                 </>
               )}
