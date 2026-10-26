@@ -48,12 +48,11 @@ import type {
 } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
-import { echoedTextFor } from "../data/collection";
 import { setNodeActionBridge } from "../data/command-bridge";
 import { embedUrl } from "../data/embed-url";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
-import { capture, getHistoryState } from "../data/history";
+import { capture } from "../data/history";
 import { planJoinPrevious } from "../data/join-previous";
 import { getLiveNodes } from "../data/live-nodes";
 import {
@@ -160,14 +159,17 @@ import {
   DELETE_CONFIRM_THRESHOLD,
   openDeleteConfirm,
 } from "./delete-confirm-opener";
-import { useCaretReveal, useInputDecoration } from "./editor-decoration";
+import {
+  useCaretReveal,
+  useInputDecoration,
+  useStoredTextDecoration,
+} from "./editor-decoration";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
 import { captureTextHistory, runHistoryRestore } from "./history-restore";
 import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
 import {
   decorate,
-  getCaretOffset,
   getSelectedAtom,
   readSource,
   setCaretOffset,
@@ -3429,21 +3431,12 @@ function ZoomedTitle({
     },
   ];
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || composingRef.current) return;
-    if (syncedRef.current === node.text) return;
-    // Same focused-skip as OutlineRow: don't paint a lagging/stale store over
-    // local typing (classic echoedText + Lunora overlay gap).
-    if (document.activeElement === el && !getHistoryState().busy) {
-      if (echoedTextFor(node.id) === node.text) return;
-      const dom = readSource(el);
-      if (dom !== node.text && dom.startsWith(node.text)) return;
-    }
-    const focused = document.activeElement === el;
-    const revealOffset = focused ? getCaretOffset(el) : null;
-    decorate(el, node.text, revealOffset, focused);
-    syncedRef.current = node.text;
+  useStoredTextDecoration({
+    ref,
+    node,
+    syncedRef,
+    composingRef,
+    keepFocusedPrefix: true,
   });
 
   // The `/` palette (Seam C) on the zoomed title too, mirroring OutlineRow --

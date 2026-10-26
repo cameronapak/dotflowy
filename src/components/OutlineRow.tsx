@@ -1,21 +1,12 @@
 import { ChevronRight, LockIcon } from "lucide-react";
-import {
-  Fragment,
-  memo,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  type RefObject,
-} from "react";
+import { Fragment, memo, useLayoutEffect, useRef, type RefObject } from "react";
 
 import type { QueryFilter } from "../data/filter-query";
 import type { Node } from "../data/schema";
 import type { PluginContext, SlotSpec } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
-import { echoedTextFor } from "../data/collection";
 import { isMirrorsEnabled } from "../data/flags";
-import { getHistoryState } from "../data/history";
 import { useSelectionFill } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
 import {
@@ -34,14 +25,13 @@ import {
 import { hasFoldingToken } from "../plugins/registry";
 import { BulletGlyph } from "./bullet-glyph";
 import { focusTextFromRowTap } from "./caret-place";
-import { useCaretReveal, useInputDecoration } from "./editor-decoration";
-import { flashRow } from "./flash-node";
 import {
-  decorate,
-  getCaretOffset,
-  readSource,
-  setCaretOffset,
-} from "./inline-code";
+  useCaretReveal,
+  useInputDecoration,
+  useStoredTextDecoration,
+} from "./editor-decoration";
+import { flashRow } from "./flash-node";
+import { decorate, readSource, setCaretOffset } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
 import { NodeBody } from "./node-body";
@@ -354,31 +344,11 @@ function RowChrome({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Push store text into the contentEditable when it changes from something
-  // other than this bullet's own typing (undo, programmatic setText, a genuine
-  // echo, OR a sibling instance of the same source editing it -- the live mirror
-  // sync). Focused-skip rationale: while THIS bullet is focused the DOM is the
-  // source of truth (onInput already wrote the latest text), and a store change
-  // that merely echoes the network back is a lagging/out-of-order echo of our
-  // own keystrokes -- repainting it scrambles characters and jumps the caret
-  // mid-type, so it's skipped; blur reconciles. See collection.ts `echoedText`.
-  useEffect(() => {
-    const el = textRef.current;
-    if (!el || composingRef.current) return;
-    if (syncedRef.current === content.text) return;
-    // Lunora owns the sticky optimistic hold across a missed shape poke. A DOM
-    // prefix guard here swallowed legitimate shrinks such as undo-to-empty.
-    if (
-      document.activeElement === el &&
-      !getHistoryState().busy &&
-      echoedTextFor(content.id) === content.text
-    ) {
-      return;
-    }
-    const focused = document.activeElement === el;
-    const revealOffset = focused ? getCaretOffset(el) : null;
-    decorate(el, content.text, revealOffset, focused);
-    syncedRef.current = content.text;
+  useStoredTextDecoration({
+    ref: textRef,
+    node: content,
+    syncedRef,
+    composingRef,
   });
 
   useBulletKeymap({
