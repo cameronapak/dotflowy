@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.29.8
+
+### Patch Changes
+
+- 996955f: Keep selection exit and deletion focus outside a mirror's expanded subtree.
+
 ## 1.29.7
 
 ### Patch Changes
