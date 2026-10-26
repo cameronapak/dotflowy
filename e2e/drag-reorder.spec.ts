@@ -137,8 +137,17 @@ test("same-spot mouse drops preserve order and the redo timeline", async ({
   await text.fill("edited");
   await page.keyboard.press("ControlOrMeta+z");
   await expect(text).toHaveText("node2");
-  // Undo restores a text selection. Collapse it before testing the dot so
-  // the appearing selection toolbar cannot intercept the pointerdown.
+  // Restored text precedes persistence and the final caret handoff. Wait for
+  // Undo's edit gate before sending input, as in the history regression tests.
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = "/src/data/history.ts";
+        return (await import(path)).getHistoryState().busy;
+      }),
+    )
+    .toBe(false);
+  // Leave the selection toolbar out of this idle-dot gesture.
   await text.press("ArrowRight");
   await expect(
     page.getByRole("toolbar", { name: "Format selection" }),
