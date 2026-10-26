@@ -1,10 +1,4 @@
-import {
-  autoUpdate,
-  flip,
-  offset,
-  shift,
-  useFloating,
-} from "@floating-ui/react-dom";
+import { Menu } from "@base-ui/react/menu";
 import {
   ClipboardCopyIcon,
   CopyPlusIcon,
@@ -15,13 +9,14 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type RefObject,
 } from "react";
-import { createPortal } from "react-dom";
 import { toast } from "sonner";
 
 import type { CommandSpec, PluginContext } from "../plugins/types";
+import type { MenuListItem } from "./slash-menu-list";
 
 import {
   lockCommand,
@@ -76,7 +71,6 @@ import {
 } from "./delete-confirm-opener";
 import { rejectRow } from "./flash-node";
 import { openMoveDialog } from "./move-dialog-opener";
-import { SlashMenuList, type MenuListItem } from "./slash-menu-list";
 
 /**
  * Node multi-selection's runtime half (ADR 0018): the while-selected keyboard
@@ -86,9 +80,9 @@ import { SlashMenuList, type MenuListItem } from "./slash-menu-list";
  * the pending-focus ref to focus a neighbor after a delete.
  *
  * Caret and selection are mutually exclusive: entering selection blurs the
- * bullet (use-bullet-keymap), so while it's active focus sits on `<body>` and a
- * capture-phase window listener owns the keys. Leaving selection (Escape, a
- * plain arrow, a click, a menu action) drops the caret back onto a real bullet,
+ * bullet (use-bullet-keymap), then the actions menu takes focus. A capture-phase
+ * window listener owns bulk shortcuts; the menu owns its navigation. Leaving
+ * selection (Escape, a click, a menu action) returns to a real bullet,
  * whose `onFocus` clears the selection.
  */
 
@@ -373,7 +367,29 @@ export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const target = e.target instanceof Element ? e.target : null;
+      const inMenu = !!target?.closest("[data-selection-menu]");
+      // IME navigation/confirmation must not run either a bulk command or a
+      // menu action. keyCode 229 covers Safari's composition-end keydown.
+      if (e.isComposing || e.keyCode === 229) {
+        if (inMenu) e.stopPropagation();
+        return;
+      }
+      // Another control owns its keys, even while the selected slab remains.
+      if (!inMenu && target !== document.body) return;
       const mod = e.metaKey || e.ctrlKey;
+      const selectionKey =
+        e.key === "Escape" ||
+        (mod && ["a", "c"].includes(e.key.toLowerCase())) ||
+        (!mod &&
+          (e.key === "Backspace" ||
+            e.key === "Delete" ||
+            e.key === "Tab" ||
+            (e.shiftKey && ["ArrowDown", "ArrowUp"].includes(e.key))));
+      if (inMenu && !selectionKey) return;
+      // These keys belong to selection, not the menu's roving focus/typeahead.
+      if (selectionKey) e.stopPropagation();
       if (e.key === "Escape") {
         e.preventDefault();
         ops.exitToCaret();
@@ -439,12 +455,18 @@ export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
     const onDown = (e: MouseEvent) => {
       // SAFETY: a window mousedown target is a DOM element
       const target = e.target as HTMLElement | null;
-      if (target?.closest('[role="listbox"]')) return;
+      if (target?.closest("[data-selection-menu]")) return;
       // Keep the selected slab alive while its bullet arms pointer drag. A
       // successful external drop clears it; pointer cancel and failed drops do
       // not. A plain dot click zooms and the new editor mount clears it.
-      if (target?.closest<HTMLElement>(".bullet")?.closest("li[data-selected]"))
+      if (
+        target?.closest<HTMLElement>(".bullet")?.closest("li[data-selected]")
+      ) {
+        // Pointerdown already armed the drag. Keep menu focus so a cancelled
+        // gesture cannot strand selection shortcuts on the bullet button.
+        e.preventDefault();
         return;
+      }
       clearSelection();
     };
     window.addEventListener("keydown", onKey, true);
@@ -466,20 +488,15 @@ type SelItem = MenuListItem & { run: () => void };
  * The selection actions menu: auto-appears anchored to the **active (focus) edge**
  * of the selection -- the newest node a `Shift+arrow` just added -- and re-anchors
  * to it on every extension, so it tracks the node you're selecting instead of
- * sitting over the run's text (ADR 0018). Positioning is delegated to floating-ui
- * (the same engine Base UI uses): its preferred side is the OUTER edge of the run
+ * sitting over the run's text (ADR 0018). Base UI positions it using floating-ui:
+ * its preferred side is the OUTER edge of the run
  * (below when the run grows down, above when it grows up, below for a lone single
- * node) so it stays off the selected text, while `flip()` + `shift()` keep it
- * fully on screen at any viewport edge -- flipping below at the top boundary
- * rather than clipping off-screen. `autoUpdate` re-solves on scroll/resize too.
+ * node), with collision handling at viewport edges and updates on scroll/resize.
  * The focus row itself is kept on screen with a stock `scrollIntoView` (selection
  * extension never focuses a row, so nothing else scrolls it).
  *
- * Reuses `SlashMenuList`'s look (no second menu style). Lists the core
- * Copy + Move + Delete, plus every plugin command that opted into `runMany` and
- * applies to at least one selected node. Mouse-driven (the while-selected arrows
- * are taken for caret motion); the two most-reached ops, Copy and Delete, also
- * have direct keys.
+ * Keeps the slash menu's look, with Base UI owning menu focus, navigation,
+ * typeahead and activation. Bulk shortcuts remain with useSelectionMode.
  */
 export function SelectionActionsMenu({
   ops,
@@ -491,37 +508,21 @@ export function SelectionActionsMenu({
   const { selectionCommandSpecs } = usePluginChrome();
   const active = useIsSelectionActive();
   const rootIds = useSelectionRootIds();
-  const [hover, setHover] = useState(0);
-
-  // The focus edge (newest selected node) and its outer side. The run is
-  // anchor..focus in visible order, so focus is always an end: the LAST root when
-  // the run grew down (menu below), otherwise the top (menu above). A lone
-  // single-node run reads as "below". Read live -- the rootIds subscription
-  // re-renders on every selection change, so this stays in sync.
-  const state = active ? getSelectionState() : null;
-  const focusId = state?.focusId;
-  const side =
-    focusId && instanceIdForKey(focusId) === rootIds[rootIds.length - 1]
-      ? "bottom-start"
-      : "top-start";
-
-  const { refs, floatingStyles, update } = useFloating({
-    placement: side,
-    strategy: "fixed",
-    // offset: gap from the row. flip: swap to the other side when this one would
-    // clip (the on-screen guarantee at the top/bottom edge). shift: slide along
-    // the edge to stay within an 8px viewport inset.
-    middleware: [offset(6), flip({ padding: 8 }), shift({ padding: 8 })],
-    whileElementsMounted: autoUpdate,
-  });
+  const firstItemRef = useRef<HTMLElement | null>(null);
+  const [anchor, setAnchor] = useState<{
+    element: HTMLElement;
+    side: "bottom" | "top";
+  } | null>(null);
 
   // Point floating-ui at the focus row's LIVE element on every extension. Query
   // the DOM (not the refs registry): the bullet span's ref is an inline arrow
-  // (fresh identity each commit), so the Map can lag a commit; the `data-node-id`
-  // row is in the DOM by the layout phase.
+  // (fresh identity each commit), so the Map can lag a commit; the `data-history-key`
+  // row is in the DOM by the layout phase. Read the live focus end here, not in
+  // render where the compiler can memoize the imperative getter across changes.
   useLayoutEffect(() => {
+    const focusId = getSelectionState()?.focusId;
     if (!active || !focusId) {
-      refs.setReference(null);
+      setAnchor(null);
       return;
     }
     const row = document
@@ -532,19 +533,23 @@ export function SelectionActionsMenu({
       // focuses a row, so nothing else scrolls it. floating-ui then keeps the
       // MENU on screen relative to the row.
       row.scrollIntoView({ block: "nearest" });
-      refs.setReference(row);
+      setAnchor({
+        element: row,
+        side:
+          instanceIdForKey(focusId) === rootIds[rootIds.length - 1]
+            ? "bottom"
+            : "top",
+      });
     } else {
-      refs.setReference(null);
+      setAnchor(null);
     }
-    update();
-    setHover(0);
-  }, [active, focusId, rootIds, refs, update]);
+  }, [active, rootIds]);
 
   const items =
     active && rootIds.length
       ? buildItems(rootIds, ops, getCtx, selectionCommandSpecs)
       : null;
-  if (!active || !focusId || !items) return null;
+  if (!active || !items) return null;
 
   const onSelect = (i: number) => {
     const item = items[i];
@@ -555,16 +560,59 @@ export function SelectionActionsMenu({
     if (item.id !== "sel-copy") clearSelection();
   };
 
-  return createPortal(
-    <SlashMenuList
-      ref={refs.setFloating}
-      style={floatingStyles}
-      items={items}
-      activeIndex={hover}
-      onHover={setHover}
-      onSelect={onSelect}
-    />,
-    document.body,
+  return (
+    // Selection owns dismissal, including the selected-dot drag exception.
+    <Menu.Root
+      open={!!anchor}
+      modal={false}
+      onOpenChangeComplete={(open) => {
+        if (open) firstItemRef.current?.focus({ preventScroll: true });
+      }}
+    >
+      <Menu.Portal>
+        <Menu.Positioner
+          anchor={anchor?.element}
+          side={anchor?.side}
+          align="start"
+          sideOffset={6}
+          collisionPadding={8}
+          positionMethod="fixed"
+          className="z-50"
+        >
+          <Menu.Popup
+            data-selection-menu
+            aria-label="Selection actions"
+            aria-description="Shift+Up or Shift+Down extends the selection. Tab or Shift+Tab indents or outdents. Escape returns to editing."
+            finalFocus={false}
+            className="w-64 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md outline-none"
+          >
+            <Menu.Group className="max-h-72 scroll-fade overflow-y-auto p-1">
+              {items.map((item, i) => {
+                const Icon = item.icon;
+                return (
+                  <Menu.Item
+                    key={item.id}
+                    ref={i === 0 ? firstItemRef : undefined}
+                    label={item.label}
+                    closeOnClick={false}
+                    onClick={() => onSelect(i)}
+                    className="flex w-full scroll-my-10 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground"
+                  >
+                    <Icon className="size-4 shrink-0 opacity-70" />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate font-medium">{item.label}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {item.description}
+                      </span>
+                    </span>
+                  </Menu.Item>
+                );
+              })}
+            </Menu.Group>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }
 

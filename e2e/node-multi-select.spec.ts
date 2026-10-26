@@ -176,6 +176,12 @@ test("filtered mirror selection uses its own render path for visibility, caret e
   await expect(li(page, "a").nth(1)).not.toHaveAttribute("data-selected", /.*/);
   await expect(li(page, "b")).not.toHaveAttribute("data-selected", /.*/);
   await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: /^Move/ })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(text(page, "c").nth(0)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(text(page, "cc").nth(0)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
   await expect(text(page, "m")).toBeFocused();
 
   await text(page, "c").nth(1).click();
@@ -202,6 +208,8 @@ test("filtered mirror selection uses its own render path for visibility, caret e
     "data-selected",
     "bottom",
   );
+  await page.keyboard.press("Escape");
+  await expect(text(page, "c").nth(1)).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(text(page, "cc").nth(1)).toBeFocused();
 });
@@ -497,6 +505,12 @@ test("Copy as Markdown copies the selected roots' subtrees", async ({
   await expect(page.getByText("Copied as Markdown")).toBeVisible();
   const clip = await page.evaluate(() => navigator.clipboard.readText());
   expect(clip).toBe("- alpha\n- bravo");
+  const copy = page.getByRole("menuitem", { name: /^Copy as Markdown/ });
+  await expect(copy).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(copy).toBeFocused();
+  await expect(li(page, "a")).toHaveAttribute("data-selected", "top");
+  await expect(li(page, "b")).toHaveAttribute("data-selected", "bottom");
 });
 
 test("Backspace deletes the selected roots in one batch; undo restores", async ({
@@ -536,6 +550,103 @@ test("Escape clears the selection and returns the caret", async ({ page }) => {
   await expect(focused(page)).toHaveText("bravo");
 });
 
+test("selection menu keyboard navigation preserves the slab, IME, and caret restoration", async ({
+  page,
+}) => {
+  await load(page);
+  await focus(page, "b");
+  await page.keyboard.press(`${MOD}+a`);
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+    .toBe("bravo");
+  await page.keyboard.press(`${MOD}+a`);
+  const menu = page.getByRole("menu", { name: "Selection actions" });
+  const copy = menu.getByRole("menuitem", { name: /^Copy as Markdown/ });
+  const move = menu.getByRole("menuitem", { name: /^Move/ });
+  await expect(copy).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(move).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(copy).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(menu.getByRole("menuitem", { name: /^Delete/ })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(copy).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(copy).toBeFocused();
+  await expect(li(page, "b")).toHaveAttribute("data-selected", "single");
+  await expect(focused(page)).toHaveCount(0);
+
+  // A cancelled selected-dot drag must leave keyboard ownership in the menu,
+  // not strand focus on the bullet while the selection remains active.
+  const dot = li(page, "b").locator(":scope > .outline-row .bullet");
+  const box = (await dot.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2);
+  await expect(page.locator("body")).toHaveClass(/dragging-active/);
+  await dot.dispatchEvent("pointercancel");
+  await page.mouse.up();
+  await expect(page.locator("body")).not.toHaveClass(/dragging-active/);
+  await expect(copy).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(move).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(copy).toBeFocused();
+  await expect(li(page, "b")).toHaveAttribute("data-selected", "single");
+
+  // Real IME candidate windows are OS-owned. Exercise the two browser event
+  // shapes explicitly: neither may navigate, activate, delete, or dismiss.
+  for (const key of ["ArrowDown", "Enter", " ", "Backspace", "Escape"]) {
+    for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+      await copy.dispatchEvent("keydown", { key, ...composition });
+      await expect(copy).toBeFocused();
+      await expect(li(page, "b")).toHaveAttribute("data-selected", "single");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    }
+  }
+
+  // A global editor shortcut still opens its own control. Its Escape must not
+  // clear the underlying selection before that control restores menu focus.
+  await page.keyboard.press(`${MOD}+k`);
+  const commandCenter = page.getByRole("dialog", { name: "Command center" });
+  await expect(commandCenter.getByRole("combobox")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(commandCenter).toHaveCount(0);
+  await expect(copy).toBeFocused();
+  await expect(li(page, "b")).toHaveAttribute("data-selected", "single");
+
+  // Bulk selection and indentation still work from a focused menu item.
+  await page.keyboard.press("Shift+ArrowDown");
+  await expect(li(page, "b")).toHaveAttribute("data-selected", "top");
+  await expect(li(page, "c")).toHaveAttribute("data-selected", "bottom");
+  await page.keyboard.press("Tab");
+  await expect(li(page, "b")).toHaveAttribute("data-parent-id", "a");
+  await expect(li(page, "c")).toHaveAttribute("data-parent-id", "a");
+  await page.keyboard.press("Shift+Tab");
+  await expect(li(page, "b")).not.toHaveAttribute("data-parent-id", /.*/);
+  await expect(li(page, "c")).not.toHaveAttribute("data-parent-id", /.*/);
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(text(page, "c")).toBeFocused();
+  await page.keyboard.type("!");
+  await expect(text(page, "c")).toHaveText("charlie!");
+  await page.keyboard.press("ArrowDown");
+  await expect(text(page, "d")).toBeFocused();
+
+  // Typeahead and Enter activate a menu action, not editor input.
+  await page.keyboard.press("Shift+ArrowUp");
+  await expect(copy).toBeFocused();
+  await page.keyboard.press("t");
+  await expect(menu.getByRole("menuitem", { name: "To-do" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(li(page, "d").locator(".checkbox")).toBeVisible();
+  await expect(menu).toHaveCount(0);
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual(["alpha", "bravo", "charlie!", "delta"]);
+});
+
 test("a printable key never replaces the selection", async ({ page }) => {
   await load(page);
   await focus(page, "a");
@@ -571,13 +682,19 @@ test("actions menu: Move relocates the whole run under one destination", async (
   await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
   await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
 
-  const menu = page.getByRole("listbox");
+  const menu = page.getByRole("menu", { name: "Selection actions" });
   // Anchor to the label: "Send to Today"'s description also contains "Move".
-  await menu.getByRole("option", { name: /^Move/ }).click();
+  await expect(
+    menu.getByRole("menuitem", { name: /^Copy as Markdown/ }),
+  ).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem", { name: /^Move/ })).toBeFocused();
+  await page.keyboard.press("Space");
 
   // The destination picker opens; pick delta (not in the moved subtrees).
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("combobox")).toBeFocused();
   await page.keyboard.type("delta");
   await dialog.getByRole("option", { name: "delta" }).click();
 
@@ -604,9 +721,9 @@ test("actions menu: To-do converts every selected root in one step", async ({
   await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
 
   // The actions menu auto-appears anchored to the active (focus) edge.
-  const menu = page.getByRole("listbox");
+  const menu = page.getByRole("menu", { name: "Selection actions" });
   await expect(menu).toBeVisible();
-  await menu.getByRole("option", { name: "To-do" }).click();
+  await menu.getByRole("menuitem", { name: "To-do" }).click();
 
   // Both selected roots are now tasks (a checkbox appears on each).
   await expect(li(page, "a").locator(".checkbox")).toBeVisible();
@@ -621,7 +738,7 @@ test("actions menu follows the active edge DOWN, anchored below the newest node"
   await load(page);
   await focus(page, "a");
 
-  const menu = page.getByRole("listbox");
+  const menu = page.getByRole("menu", { name: "Selection actions" });
   const rowBox = async (id: string) =>
     (await page
       .locator(`li[data-node-id="${id}"] > .outline-row`)
@@ -642,6 +759,9 @@ test("actions menu follows the active edge DOWN, anchored below the newest node"
   // parking over the run's text up top.
   await page.keyboard.press("Shift+ArrowDown"); // -> [a, b], focus b
   await page.keyboard.press("Shift+ArrowDown"); // -> [a, b, c], focus c
+  await expect
+    .poll(async () => (await menuBox()).y)
+    .toBeGreaterThan(yBelowA + 10);
   row = await rowBox("c");
   m = await menuBox();
   expect(m.y).toBeGreaterThan(yBelowA + 10); // it moved down with the selection
@@ -662,7 +782,7 @@ test("actions menu stays fully on screen when the run grows to the TOP edge", as
   await page.keyboard.press("Shift+ArrowUp"); // -> [b, c, d]
   await page.keyboard.press("Shift+ArrowUp"); // -> [a, b, c, d], focus a (top)
 
-  const menu = page.getByRole("listbox");
+  const menu = page.getByRole("menu", { name: "Selection actions" });
   await expect(menu).toBeVisible();
   // floating-ui flips the menu below the top node rather than letting it clip:
   // the whole box is within the viewport (the bug in the report).
@@ -680,7 +800,7 @@ test("actions menu stays on screen extending DOWN past the fold", async ({
   await page.keyboard.press("Shift+ArrowDown"); // enter -> [n0]
   for (let i = 0; i < 12; i++) await page.keyboard.press("Shift+ArrowDown");
 
-  const menu = page.getByRole("listbox");
+  const menu = page.getByRole("menu", { name: "Selection actions" });
   await expect(menu).toBeVisible();
   // shift()/flip() keep the menu in view even though the run runs past the fold.
   expectInViewport((await menu.boundingBox())!, page.viewportSize()!);
