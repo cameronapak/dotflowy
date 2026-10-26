@@ -36,6 +36,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { flushSync } from "react-dom";
 import { toast } from "sonner";
 
 import type { OutlineSearch } from "../data/tags";
@@ -2677,155 +2678,161 @@ function useNodeCommands({
           setText(id, text);
         },
 
-        onEnter: (id, selection) => {
-          const initialIndex = getTreeIndex();
-          if (guardLocked(initialIndex, id, rowOf(findFocusedId() ?? id)))
-            return;
-          // The new node's id + the row the user was editing, returned from the
-          // batch so the focus key can be re-derived from the post-edit render walk
-          // AFTER it commits (focusKeyFor reads the settled collection).
-          const plan = runStructural(
-            (): {
-              instanceId: string;
-              activeKey: string;
-              atStart: boolean;
-            } | null => {
-              // Address the row by its render KEY, not the bare id the keymap passes:
-              // inside a mirror the keymap hands over the CONTENT id, so only the
-              // focused span's key resolves the right instance (ADR 0022, 2b/2c). The
-              // field split (ADR 0022): position (sibling/parent) is LOCAL to the
-              // instance; text + children are the SOURCE's content.
-              const mirrorsOn = isMirrorsEnabled();
-              const activeKey = findFocusedId() ?? id;
-              const instanceId = instanceIdForKey(activeKey);
-              const idx = getTreeIndex();
-              const instance = idx.byId.get(instanceId);
-              if (!instance) return null;
-              const contentId = mirrorsOn
-                ? (instance.mirrorOf ?? instanceId)
-                : instanceId;
-              const content = idx.byId.get(contentId);
-              if (!content) return null;
-              const isMirrorRow = contentId !== instanceId;
-              const offset = Math.max(
-                0,
-                Math.min(selection.start, content.text.length),
+        onEnter: (id, selection) =>
+          flushSync(() => {
+            // Native typing can follow before React's next scheduled commit.
+            // Commit the split and its destination focus as one input handoff.
+            const initialIndex = getTreeIndex();
+            if (guardLocked(initialIndex, id, rowOf(findFocusedId() ?? id)))
+              return;
+            // The new node's id + the row the user was editing, returned from the
+            // batch so the focus key can be re-derived from the post-edit render walk
+            // AFTER it commits (focusKeyFor reads the settled collection).
+            const plan = runStructural(
+              (): {
+                instanceId: string;
+                activeKey: string;
+                atStart: boolean;
+              } | null => {
+                // Address the row by its render KEY, not the bare id the keymap passes:
+                // inside a mirror the keymap hands over the CONTENT id, so only the
+                // focused span's key resolves the right instance (ADR 0022, 2b/2c). The
+                // field split (ADR 0022): position (sibling/parent) is LOCAL to the
+                // instance; text + children are the SOURCE's content.
+                const mirrorsOn = isMirrorsEnabled();
+                const activeKey = findFocusedId() ?? id;
+                const instanceId = instanceIdForKey(activeKey);
+                const idx = getTreeIndex();
+                const instance = idx.byId.get(instanceId);
+                if (!instance) return null;
+                const contentId = mirrorsOn
+                  ? (instance.mirrorOf ?? instanceId)
+                  : instanceId;
+                const content = idx.byId.get(contentId);
+                if (!content) return null;
+                const isMirrorRow = contentId !== instanceId;
+                const offset = Math.max(
+                  0,
+                  Math.min(selection.start, content.text.length),
+                );
+                const end = Math.max(
+                  offset,
+                  Math.min(selection.end, content.text.length),
+                );
+                const before = content.text.slice(0, offset);
+                const after = content.text.slice(end);
+                if (
+                  end > offset &&
+                  before.trim() === "" &&
+                  !isMirrorRow &&
+                  content.kind !== "embed" &&
+                  guardProtected(contentId, "blank", rowOf(activeKey))
+                )
+                  return null;
+                capture(idx, activeKey, null, { label: "create" });
+                // Caret at the very START of a bullet that HAS text: this is not a
+                // split, it's "make room above". The edited node keeps its id, its
+                // text, and its children -- only an empty sibling appears before it.
+                // (Splitting here would blank this node and hand its text to a NEW
+                // one below, orphaning its children under the blank line and moving
+                // identity out from under every bookmark / [[link]] / mirror / daily
+                // mapping pointing at it.) Checked BEFORE the mirror redirect: this
+                // arm writes nothing to the source and positions the new node beside
+                // the INSTANCE, which is the local-position side (ADR 0022).
+                if (offset === 0 && end === 0 && content.text.length > 0) {
+                  // Insert BEFORE = insert after our own predecessor. At the head
+                  // that's null, which insertSibling handles by repointing the old
+                  // head -- so one call covers head and middle alike.
+                  insertSibling(
+                    idx,
+                    instance.parentId,
+                    instance.prevSiblingId,
+                    content.isTask,
+                    "",
+                    content.kind,
+                  );
+                  // Focus stays on the row the user was editing, caret still at its
+                  // start -- the blank line is above, ready to arrow up into. (A
+                  // deliberate divergence from Workflowy, which parks the caret in
+                  // the new line: every other arm only moves the caret when it moved
+                  // the text.) Still routed through pendingFocus because the row
+                  // shifts position in the flat windowed list (ADR 0019).
+                  return { instanceId, activeKey, atStart: true };
+                }
+                // On a mirror's OWN row, Enter never moves text off the source -- the
+                // text is the source's content, so a split would either desync every
+                // instance or strand the tail on a local node. Treat it as the empty-
+                // tail case: add a node, leave the source text whole (ADR 0022, 2c).
+                const caretAtEnd =
+                  isMirrorRow || content.kind === "embed" || after.length === 0;
+                // Pressing Enter at the end of an open (expanded, has-children) bullet
+                // adds a child at the top of its list rather than a sibling -- you're
+                // diving into the thing you just finished naming. "Open" reads the
+                // CONTENT's children but the INSTANCE's collapse (collapse is local).
+                const isOpen =
+                  !instance.collapsed && childrenOf(idx, contentId).length > 0;
+                // The empty-tail arms insert without splitting. Still remove a
+                // selected suffix in this same history/structural transaction.
+                // Mirrors and embeds keep their existing no-text-split behavior.
+                if (
+                  end > offset &&
+                  caretAtEnd &&
+                  !isMirrorRow &&
+                  content.kind !== "embed"
+                ) {
+                  setText(contentId, before);
+                }
+                let newId: string;
+                let atStart = false;
+                if (caretAtEnd && isOpen) {
+                  // Dive in: a child of the CONTENT (source), so the new node windows
+                  // into every instance, not just the one being edited.
+                  newId = insertChildAtStart(
+                    idx,
+                    contentId,
+                    content.isTask,
+                    "",
+                    undefined,
+                    content.kind,
+                  );
+                } else if (!caretAtEnd) {
+                  // Mid-split: one atomic Lunora mutator (or insertSibling+setText
+                  // inside this runStructural batch on the custom-DO path).
+                  // Mirror rows force caretAtEnd above, so this arm is never a mirror.
+                  newId = splitNode(idx, {
+                    nodeId: contentId,
+                    parentId: instance.parentId,
+                    afterId: instanceId,
+                    leftText: before,
+                    rightText: after,
+                    isTask: content.isTask,
+                    kind: content.kind,
+                  });
+                  atStart = true;
+                } else {
+                  // New sibling beside the INSTANCE (position is local to where the row
+                  // sits). Off-flag / mirror-free, instance === content === id, so this
+                  // is byte-identical to the old new-sibling path.
+                  newId = insertSibling(
+                    idx,
+                    instance.parentId,
+                    instanceId,
+                    content.isTask,
+                    "",
+                    content.kind,
+                  );
+                }
+                return { instanceId: newId, activeKey, atStart };
+              },
+            );
+            if (plan) {
+              pendingFocus.current = focusKeyFor(
+                plan.instanceId,
+                plan.activeKey,
               );
-              const end = Math.max(
-                offset,
-                Math.min(selection.end, content.text.length),
-              );
-              const before = content.text.slice(0, offset);
-              const after = content.text.slice(end);
-              if (
-                end > offset &&
-                before.trim() === "" &&
-                !isMirrorRow &&
-                content.kind !== "embed" &&
-                guardProtected(contentId, "blank", rowOf(activeKey))
-              )
-                return null;
-              capture(idx, activeKey, null, { label: "create" });
-              // Caret at the very START of a bullet that HAS text: this is not a
-              // split, it's "make room above". The edited node keeps its id, its
-              // text, and its children -- only an empty sibling appears before it.
-              // (Splitting here would blank this node and hand its text to a NEW
-              // one below, orphaning its children under the blank line and moving
-              // identity out from under every bookmark / [[link]] / mirror / daily
-              // mapping pointing at it.) Checked BEFORE the mirror redirect: this
-              // arm writes nothing to the source and positions the new node beside
-              // the INSTANCE, which is the local-position side (ADR 0022).
-              if (offset === 0 && end === 0 && content.text.length > 0) {
-                // Insert BEFORE = insert after our own predecessor. At the head
-                // that's null, which insertSibling handles by repointing the old
-                // head -- so one call covers head and middle alike.
-                insertSibling(
-                  idx,
-                  instance.parentId,
-                  instance.prevSiblingId,
-                  content.isTask,
-                  "",
-                  content.kind,
-                );
-                // Focus stays on the row the user was editing, caret still at its
-                // start -- the blank line is above, ready to arrow up into. (A
-                // deliberate divergence from Workflowy, which parks the caret in
-                // the new line: every other arm only moves the caret when it moved
-                // the text.) Still routed through pendingFocus because the row
-                // shifts position in the flat windowed list (ADR 0019).
-                return { instanceId, activeKey, atStart: true };
-              }
-              // On a mirror's OWN row, Enter never moves text off the source -- the
-              // text is the source's content, so a split would either desync every
-              // instance or strand the tail on a local node. Treat it as the empty-
-              // tail case: add a node, leave the source text whole (ADR 0022, 2c).
-              const caretAtEnd =
-                isMirrorRow || content.kind === "embed" || after.length === 0;
-              // Pressing Enter at the end of an open (expanded, has-children) bullet
-              // adds a child at the top of its list rather than a sibling -- you're
-              // diving into the thing you just finished naming. "Open" reads the
-              // CONTENT's children but the INSTANCE's collapse (collapse is local).
-              const isOpen =
-                !instance.collapsed && childrenOf(idx, contentId).length > 0;
-              // The empty-tail arms insert without splitting. Still remove a
-              // selected suffix in this same history/structural transaction.
-              // Mirrors and embeds keep their existing no-text-split behavior.
-              if (
-                end > offset &&
-                caretAtEnd &&
-                !isMirrorRow &&
-                content.kind !== "embed"
-              ) {
-                setText(contentId, before);
-              }
-              let newId: string;
-              let atStart = false;
-              if (caretAtEnd && isOpen) {
-                // Dive in: a child of the CONTENT (source), so the new node windows
-                // into every instance, not just the one being edited.
-                newId = insertChildAtStart(
-                  idx,
-                  contentId,
-                  content.isTask,
-                  "",
-                  undefined,
-                  content.kind,
-                );
-              } else if (!caretAtEnd) {
-                // Mid-split: one atomic Lunora mutator (or insertSibling+setText
-                // inside this runStructural batch on the custom-DO path).
-                // Mirror rows force caretAtEnd above, so this arm is never a mirror.
-                newId = splitNode(idx, {
-                  nodeId: contentId,
-                  parentId: instance.parentId,
-                  afterId: instanceId,
-                  leftText: before,
-                  rightText: after,
-                  isTask: content.isTask,
-                  kind: content.kind,
-                });
-                atStart = true;
-              } else {
-                // New sibling beside the INSTANCE (position is local to where the row
-                // sits). Off-flag / mirror-free, instance === content === id, so this
-                // is byte-identical to the old new-sibling path.
-                newId = insertSibling(
-                  idx,
-                  instance.parentId,
-                  instanceId,
-                  content.isTask,
-                  "",
-                  content.kind,
-                );
-              }
-              return { instanceId: newId, activeKey, atStart };
-            },
-          );
-          if (plan) {
-            pendingFocus.current = focusKeyFor(plan.instanceId, plan.activeKey);
-            pendingFocusAtStart.current = plan.atStart;
-          }
-        },
+              pendingFocusAtStart.current = plan.atStart;
+            }
+          }),
 
         onIndent: (id) => {
           const plan = runStructural(
