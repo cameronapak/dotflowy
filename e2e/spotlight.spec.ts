@@ -71,6 +71,43 @@ test("focusin centers the lit row in the visual viewport", async ({ page }) => {
     })
     .toBeLessThan(ALIGN_PX);
 });
+
+test("a startup reinstall centers a row focused before cleanup animation ends", async ({
+  page,
+}) => {
+  await loadWithSpotlight(page);
+  const maxDelta = await text(page, "alpha-1").evaluate(async (el) => {
+    const modulePath = "/src/data/spotlight.ts";
+    const { uninstallSpotlight, installSpotlight } = await import(
+      /* @vite-ignore */ modulePath
+    );
+    // Suspense can clean up and restore the controller's layout effect while
+    // the saved preference stays on. Focus must work in that first frame,
+    // before the cleanup's collapse tween would have finished.
+    uninstallSpotlight();
+    installSpotlight(false);
+    el.focus({ preventScroll: true });
+    // Observe the whole 200ms cleanup flight, not just the first centered frame:
+    // an uncancelled tween could scroll the row away again on the next frame.
+    return new Promise<number>((resolve) => {
+      const start = performance.now();
+      let max = 0;
+      const sample = () => {
+        const rect = el.closest("li")!.getBoundingClientRect();
+        const center =
+          (window.visualViewport?.offsetTop ?? 0) +
+          (window.visualViewport?.height ?? window.innerHeight) / 2;
+        max = Math.max(max, Math.abs(rect.top + rect.height / 2 - center));
+        if (performance.now() - start >= 300) resolve(max);
+        else requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+  });
+  await expect(text(page, "alpha-1")).toBeFocused();
+  expect(maxDelta).toBeLessThan(ALIGN_PX);
+});
+
 test.describe("spotlight alignment — mobile", () => {
   test.use({ viewport: { width: 375, height: 700 } });
 
