@@ -364,33 +364,111 @@ test("Enter mid-text then Backspace returns the line to its pre-Enter state", as
   await expect(text(page, "n")).toHaveText("alphaXbravo");
 });
 
-test("Enter at the START then Backspace is a true round trip — same node id", async ({
-  page,
-}) => {
-  // Enter at offset 0 inserts a blank ABOVE and leaves focus put (#326), so
-  // this pair reads as an undo. Appending onto the blank would restore the
-  // TEXT while quietly moving it onto the blank's id -- the identity move that
-  // Enter arm exists to prevent. Asserting on the id, not just the text, is
-  // the whole point of this test.
-  await load(page, [
-    { id: "keepme", parentId: null, prevSiblingId: null, text: "alpha" },
-  ]);
+for (const collapsed of [undefined, false, true]) {
+  test(`Enter at the START then Backspace preserves identity (${collapsed === undefined ? "leaf" : collapsed ? "collapsed parent" : "expanded parent"})`, async ({
+    page,
+  }) => {
+    // Enter at offset 0 inserts a blank ABOVE and leaves focus put (#326), so
+    // this pair reads as an undo. Appending onto the blank would restore the
+    // TEXT while quietly moving it onto the blank's id -- the identity move that
+    // Enter arm exists to prevent. Asserting on the id, not just the text, is
+    // the whole point of this test.
+    await load(page, [
+      {
+        id: "keepme",
+        parentId: null,
+        prevSiblingId: null,
+        text: "alpha",
+        collapsed,
+      },
+      ...(collapsed === undefined
+        ? []
+        : [
+            {
+              id: "kid",
+              parentId: "keepme",
+              prevSiblingId: null,
+              text: "child",
+            },
+          ]),
+    ]);
 
-  await caretAt(page, "keepme", 0);
-  await page.keyboard.press("Enter");
-  await expect.poll(() => orderedTexts(page)).toEqual(["", "alpha"]);
+    const visible = collapsed === false ? ["alpha", "child"] : ["alpha"];
+    await caretAt(page, "keepme", 0);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => orderedTexts(page)).toEqual(["", ...visible]);
 
-  await page.keyboard.press("Backspace");
+    await page.keyboard.press("Backspace");
 
-  await expect.poll(() => orderedTexts(page)).toEqual(["alpha"]);
-  // The ORIGINAL node is the survivor, not a look-alike carrying its text.
-  await expect(text(page, "keepme")).toHaveText("alpha");
-  await expect(rows(page)).toHaveCount(1);
-  // Caret is back at the start, where the user left it.
-  await expect(text(page, "keepme")).toBeFocused();
-  await page.keyboard.type("X");
-  await expect(text(page, "keepme")).toHaveText("Xalpha");
-});
+    await expect.poll(() => orderedTexts(page)).toEqual(visible);
+    // The ORIGINAL node is the survivor, not a look-alike carrying its text.
+    await expect(text(page, "keepme")).toHaveText("alpha");
+    await expect(rows(page)).toHaveCount(visible.length);
+    await expect(text(page, "keepme")).toBeFocused();
+    await expect
+      .poll(() =>
+        text(page, "keepme").evaluate((el) => {
+          const selection = window.getSelection();
+          if (
+            !selection?.isCollapsed ||
+            !selection.anchorNode ||
+            !el.contains(selection.anchorNode)
+          )
+            return null;
+          const before = document.createRange();
+          before.selectNodeContents(el);
+          before.setEnd(selection.anchorNode, selection.anchorOffset);
+          return before.toString().length;
+        }),
+      )
+      .toBe(0);
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect.poll(() => orderedTexts(page)).toEqual(["", ...visible]);
+    // Replay paints before its persistence and caret work finish. Wait for the
+    // existing edit gate before sending another shortcut or typing.
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const path = "/src/data/history.ts";
+          return (await import(path)).getHistoryState().busy;
+        }),
+      )
+      .toBe(false);
+    await page.keyboard.press("ControlOrMeta+Shift+z");
+    await expect.poll(() => orderedTexts(page)).toEqual(visible);
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const path = "/src/data/history.ts";
+          return (await import(path)).getHistoryState().busy;
+        }),
+      )
+      .toBe(false);
+    // Caret is back at the start, where the user left it.
+    await expect(text(page, "keepme")).toBeFocused();
+    await page.keyboard.type("X");
+    await expect(text(page, "keepme")).toHaveText("Xalpha");
+    await page.reload();
+    await expect(text(page, "keepme")).toHaveText("Xalpha");
+    await expect
+      .poll(() => orderedTexts(page))
+      .toEqual(["Xalpha", ...visible.slice(1)]);
+    if (collapsed !== undefined) {
+      await row(page, "keepme")
+        .getByRole("button", {
+          name: collapsed ? "Expand" : "Collapse",
+          exact: true,
+        })
+        .click();
+      await expect(text(page, "kid")).toHaveCount(collapsed ? 1 : 0);
+      if (collapsed)
+        await expect(row(page, "kid")).toHaveAttribute(
+          "data-parent-id",
+          "keepme",
+        );
+    }
+  });
+}
 
 test("a seeded bullet joins into its previous sibling, caret at the seam", async ({
   page,

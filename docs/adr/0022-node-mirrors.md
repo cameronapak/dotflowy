@@ -162,6 +162,13 @@ logical-id model: selecting a windowed descendant directly can still tint both
 occurrences and return to its source occurrence. Full path-aware selection
 remains the separate Stage 2e follow-up in the mirror editing plan.
 
+**Amended 2026-10-26 (#245):** Selection anchors and focus now carry render keys,
+while mutation roots remain logical instance ids. Selection fill, action-menu
+anchoring, and history retain the selected instance; subtree-boundary callers
+pass its keys into the existing rendered-row walk. This addresses the selection
+limitation above, not the other Stage 2e editing work. See
+[ADR 0018](./0018-node-multi-selection.md).
+
 ## Don't regress
 
 - The mirror-free outline must run **today's exact code** — bare `nodeId` addressing until a mirror is crossed.

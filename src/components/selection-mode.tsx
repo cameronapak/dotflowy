@@ -63,7 +63,10 @@ import { scrollRowIntoView } from "../data/virtual-nav";
 import {
   buildVisibleRows,
   findVisibleNeighbor,
+  instanceIdForKey,
   lastVisibleDescendant,
+  parentKeyOf,
+  rowKeyFor,
 } from "../data/visible-order";
 import { isProtected, usePluginChrome } from "../plugins/registry";
 import { placeCaretAtEnd } from "./caret-place";
@@ -200,8 +203,9 @@ function makeSelectionOps({
     // a surviving protected node at the top/bottom edge must not be jumped over.
     // `above` = the row above the first deleted node (often that surviving
     // protected one); `below` = the row after the last deleted node's subtree.
-    const firstDel = deletable[0]!;
-    const lastDel = deletable[deletable.length - 1]!;
+    const prefix = parentKeyOf(getSelectionState()!.anchorId);
+    const firstDel = rowKeyFor(prefix, deletable[0]!);
+    const lastDel = rowKeyFor(prefix, deletable[deletable.length - 1]!);
     const mirrorsOn = isMirrorsEnabled();
     const above = findVisibleNeighbor(
       index,
@@ -280,7 +284,7 @@ function makeSelectionOps({
     const state = getSelectionState();
     if (!state) return;
     const index = getTreeIndex();
-    const top = state.rootIds[0]!;
+    const top = rowKeyFor(parentKeyOf(state.anchorId), state.rootIds[0]!);
     const target =
       findVisibleNeighbor(
         index,
@@ -303,7 +307,10 @@ function makeSelectionOps({
     const index = getTreeIndex();
     const isHidden = getViewIsHidden();
     const filter = getViewFilter();
-    const lastRoot = state.rootIds[state.rootIds.length - 1]!;
+    const lastRoot = rowKeyFor(
+      parentKeyOf(state.anchorId),
+      state.rootIds[state.rootIds.length - 1]!,
+    );
     const rows = buildVisibleRows(
       index,
       getViewRootId(),
@@ -494,7 +501,7 @@ export function SelectionActionsMenu({
   const state = active ? getSelectionState() : null;
   const focusId = state?.focusId;
   const side =
-    focusId && focusId === rootIds[rootIds.length - 1]
+    focusId && instanceIdForKey(focusId) === rootIds[rootIds.length - 1]
       ? "bottom-start"
       : "top-start";
 
@@ -517,9 +524,9 @@ export function SelectionActionsMenu({
       refs.setReference(null);
       return;
     }
-    const row = document.querySelector(
-      `li[data-node-id="${focusId}"] > .outline-row`,
-    );
+    const row = document
+      .querySelector(`[data-history-key="${CSS.escape(focusId)}"]`)
+      ?.closest(".outline-row");
     if (row instanceof HTMLElement) {
       // Keep the node you're selecting on screen -- selection extension never
       // focuses a row, so nothing else scrolls it. floating-ui then keeps the

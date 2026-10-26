@@ -1,5 +1,17 @@
 # dotflowy
 
+## 1.29.10
+
+### Patch Changes
+
+- 7d032af: Keep filtered node selections on visible siblings, including mirror instances, so bulk actions do not include hidden sibling roots.
+
+## 1.29.9
+
+### Patch Changes
+
+- 511f103: Backspace removes the empty line inserted above a parent by Enter, preserving its children and caret. Empty parents are no longer mistaken for disposable blank lines.
+
 ## 1.29.8
 
 ### Patch Changes
