@@ -253,6 +253,13 @@ const MiniNodeEditor = forwardRef<
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const caretWatchRef = useRef<(() => void) | null>(null);
+  // Closing capture can remove the focused editor without firing blur.
+  useEffect(() => {
+    return () => {
+      caretWatchRef.current?.();
+      caretWatchRef.current = null;
+    };
+  }, []);
   useEditorFeatureDecoration(ref, composingRef);
   const { slotsByPosition } = usePluginChrome();
   const ownsFormatEditable = useCallback(
