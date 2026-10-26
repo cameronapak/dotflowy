@@ -137,6 +137,12 @@ test("same-spot mouse drops preserve order and the redo timeline", async ({
   await text.fill("edited");
   await page.keyboard.press("ControlOrMeta+z");
   await expect(text).toHaveText("node2");
+  // Undo restores a text selection. Collapse it before testing the dot so
+  // the appearing selection toolbar cannot intercept the pointerdown.
+  await text.press("ArrowRight");
+  await expect(
+    page.getByRole("toolbar", { name: "Format selection" }),
+  ).toBeHidden();
 
   const bullet = page.locator('li[data-node-id="a2"] .bullet');
   const box = await bullet.boundingBox();
