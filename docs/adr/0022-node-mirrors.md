@@ -148,6 +148,20 @@ Even though we chose A1, the build is sequenced so daily value arrives before th
     unaffected — its target is a grandparent, always a real content node. e2e: `mirror-editing.spec.ts`.
 - **Stage 3 — promote-on-delete** (direct + cascade-aware) and its undo/redo.
 
+## Selection subtree boundaries (#247)
+
+Selection caret-exit and deletion's below-focus fallback derive the bottom of
+the selected subtree from `buildVisibleRows`, using its contiguous deeper rows
+and returning a render key. A stored-child walk cannot find the bottom of a
+mirror's window. The rendered walk also owns filtering, local collapse,
+hidden content, broken sources, and cycle caps.
+
+Deletion still targets selected instance ids in one history capture and one
+structural batch. This boundary fix does not change the selection actor's
+logical-id model: selecting a windowed descendant directly can still tint both
+occurrences and return to its source occurrence. Full path-aware selection
+remains the separate Stage 2e follow-up in the mirror editing plan.
+
 ## Don't regress
 
 - The mirror-free outline must run **today's exact code** — bare `nodeId` addressing until a mirror is crossed.
