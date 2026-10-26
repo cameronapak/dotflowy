@@ -10,7 +10,7 @@ import {
   collectOperatorKeyInfos,
   type FilterOperator,
   parseFilterQuery,
-  queryMembershipUnchanged,
+  updateQueryFilter,
   tokenizeQuery,
 } from "./filter-query";
 import { buildTreeIndex, createNode, type Node } from "./tree";
@@ -22,55 +22,74 @@ const never = () => false;
 // Exercise the registered pure operators, not handwritten predicate twins.
 const ops = queryOperators;
 
-test.each<[string, boolean]>([
-  ["milk", true],
-  ["#work", true],
-  ["milk OR bread -#home", true],
-  ["unknown:x", true],
-  ["-bread", true],
-  ["more", false],
-  ["-more", false],
-  ['"more milk"', false],
-  ["#home OR more", false],
-])("field deltas preserve membership for %s: %s", (query, unchanged) => {
-  const before = createNode({ id: "a", text: "Milk #work" });
-  const after = { ...before, text: "More milk #work" };
-  expect(
-    queryMembershipUnchanged(
+test.each<[string, boolean, boolean]>([
+  ["milk", true, true],
+  ["#work", true, true],
+  ["milk OR bread -#home", true, true],
+  ["unknown:x", true, false],
+  ["-bread", true, true],
+  ["more", false, true],
+  ["-more", false, false],
+  ['"more milk"', false, true],
+  ["#home OR more", false, true],
+])(
+  "field deltas preserve membership for %s: %s",
+  (query, unchanged, matches) => {
+    const before = createNode({ id: "a", text: "Milk #work" });
+    const after = { ...before, text: "More milk #work" };
+    const previous = buildQueryFilter(
+      index([before]),
+      null,
+      query,
+      never,
+      ops,
+    )!;
+    const next = updateQueryFilter(
       index([after]),
+      null,
       query,
       [{ before, after }],
       never,
       ops,
-    ),
-  ).toBe(unchanged);
-});
+      previous,
+      null,
+    );
+    expect(next === previous).toBe(unchanged);
+    expect(next?.matchIds).toEqual(new Set(matches ? ["a"] : []));
+    expect(next?.visibleIds).toEqual(new Set(matches ? ["a"] : []));
+  },
+);
 
-test("field deltas fall back for changing visibility and nonlocal dependencies", () => {
+test("field deltas fall back for branches, changing visibility and nonlocal dependencies", () => {
   const before = createNode({ id: "a", text: "Milk #work" });
   const after = { ...before, text: "More milk #work" };
   const tree = index([after]);
+  const previous = buildQueryFilter(index([before]), null, "milk", never, ops)!;
   expect(
-    queryMembershipUnchanged(
+    updateQueryFilter(
       tree,
-      "milk",
-      [
-        { before, after },
-        { before: after, after: { ...after, text: "Bread #work" } },
-      ],
-      never,
-      ops,
-    ),
-  ).toBe(false);
-  expect(
-    queryMembershipUnchanged(
-      tree,
+      null,
       "milk",
       [{ before, after }],
       (n) => n.text.startsWith("More"),
       ops,
+      previous,
+      null,
     ),
-  ).toBe(false);
+  ).toBeNull();
+  const branched = index([after, createNode({ id: "child", parentId: "a" })]);
+  expect(
+    updateQueryFilter(
+      branched,
+      null,
+      "more",
+      [{ before, after }],
+      never,
+      ops,
+      previous,
+      null,
+    ),
+  ).toBeNull();
 
   // An operator can depend on another node, even when the edited node's own
   // result stays false. Never infer node-locality from one pair of results.
@@ -84,24 +103,243 @@ test("field deltas fall back for changing visibility and nonlocal dependencies",
     },
   ]);
   expect(
-    queryMembershipUnchanged(
+    updateQueryFilter(
       tree,
+      null,
       "has:milk",
       [{ before, after }],
       never,
       globalOps,
+      previous,
+      null,
     ),
-  ).toBe(false);
+  ).toBeNull();
   expect(
-    queryMembershipUnchanged(tree, "is:todo", [{ before, after }], never, ops),
-  ).toBe(false);
+    updateQueryFilter(
+      tree,
+      null,
+      "is:todo",
+      [{ before, after }],
+      never,
+      ops,
+      previous,
+      null,
+    ),
+  ).toBeNull();
   const mirrored = index([after, createNode({ id: "m", mirrorOf: "a" })]);
   expect(
-    queryMembershipUnchanged(mirrored, "milk", [{ before, after }], never, ops),
-  ).toBe(false);
+    updateQueryFilter(
+      mirrored,
+      null,
+      "milk",
+      [{ before, after }],
+      never,
+      ops,
+      previous,
+      null,
+    ),
+  ).toBeNull();
   expect(
-    queryMembershipUnchanged(tree, "", [{ before, after }], never, ops),
-  ).toBe(false);
+    updateQueryFilter(
+      tree,
+      null,
+      "",
+      [{ before, after }],
+      never,
+      ops,
+      previous,
+      null,
+    ),
+  ).toBeNull();
+});
+
+test("leaf deltas preserve shared context, collapse, focus and immutable snapshots", () => {
+  const root = createNode({ id: "root", text: "Project", collapsed: true });
+  const a = createNode({ id: "a", parentId: "root", text: "Milk" });
+  const b = createNode({
+    id: "b",
+    parentId: "root",
+    prevSiblingId: "a",
+    text: "Milk",
+  });
+  const tree = index([root, a, b]);
+  const original = buildQueryFilter(tree, null, "milk", never, ops)!;
+  const changedA = { ...a, text: "Bread" };
+  tree.byId.set(a.id, changedA); // The store shares Maps with old wrappers.
+  const first = updateQueryFilter(
+    tree,
+    null,
+    "milk",
+    [{ before: a, after: changedA }],
+    never,
+    ops,
+    original,
+    null,
+  )!;
+  expect(first.matchIds).toEqual(new Set(["b"]));
+  expect(first.visibleIds).toEqual(new Set(["root", "b"]));
+  expect(original.matchIds).toEqual(new Set(["a", "b"]));
+  expect(original.visibleIds).toEqual(new Set(["root", "a", "b"]));
+  const changedB = { ...b, text: "Butter" };
+  tree.byId.set(b.id, changedB);
+  const last = updateQueryFilter(
+    tree,
+    null,
+    "milk",
+    [{ before: b, after: changedB }],
+    never,
+    ops,
+    first,
+    null,
+  )!;
+  expect(last.visibleIds.size).toBe(0);
+  expect(last.emptyMessage).toBeDefined();
+  const together = updateQueryFilter(
+    tree,
+    null,
+    "milk",
+    [
+      { before: a, after: changedA },
+      { before: b, after: changedB },
+    ],
+    never,
+    ops,
+    original,
+    null,
+  )!;
+  expect(together.visibleIds.size).toBe(0);
+  expect(together.matchIds.size).toBe(0);
+  const retained = updateQueryFilter(
+    tree,
+    null,
+    "milk",
+    [{ before: b, after: changedB }],
+    never,
+    ops,
+    first,
+    "b",
+  )!;
+  expect(retained.visibleIds).toBe(first.visibleIds);
+  expect(retained.matchIds).toBe(first.matchIds);
+  expect(retained.retainedKey).toBe("b");
+  tree.byId.set(b.id, b);
+  const restored = updateQueryFilter(
+    tree,
+    null,
+    "milk",
+    [{ before: changedB, after: b }],
+    never,
+    ops,
+    retained,
+    "b",
+  )!;
+  expect(restored.retainedKey).toBeUndefined();
+  expect(restored.visibleIds).toBe(retained.visibleIds);
+  const added = updateQueryFilter(
+    tree,
+    null,
+    "milk",
+    [{ before: changedB, after: b }],
+    never,
+    ops,
+    last,
+    null,
+  )!;
+  expect(added.visibleIds).toEqual(new Set(["root", "b"]));
+  expect(added.matchIds).toEqual(new Set(["b"]));
+  expect(added.emptyMessage).toBeUndefined();
+});
+
+test("leaf membership respects revealed descendants, hidden ancestors and zoom scope", () => {
+  for (const collapsed of [false, true]) {
+    const root = createNode({ id: "root", text: "Milk", collapsed });
+    const leaf = createNode({ id: "leaf", parentId: "root", text: "Milk" });
+    const outside = createNode({ id: "outside", text: "Milk" });
+    const hidden = createNode({ id: "hidden", completed: true });
+    const hiddenLeaf = createNode({
+      id: "hidden-leaf",
+      parentId: "hidden",
+      text: "Milk",
+    });
+    const tree = index([root, leaf, outside, hidden, hiddenLeaf]);
+    const hide = (node: Node) => node.completed;
+    const previous = buildQueryFilter(tree, null, "milk", hide, ops)!;
+    const zoomed = buildQueryFilter(tree, "root", "milk", hide, ops)!;
+    const changes = [leaf, outside, hiddenLeaf].map((before) => ({
+      before,
+      after: { ...before, text: "Bread" },
+    }));
+    for (const { after } of changes) tree.byId.set(after.id, after);
+    const next = updateQueryFilter(
+      tree,
+      null,
+      "milk",
+      changes,
+      hide,
+      ops,
+      previous,
+      null,
+    )!;
+    expect(next.matchIds).toEqual(
+      new Set(collapsed ? ["root"] : ["root", "leaf"]),
+    );
+    const scoped = updateQueryFilter(
+      tree,
+      "root",
+      "milk",
+      changes,
+      hide,
+      ops,
+      zoomed,
+      null,
+    )!;
+    expect(scoped.visibleIds.size).toBe(0); // A zoom root does not reveal children by matching.
+    expect(scoped.emptyMessage).toBeDefined();
+  }
+});
+
+test("a focus-only parent neither reveals unmatched leaves nor loses its context", () => {
+  const parent = createNode({ id: "parent", text: "Project" });
+  const leaf = createNode({ id: "leaf", parentId: "parent", text: "Milk" });
+  const tree = index([parent, leaf]);
+  const previous = buildQueryFilter(
+    tree,
+    null,
+    "milk",
+    never,
+    ops,
+    true,
+    "parent",
+  )!;
+  const after = { ...leaf, text: "Bread" };
+  tree.byId.set(leaf.id, after);
+  const removed = updateQueryFilter(
+    tree,
+    null,
+    "milk",
+    [{ before: leaf, after }],
+    never,
+    ops,
+    previous,
+    "parent",
+  )!;
+  expect(removed.visibleIds).toEqual(new Set(["parent"]));
+  expect(removed.matchIds).toEqual(new Set(["parent"]));
+  expect(removed.retainedKey).toBe("parent");
+  tree.byId.set(leaf.id, leaf);
+  const added = updateQueryFilter(
+    tree,
+    null,
+    "milk",
+    [{ before: after, after: leaf }],
+    never,
+    ops,
+    removed,
+    "parent",
+  )!;
+  expect(added.visibleIds).toEqual(new Set(["parent", "leaf"]));
+  expect(added.matchIds).toEqual(new Set(["parent", "leaf"]));
+  expect(added.retainedKey).toBe("parent");
 });
 
 test.each<[string, string | undefined, string[]]>([

@@ -203,10 +203,35 @@ test("a row that still matches after editing stays visible on blur", async ({
         sameFilter: previous.filter === (await import(path)).getViewFilter(),
         unrelatedReads: previous.reads(),
       };
-      previous.restore();
       return result;
     }, before),
   ).toEqual({ sameFilter: true, unrelatedReads: 0 });
+  await editor.fill("Buy bread #work");
+  await expect(editor).toBeFocused();
+  expect(
+    await page.evaluate(async (previous) => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      const path = "/src/data/view-state.ts";
+      const filter = (await import(path)).getViewFilter();
+      return {
+        sameVisible: previous.filter.visibleIds === filter.visibleIds,
+        retained: filter.retainedKey,
+        unrelatedReads: previous.reads(),
+      };
+    }, before),
+  ).toEqual({ sameVisible: true, retained: "milk", unrelatedReads: 0 });
+  await editor.fill("Buy more milk #work");
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = "/src/data/view-state.ts";
+        return (await import(path)).getViewFilter().retainedKey;
+      }),
+    )
+    .toBeUndefined();
+  await page.evaluate((previous) => previous.restore(), before);
   await before.dispose();
   await input(page).focus();
   await expect(editor).toHaveText("Buy more milk #work");

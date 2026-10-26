@@ -660,15 +660,12 @@ const EMPTY_ROWS: VisibleRow[] = [];
  * render driver (ADR 0019). One subscription feeds the whole windowed list;
  * {@link useVisibleChildIds} stays per-row (a row's own children slice).
  *
- * Identity discipline (the reason this is cheap at 100k): getSnapshot rebuilds
- * the array ONLY when {@link structureRev} changes -- a structural edit or a
- * collapse/completed flip. A plain keystroke bumps nothing, so getSnapshot is an
- * O(1) rev compare and returns the SAME array reference, so the virtualizer host
- * doesn't re-render on typing. `isHidden` and `filter` are deps of the memoized
- * callback (a new filter object on a matching keystroke while filtering forces a
- * rebuild -- correct, and not the 100k hot path). They must be referentially
- * stable across unrelated keystrokes (the caller memoizes them), or the cache
- * resets every render.
+ * Identity discipline: getSnapshot rebuilds when {@link structureRev}, the
+ * root, `isHidden`, or the filter's `visibleIds` identity changes. A plain
+ * keystroke bumps no structure, so stable visibility returns the SAME array
+ * reference. Dimming and focus-retention metadata can change without rebuilding
+ * rows. Callers preserve `isHidden` and published visible sets across edits
+ * that cannot change visibility.
  *
  * Mirror resolution (ADR 0022) is gated on {@link isMirrorsEnabled}, read here
  * rather than threaded as a dep: the flag is fixed for a session (set before the
@@ -698,7 +695,9 @@ export function useVisibleRows(
       c.rev === rev &&
       c.rootId === rootId &&
       c.isHidden === isHidden &&
-      c.filter === filter
+      // Dimming and focus-only retention do not shape rows. An incremental
+      // filter can change them while preserving its published visible set.
+      c.filter?.visibleIds === filter?.visibleIds
     ) {
       return c.rows;
     }

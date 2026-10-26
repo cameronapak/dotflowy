@@ -51,7 +51,7 @@ import {
   buildFilterOperatorMap,
   buildQueryFilter,
   collectOperatorKeyInfos,
-  queryMembershipUnchanged,
+  updateQueryFilter,
   type QueryFilter,
 } from "../data/filter-query";
 import { isMirrorsEnabled } from "../data/flags";
@@ -325,9 +325,9 @@ export function buildViewFilter(
  * Subscribe to the active view filter, re-rendering ONLY while a filter is live.
  * When no plugin wants to filter (no `?q=` query) {@link buildViewFilter}
  * returns null, so the cached snapshot stays a stable `null` and a no-filter
- * keystroke never re-renders the editor shell. A field-only edit whose text/tag
- * membership is unchanged reuses the filter without walking the tree. Other
- * edits recompute against the live tree. The cache (keyed on the shared index's
+ * keystroke never re-renders the editor shell. Field-only text/tag edits reuse
+ * unchanged membership or update changed leaves and their ancestor context.
+ * Other edits recompute against the live tree. The cache (keyed on the shared index's
  * identity, which is stable between edits) keeps getSnapshot referentially
  * stable, as `useSyncExternalStore` requires. See ADR 0014 and ADR 0001 (Seam G).
  */
@@ -357,20 +357,22 @@ export function useViewFilter(
     ) {
       if (prev.index === index) return prev.filter;
       const changes = getTreeFieldChangesSince(prev.index);
-      if (
-        prev.filter &&
-        changes &&
-        queryMembershipUnchanged(
+      if (prev.filter && changes) {
+        const filter = updateQueryFilter(
           index,
+          ctx.rootId,
           ctx.search.q,
           changes,
           isHidden,
           filterOperatorMap,
+          prev.filter,
+          focusedKey,
           today,
-        )
-      ) {
-        cache.current = { ...prev, index };
-        return prev.filter;
+        );
+        if (filter) {
+          cache.current = { ...prev, index, filter };
+          return filter;
+        }
       }
     }
     let filter: QueryFilter | null = buildViewFilter(
