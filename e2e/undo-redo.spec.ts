@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   holdDailyClaims,
@@ -8,6 +8,25 @@ import {
   STANDARD_TREE,
   type ApiNode,
 } from "./fixtures";
+
+// Text updates before replay finishes its persistence and caret/paint work.
+// Wait for the existing edit gate so a second shortcut is not intentionally ignored.
+async function replay(page: Page, kind: "undo" | "redo") {
+  const idle = () =>
+    expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const path = "/src/data/history.ts";
+          return (await import(path)).getHistoryState().busy;
+        }),
+      )
+      .toBe(false);
+  await idle();
+  await page.keyboard.press(
+    kind === "undo" ? "ControlOrMeta+z" : "ControlOrMeta+Shift+z",
+  );
+  await idle();
+}
 
 test("the first node after emptying the outline can be undone and redone", async ({
   page,
@@ -289,7 +308,7 @@ test("title undo returns to the editing root and Cmd+K can redo it", async ({
   test.setTimeout(90_000);
   await seedOutline(page, STANDARD_TREE);
   await page.goto("/alpha");
-  const title = page.locator('[data-history-key="alpha"].node-text');
+  const title = page.locator(".zoomed-title-text");
   await expect(title).toBeVisible({ timeout: 60_000 });
   await placeCaret(title, "end");
   await page.keyboard.type(" title");
@@ -298,13 +317,27 @@ test("title undo returns to the editing root and Cmd+K can redo it", async ({
     .getByRole("button", { name: "", exact: true })
     .click();
   await expect(page).toHaveURL(/\/$/);
-  await page.keyboard.press("ControlOrMeta+z");
+  const row = page.locator(
+    'li[data-node-id="alpha"] > .outline-row .node-text',
+  );
+  // Redo saves where undo is invoked, not the earlier title-editing location.
+  await placeCaret(row, 2);
+  await replay(page, "undo");
   await expect(page).toHaveURL(/\/alpha$/);
   await expect(title).toHaveText("Alpha");
+  await expect(title).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(5);
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder("Search nodes and actions...").fill("redo");
   await page.getByRole("option", { name: /Redo typing/ }).click();
-  await expect(title).toHaveText("Alpha title");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(row).toHaveText("Alpha title");
+  await expect(row).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(2);
 });
 
 test("external edits clear both history directions, but our own echoes do not", async ({
@@ -500,8 +533,137 @@ test("selection replacement is separate from typing and undo restores the source
   await expect(alpha).toHaveText("Alpha");
 });
 
-test("one IME composition is one undo step", async ({ page }) => {
+test("unrelated editable owners keep separate typing runs and caret locations", async ({
+  page,
+}) => {
   test.setTimeout(90_000);
+  // Equal caret offsets and a fixed clock make host identity the only boundary.
+  await page.clock.setFixedTime(new Date(2030, 5, 10, 12));
+  await seedOutline(page, [
+    { id: "a", parentId: null, prevSiblingId: null, text: "Alpha" },
+    { id: "b", parentId: null, prevSiblingId: "a", text: "Second" },
+  ]);
+  await page.goto("/");
+  const a = page.locator('[data-history-key="a"].node-text');
+  const b = page.locator('[data-history-key="b"].node-text');
+  await expect(a).toBeVisible({ timeout: 60_000 });
+  await placeCaret(a, "end");
+  await page.keyboard.type("x");
+  await placeCaret(b, "end");
+  await page.keyboard.type("yz");
+  await expect(a).toHaveText("Alphax");
+  await expect(b).toHaveText("Secondyz");
+
+  await replay(page, "undo");
+  await expect(b).toHaveText("Second");
+  await expect(a).toHaveText("Alphax");
+  await expect(b).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(6);
+  await replay(page, "undo");
+  await expect(a).toHaveText("Alpha");
+  await expect(a).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(5);
+  await replay(page, "redo");
+  await expect(a).toHaveText("Alphax");
+  await replay(page, "redo");
+  await expect(b).toHaveText("Secondyz");
+  await expect(b).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(8);
+  await page.reload();
+  await expect(a).toHaveText("Alphax");
+  await expect(b).toHaveText("Secondyz");
+});
+
+test("source and mirror render paths separate typing and restore their own selection", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.clock.setFixedTime(new Date(2030, 5, 10, 12));
+  await seedOutline(page, [
+    { id: "a", parentId: null, prevSiblingId: null, text: "Parent" },
+    { id: "child", parentId: "a", prevSiblingId: null, text: "Seed" },
+    { id: "m", parentId: null, prevSiblingId: "a", text: "", mirrorOf: "a" },
+  ]);
+  await page.goto("/");
+  const instances = page.locator('[data-history-node-id="child"].node-text');
+  await expect(instances).toHaveCount(2, { timeout: 60_000 });
+  const source = instances.nth(0);
+  const mirror = instances.nth(1);
+  await placeCaret(source, "end");
+  await page.keyboard.type("x");
+  await expect(mirror).toHaveText("Seedx");
+  await placeCaret(mirror, "end");
+  await page.keyboard.type("yz");
+  await expect(source).toHaveText("Seedxyz");
+  await replay(page, "undo");
+  await expect(source).toHaveText("Seedx");
+  await expect(mirror).toHaveText("Seedx");
+  await expect(mirror).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(5);
+  await replay(page, "undo");
+  await expect(mirror).toHaveText("Seed");
+  await expect(source).toBeFocused();
+  await replay(page, "redo");
+  await expect(mirror).toHaveText("Seedx");
+  // Redo restores the location saved when undo was invoked: the mirror after
+  // the first undo, even though the second undo changed the source's typing.
+  await expect(mirror).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(5);
+  await replay(page, "redo");
+  await expect(source).toHaveText("Seedxyz");
+  await expect(mirror).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(7);
+
+  // A noncollapsed selection belongs to this render path, not just its source.
+  await mirror.evaluate((el) => {
+    const range = document.createRange();
+    range.setStart(el.firstChild!, 1);
+    range.setEnd(el.firstChild!, 4);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+  });
+  await page.keyboard.type("Q");
+  await expect(source).toHaveText("SQxyz");
+  await replay(page, "undo");
+  await expect(mirror).toHaveText("Seedxyz");
+  await expect(mirror).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+    .toBe("eed");
+  await replay(page, "redo");
+  await expect(source).toHaveText("SQxyz");
+  await expect(mirror).toHaveText("SQxyz");
+  await expect(mirror).toBeFocused();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const selection = window.getSelection()!;
+        return [selection.anchorOffset, selection.focusOffset];
+      }),
+    )
+    .toEqual([2, 2]);
+  await page.reload();
+  await expect(source).toHaveText("SQxyz");
+  await expect(mirror).toHaveText("SQxyz");
+});
+
+test("IME composition stays together across pauses but never joins another owner", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.clock.setFixedTime(new Date(2030, 5, 10, 12));
   await seedOutline(page, STANDARD_TREE);
   await page.goto("/");
   const alpha = page.locator(
@@ -509,21 +671,50 @@ test("one IME composition is one undo step", async ({ page }) => {
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
   await placeCaret(alpha, "end");
+  await page.keyboard.type("x");
+  // CDP drives Chromium's composition events, not a native OS IME or iPhone.
   const ime = await page.context().newCDPSession(page);
   await ime.send("Input.imeSetComposition", {
     text: "文",
     selectionStart: 1,
     selectionEnd: 1,
   });
+  await page.clock.setFixedTime(new Date(2030, 5, 10, 12, 0, 5));
   await ime.send("Input.imeSetComposition", {
     text: "文章",
     selectionStart: 2,
     selectionEnd: 2,
   });
   await ime.send("Input.insertText", { text: "文章" });
-  await expect(alpha).toHaveText("Alpha文章");
-  await page.keyboard.press("ControlOrMeta+z");
+  await expect(alpha).toHaveText("Alphax文章");
+  const bravo = page.locator('[data-history-key="bravo"].node-text');
+  await placeCaret(bravo, "end");
+  await ime.send("Input.imeSetComposition", {
+    text: "別",
+    selectionStart: 1,
+    selectionEnd: 1,
+  });
+  await ime.send("Input.insertText", { text: "別" });
+  await expect(bravo).toHaveText("Bravo別");
+  await replay(page, "undo");
+  await expect(bravo).toHaveText("Bravo");
+  await expect(alpha).toHaveText("Alphax文章");
+  await expect(bravo).toBeFocused();
+  await replay(page, "undo");
+  await expect(alpha).toHaveText("Alphax");
+  await expect(alpha).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(6);
+  await replay(page, "undo");
   await expect(alpha).toHaveText("Alpha");
+  await replay(page, "redo");
+  await expect(alpha).toHaveText("Alphax");
+  await replay(page, "redo");
+  await expect(alpha).toHaveText("Alphax文章");
+  await replay(page, "redo");
+  await expect(bravo).toHaveText("Bravo別");
+  await expect(bravo).toBeFocused();
 });
 
 test("undoing a selected-node delete restores the selected range", async ({
@@ -555,6 +746,7 @@ test("one quick-add typing run includes the first character and can be redone", 
   page,
 }) => {
   test.setTimeout(90_000);
+  await page.clock.setFixedTime(new Date(2030, 5, 10, 12));
   await seedOutline(page, STANDARD_TREE);
   await page.goto("/");
   await expect(page.locator('li[data-node-id="alpha"]')).toBeVisible({
@@ -565,16 +757,39 @@ test("one quick-add typing run includes the first character and can be redone", 
   await page.getByRole("option", { name: "Top level", exact: true }).click();
   const draft = page.getByRole("textbox", { name: "Quick add", exact: true });
   await draft.click();
+  await expect(draft).toHaveAttribute(
+    "data-history-node-id",
+    "__quick_add_draft__",
+  );
+  const host = await draft.elementHandle();
   await page.keyboard.type("a");
   await expect(draft).toHaveAttribute(
     "data-history-node-id",
     /^(?!__quick_add_draft__).+/,
   );
+  // Adoption changes logical ownership without replacing the editable host.
+  expect(await draft.evaluate((el, original) => el === original, host)).toBe(
+    true,
+  );
   await page.keyboard.type(" capture");
-  await page.keyboard.press("ControlOrMeta+z");
+  await replay(page, "undo");
   await expect(draft).toHaveText("");
-  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(draft).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(0);
+  await replay(page, "redo");
   await expect(draft).toHaveText("a capture");
+  await expect(draft).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
+    .toBe(9);
+  await page.keyboard.press("Enter");
+  await expect(draft).toHaveCount(0);
+  await page.reload();
+  await expect(
+    page.locator(".outline-row .node-text").filter({ hasText: /^a capture$/ }),
+  ).toHaveCount(1);
 });
 
 test("undo and redo in a filter input stay separate from outline authoring", async ({
