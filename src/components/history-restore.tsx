@@ -449,7 +449,8 @@ export function HistoryRestoreDialog() {
         const caret = plan.location?.caret;
         if (node)
           decorate(el, node.text, caret?.start ?? node.text.length, true);
-        if (caret) setSelectionOffsets(el, caret.start, caret.end);
+        if (caret)
+          setSelectionOffsets(el, caret.start, caret.end, caret.backward);
         if (plan.location?.selection) {
           el.blur();
           window.getSelection()?.removeAllRanges();

@@ -10,6 +10,7 @@ import { dispatchClick, keymapSpecs } from "../plugins/registry";
 import {
   getCaretOffset,
   getSelectedAtom,
+  getSelectionRange,
   readSource,
   selectAdjacentAtom,
 } from "./inline-code";
@@ -196,7 +197,10 @@ export function useBulletKeymap({
               }
               commands.onEnter(
                 node.id,
-                el ? getCaretOffset(el) : node.text.length,
+                (el && getSelectionRange(el)) ?? {
+                  start: node.text.length,
+                  end: node.text.length,
+                },
               );
             },
           },
@@ -235,7 +239,10 @@ export function useBulletKeymap({
               const el = textRef.current;
               commands.onEnter(
                 node.id,
-                el ? getCaretOffset(el) : node.text.length,
+                (el && getSelectionRange(el)) ?? {
+                  start: node.text.length,
+                  end: node.text.length,
+                },
               );
             },
           },
