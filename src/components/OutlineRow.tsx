@@ -34,14 +34,13 @@ import {
 import { hasFoldingToken } from "../plugins/registry";
 import { BulletGlyph } from "./bullet-glyph";
 import { focusTextFromRowTap } from "./caret-place";
-import { useCaretReveal } from "./editor-decoration";
+import { useCaretReveal, useInputDecoration } from "./editor-decoration";
 import { flashRow } from "./flash-node";
 import {
   decorate,
   getCaretOffset,
   readSource,
   setCaretOffset,
-  useEditorFeatureDecoration,
 } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
@@ -208,10 +207,14 @@ function RowChrome({
   measureRef,
 }: RowChromeProps) {
   const textRef = useRef<HTMLSpanElement | null>(null);
-  const syncedRef = useRef<string | null>(null);
-  const composingRef = useRef(false);
+  const {
+    syncedRef,
+    composingRef,
+    paintInput,
+    startComposition,
+    endComposition,
+  } = useInputDecoration(textRef);
   const caretReveal = useCaretReveal(composingRef, syncedRef);
-  useEditorFeatureDecoration(textRef, composingRef);
   const { slotsByPosition } = usePluginChrome();
 
   // Direct visible children of the CONTENT -- a mirror windows its source's
@@ -519,21 +522,13 @@ function RowChrome({
               commands.onTextChange(content.id, text);
               slash.handleInput();
               menus.handleInput();
-              if (!composingRef.current) {
-                decorate(el, text, getCaretOffset(el), true);
-                syncedRef.current = text;
-              }
+              paintInput(el, text);
             }}
-            onCompositionStart={() => {
-              composingRef.current = true;
-            }}
+            onCompositionStart={startComposition}
             onCompositionEnd={(e) => {
-              composingRef.current = false;
-              const el = e.currentTarget;
-              const text = readSource(el);
-              commands.onTextChange(content.id, text);
-              decorate(el, text, getCaretOffset(el), true);
-              syncedRef.current = text;
+              endComposition(e.currentTarget, (text) =>
+                commands.onTextChange(content.id, text),
+              );
             }}
             onPaste={(e) => {
               const el = e.currentTarget;

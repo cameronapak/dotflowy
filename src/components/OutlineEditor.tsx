@@ -160,7 +160,7 @@ import {
   DELETE_CONFIRM_THRESHOLD,
   openDeleteConfirm,
 } from "./delete-confirm-opener";
-import { useCaretReveal } from "./editor-decoration";
+import { useCaretReveal, useInputDecoration } from "./editor-decoration";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { Header } from "./Header";
 import { captureTextHistory, runHistoryRestore } from "./history-restore";
@@ -171,7 +171,6 @@ import {
   getSelectedAtom,
   readSource,
   setCaretOffset,
-  useEditorFeatureDecoration,
 } from "./inline-code";
 import { signalJoinRefusal } from "./join-refusal";
 import { openInlineTargetAtCaret } from "./link-keymap";
@@ -3367,12 +3366,14 @@ function ZoomedTitle({
   setPendingFocus: (key: string, offset: number) => void;
 }) {
   const ref = useRef<HTMLSpanElement | null>(null);
-  // Mirror OutlineRow's live inline-`code` decoration so a backtick run in the
-  // title renders as a mono chip too. See inline-code.ts and OutlineRow.
-  const syncedRef = useRef<string | null>(null);
-  const composingRef = useRef(false);
+  const {
+    syncedRef,
+    composingRef,
+    paintInput,
+    startComposition,
+    endComposition,
+  } = useInputDecoration(ref);
   const caretReveal = useCaretReveal(composingRef, syncedRef);
-  useEditorFeatureDecoration(ref, composingRef);
   const { slotsByPosition } = usePluginChrome();
   // The protection rules (no delete/blank/to-do/complete) apply to the zoomed
   // node just as on a list bullet, so it wears the same indicator when zoomed.
@@ -3549,23 +3550,11 @@ function ZoomedTitle({
               onTextChange(text);
               slash.handleInput();
               menus.handleInput();
-              // Re-decorate live, revealing the link under the caret. Suspended
-              // during IME composition; compositionend handles that case.
-              if (!composingRef.current) {
-                decorate(el, text, getCaretOffset(el), true);
-                syncedRef.current = text;
-              }
+              paintInput(el, text);
             }}
-            onCompositionStart={() => {
-              composingRef.current = true;
-            }}
+            onCompositionStart={startComposition}
             onCompositionEnd={(e) => {
-              composingRef.current = false;
-              const el = e.currentTarget;
-              const text = readSource(el);
-              onTextChange(text);
-              decorate(el, text, getCaretOffset(el), true);
-              syncedRef.current = text;
+              endComposition(e.currentTarget, onTextChange);
             }}
             onPaste={(e) => {
               const el = e.currentTarget;

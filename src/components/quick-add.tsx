@@ -112,19 +112,13 @@ import {
   keymapSpecs,
   usePluginChrome,
 } from "../plugins/registry";
-import { useCaretReveal } from "./editor-decoration";
+import { useCaretReveal, useInputDecoration } from "./editor-decoration";
 import {
   captureTextHistory,
   runHistoryRestoreE,
   takeTextHistory,
 } from "./history-restore";
-import {
-  decorate,
-  getCaretOffset,
-  setSelectionOffsets,
-  readSource,
-  useEditorFeatureDecoration,
-} from "./inline-code";
+import { decorate, setSelectionOffsets, readSource } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import {
   buildTargetCandidates,
@@ -252,10 +246,14 @@ const MiniNodeEditor = forwardRef<
   handle,
 ) {
   const ref = useRef<HTMLSpanElement | null>(null);
-  const syncedRef = useRef<string | null>(null);
-  const composingRef = useRef(false);
+  const {
+    syncedRef,
+    composingRef,
+    paintInput,
+    startComposition,
+    endComposition,
+  } = useInputDecoration(ref);
   const caretReveal = useCaretReveal(composingRef, syncedRef);
-  useEditorFeatureDecoration(ref, composingRef);
   const { slotsByPosition } = usePluginChrome();
   const ownsFormatEditable = useCallback(
     (el: HTMLElement) => ref.current === el,
@@ -293,7 +291,7 @@ const MiniNodeEditor = forwardRef<
         );
       },
     }),
-    [],
+    [syncedRef],
   );
 
   // The `/` palette (Seam C), curated to text-authoring commands. Same wiring as
@@ -379,21 +377,11 @@ const MiniNodeEditor = forwardRef<
           onText(text);
           slash.handleInput();
           menus.handleInput();
-          if (!composingRef.current) {
-            decorate(el, text, getCaretOffset(el), true);
-            syncedRef.current = text;
-          }
+          paintInput(el, text);
         }}
-        onCompositionStart={() => {
-          composingRef.current = true;
-        }}
+        onCompositionStart={startComposition}
         onCompositionEnd={(e) => {
-          composingRef.current = false;
-          const el = e.currentTarget;
-          const text = readSource(el);
-          onText(text);
-          decorate(el, text, getCaretOffset(el), true);
-          syncedRef.current = text;
+          endComposition(e.currentTarget, onText);
         }}
         onPaste={(e) => {
           const el = e.currentTarget;
