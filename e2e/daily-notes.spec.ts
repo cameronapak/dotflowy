@@ -293,8 +293,8 @@ test("Enter at the start of the protected Daily container never blanks it", asyn
   // Enter at offset 0 used to take the mid-split arm: it wrote "" into the
   // node and handed its text to a NEW node below -- so a protected node sat
   // visibly blanked until its row blurred and the heal fired. The insert-above
-  // arm writes nothing to it at all, which is why this funnel deliberately
-  // carries no `guardProtected` call: there is nothing left to guard against.
+  // arm writes nothing to it at all. A noncollapsed selection starting at zero
+  // would blank the original node instead and must respect its protection.
   await load(page);
 
   await todayButton(page).click();
@@ -335,6 +335,20 @@ test("Enter at the start of the protected Daily container never blanks it", asyn
   await expect(page.getByText(/needs a name/i)).toHaveCount(0);
   // Still protected, still locked.
   await expect(containerRow.locator(".protection-indicator")).toBeVisible();
+
+  const count = await page.locator("li[data-node-id]").count();
+  for (const end of [2, 5]) {
+    await containerText.evaluate((el, end) => {
+      el.focus();
+      window
+        .getSelection()!
+        .setBaseAndExtent(el.firstChild!, end, el.firstChild!, 0);
+    }, end);
+    await page.keyboard.press("Enter");
+    await expect(page.getByText(/needs a name/i)).toBeVisible();
+    expect(await containerText.textContent()).toBe("Daily");
+    await expect(page.locator("li[data-node-id]")).toHaveCount(count);
+  }
 });
 
 test("the protected Daily container can't be turned into a to-do", async ({

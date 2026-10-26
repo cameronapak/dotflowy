@@ -2708,7 +2708,6 @@ function useNodeCommands({
               const content = idx.byId.get(contentId);
               if (!content) return null;
               const isMirrorRow = contentId !== instanceId;
-              capture(idx, activeKey, null, { label: "create" });
               const offset = Math.max(
                 0,
                 Math.min(selection.start, content.text.length),
@@ -2719,6 +2718,15 @@ function useNodeCommands({
               );
               const before = content.text.slice(0, offset);
               const after = content.text.slice(end);
+              if (
+                end > offset &&
+                before.trim() === "" &&
+                !isMirrorRow &&
+                content.kind !== "embed" &&
+                guardProtected(contentId, "blank", rowOf(activeKey))
+              )
+                return null;
+              capture(idx, activeKey, null, { label: "create" });
               // Caret at the very START of a bullet that HAS text: this is not a
               // split, it's "make room above". The edited node keeps its id, its
               // text, and its children -- only an empty sibling appears before it.
