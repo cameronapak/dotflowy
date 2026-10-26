@@ -360,7 +360,19 @@ export function installSpotlight(animate = true): void {
   window.addEventListener("pointerdown", onPointerDown, true);
   window.addEventListener("keydown", onKeyDown, true);
   window.addEventListener("focusin", onFocusIn, true);
-  if (!animate || navigationOwnsScroll) return;
+  if (!animate) {
+    // Suspense may restore this layout effect during cleanup's collapse tween.
+    // A steady-state install must release that tween before the first focus.
+    cancelTween();
+    breathAnimating = false;
+    const region = outlineRegion();
+    if (region) {
+      region.style.paddingTop = "";
+      region.style.overflowAnchor = "";
+    }
+    return;
+  }
+  if (navigationOwnsScroll) return;
   const epoch = alignmentEpoch;
   // Enable (ADR 0060): grow the breathing room and center the lit line as
   // ONE animation. The `pt-[50vh]` class just applied at render; pin the pad
