@@ -514,19 +514,23 @@ export function buildQueryFilter(
   return result;
 }
 
-/** Prove that a field-only batch cannot change a text/tag filter. The caller
- * must hold the same view, focus, date, and structure. Registered operators
- * may read the entire index; mirrors may resolve content along several paths.
- * Both keep the full evaluator rather than guessing their dependencies. */
-export function queryMembershipUnchanged(
+/** Update a text/tag filter from a complete field-only batch. The caller holds
+ * view, focus, date, and structure fixed. Only leaves may change membership:
+ * branches can reveal descendants, operators can read other nodes, and mirrors
+ * can affect several render paths. Return null for those full-walk fallbacks.
+ * Published sets are never mutated. */
+export function updateQueryFilter(
   index: TreeIndex,
+  rootId: string | null,
   query: string | undefined,
   changes: ReadonlyArray<{ before: Node; after: Node }>,
   isHidden: (node: Node) => boolean,
   operators: FilterOperatorMap,
+  previous: QueryFilter,
+  focusedKey: string | null,
   today = localDateKey(),
-): boolean {
-  if (index.mirrorsBySource.size > 0) return false;
+): QueryFilter | null {
+  if (index.mirrorsBySource.size > 0) return null;
   const parsed = parseFilterQuery(query);
   if (
     parsed.groups.length === 0 ||
@@ -538,13 +542,77 @@ export function queryMembershipUnchanged(
       ),
     )
   )
-    return false;
-  return changes.every(
-    ({ before, after }) =>
-      isHidden(before) === isHidden(after) &&
-      nodeMatches(parsed, before, index, operators, today) ===
-        nodeMatches(parsed, after, index, operators, today),
-  );
+    return null;
+  if (rootId !== null && !index.byId.has(rootId)) return previous;
+
+  let visibleIds = previous.visibleIds;
+  let matchIds = previous.matchIds;
+  let retainedKey = previous.retainedKey;
+  for (const { before, after } of changes) {
+    if (isHidden(before) !== isHidden(after)) return null;
+    const matched = nodeMatches(parsed, after, index, operators, today);
+    if (nodeMatches(parsed, before, index, operators, today) === matched)
+      continue;
+    if (index.childrenByParent.get(after.id)?.length) return null;
+    if (after.id === rootId || isHidden(after)) continue;
+
+    // Walk only the changed leaf's stored ancestors. Without mirrors these
+    // are also its render ancestors. Hidden or out-of-scope edits have no effect.
+    const ancestors: Node[] = [];
+    let parentId = after.parentId;
+    while (parentId !== rootId && parentId !== null) {
+      const parent = index.byId.get(parentId);
+      if (!parent || isHidden(parent)) break;
+      ancestors.push(parent);
+      parentId = parent.parentId;
+    }
+    if (parentId !== rootId) continue;
+    const parent = ancestors[0];
+    const revealed =
+      parent !== undefined &&
+      !parent.collapsed &&
+      previous.matchIds.has(parent.id) &&
+      previous.retainedKey !== parent.id;
+    const included = matched || revealed || after.id === focusedKey;
+    if (after.id === focusedKey)
+      retainedKey = matched || revealed ? undefined : after.id;
+
+    if (included === matchIds.has(after.id)) continue;
+    if (matchIds === previous.matchIds) matchIds = new Set(matchIds);
+    if (visibleIds === previous.visibleIds) visibleIds = new Set(visibleIds);
+    if (included) {
+      matchIds.add(after.id);
+      visibleIds.add(after.id);
+      for (const ancestor of ancestors) visibleIds.add(ancestor.id);
+    } else {
+      matchIds.delete(after.id);
+      visibleIds.delete(after.id);
+      // A context ancestor survives while any visible child or its own match
+      // needs it. This can scan a wide sibling list, but never evaluates those
+      // siblings' queries or visits unrelated branches.
+      for (const ancestor of ancestors) {
+        if (
+          matchIds.has(ancestor.id) ||
+          index.childrenByParent
+            .get(ancestor.id)
+            ?.some((id) => visibleIds.has(id))
+        )
+          break;
+        visibleIds.delete(ancestor.id);
+      }
+    }
+  }
+  if (
+    visibleIds === previous.visibleIds &&
+    matchIds === previous.matchIds &&
+    retainedKey === previous.retainedKey
+  )
+    return previous;
+  const result: QueryFilter = { visibleIds, matchIds };
+  if (retainedKey !== undefined) result.retainedKey = retainedKey;
+  if (matchIds.size === 0)
+    result.emptyMessage = `No matches for "${(query ?? "").trim()}" here.`;
+  return result;
 }
 
 /**
