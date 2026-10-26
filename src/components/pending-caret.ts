@@ -11,7 +11,12 @@
 import { placeCaretAtEnd, placeCaretAtStart } from "./caret-place";
 import { setSelectionOffsets } from "./inline-code";
 
-let pending: { key: string; start: number; end: number } | null = null;
+let pending: {
+  key: string;
+  start: number;
+  end: number;
+  backward?: boolean;
+} | null = null;
 
 /** Queue a source-space caret offset for the row `key` about to take focus. */
 export function setPendingCaretOffset(key: string, offset: number): void {
@@ -20,7 +25,7 @@ export function setPendingCaretOffset(key: string, offset: number): void {
 
 export function setPendingCaretSelection(
   key: string,
-  range: { start: number; end: number },
+  range: { start: number; end: number; backward?: boolean },
 ): void {
   pending = { key, ...range };
 }
@@ -40,9 +45,9 @@ export function applyPendingCaret(
   atStart: boolean,
 ): void {
   if (pending && pending.key === key) {
-    const { start, end } = pending;
+    const { start, end, backward } = pending;
     pending = null;
-    setSelectionOffsets(el, start, end);
+    setSelectionOffsets(el, start, end, backward);
     return;
   }
   if (atStart) placeCaretAtStart(el);

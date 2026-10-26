@@ -10,7 +10,7 @@ import { instanceIdForKey } from "./visible-order";
 export interface HistoryLocation {
   rootId: string | null;
   rowKey: string | null;
-  caret: { start: number; end: number } | null;
+  caret: { start: number; end: number; backward?: boolean } | null;
   selection: { anchorId: string; focusId: string } | null;
 }
 

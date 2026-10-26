@@ -197,7 +197,10 @@ export interface MiniEditorHandle {
   focus(): void;
   clear(): void;
   readText(): string;
-  restore(text: string, caret?: { start: number; end: number } | null): void;
+  restore(
+    text: string,
+    caret?: { start: number; end: number; backward?: boolean } | null,
+  ): void;
 }
 
 /** The contentEditable capture surface for ONE node. A curated, text-authoring
@@ -294,6 +297,7 @@ const MiniNodeEditor = forwardRef<
           el,
           caret?.start ?? text.length,
           caret?.end ?? text.length,
+          caret?.backward,
         );
       },
     }),

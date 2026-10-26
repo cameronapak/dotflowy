@@ -74,9 +74,14 @@ const renderCache = new WeakMap<HTMLElement, string>();
 // blurred. A link REVEALS (raw, decorated `[label](url)`) iff the caret sits
 // within or adjacent to it (offset in `[start, end]`, boundaries inclusive so
 // you can arrow/click in from either edge); otherwise it FOLDS to a clean <a>.
-// At most one link reveals -- the one under the caret. Code and tags keep their
-// source visible in both states. See ADR 0005 (per-link reveal).
-function inlineMarkupHtml(text: string, revealOffset: number | null): string {
+// A selection also keeps tokens containing either interior endpoint revealed,
+// so restoring the range cannot snap that endpoint to an atom's edge.
+// See ADR 0005 (per-link reveal) and ADR 0025 (emphasis/code folding).
+function inlineMarkupHtml(
+  text: string,
+  revealOffset: number | null,
+  selection: { start: number; end: number } | null,
+): string {
   let html = "";
   let last = 0;
   for (const m of text.matchAll(tokenRegex)) {
@@ -86,7 +91,17 @@ function inlineMarkupHtml(text: string, revealOffset: number | null): string {
     html += escapeHtml(text.slice(last, start));
     // The plugin that owns this token returns a declarative descriptor; the
     // core escapes + serializes it, so a plugin never hands us raw HTML (D6).
-    html += serializeEl(renderToken(m, { revealOffset, start, end }));
+    // Keep an interior selection endpoint addressable as real text. Endpoints
+    // at atom boundaries need no reveal; a range can still select a whole atom.
+    const endpoint =
+      selection && selection.start !== selection.end
+        ? [selection.start, selection.end].find(
+            (offset) => offset > start && offset < end,
+          )
+        : undefined;
+    html += serializeEl(
+      renderToken(m, { revealOffset: endpoint ?? revealOffset, start, end }),
+    );
     last = end;
   }
   html += escapeHtml(text.slice(last));
@@ -219,9 +234,9 @@ function sameDecoration(current: Node, next: Node): boolean {
   return current.isEqualNode(next);
 }
 
-// Re-render `el` as formatted HTML, optionally keeping the caret put. A DOM
-// update can invalidate a (node, offset) selection, so we capture the caret as
-// an absolute SOURCE-character offset first and re-derive it against the new
+// Re-render `el` as formatted HTML, optionally keeping the selection put. A DOM
+// update can invalidate a (node, offset) selection, so we capture both endpoints
+// and direction in SOURCE offsets first and re-derive them against the new
 // tree after. The render cache skips unchanged HTML. When it changes, keep the
 // equal prefix/suffix connected: rebuilding unchanged tokens would reload their
 // images on every keystroke. Native edits often already match the desired DOM,
@@ -234,9 +249,9 @@ export function decorate(
   revealOffset: number | null,
   preserveCaret: boolean,
 ): void {
-  const html = inlineMarkupHtml(text, revealOffset);
+  const selection = preserveCaret ? getSelectionRange(el) : null;
+  const html = inlineMarkupHtml(text, revealOffset, selection);
   if (renderCache.get(el) === html) return;
-  const offset = preserveCaret ? getCaretOffset(el) : -1;
   const template = document.createElement("template");
   template.innerHTML = html;
   const next = template.content;
@@ -265,7 +280,8 @@ export function decorate(
   }
   el.insertBefore(next, end);
   renderCache.set(el, html);
-  if (offset >= 0) setCaretOffset(el, offset);
+  if (selection)
+    setSelectionOffsets(el, selection.start, selection.end, selection.backward);
 }
 
 // Absolute count of SOURCE characters before the collapsed caret within `el`. A
@@ -281,11 +297,12 @@ export function getCaretOffset(el: HTMLElement): number {
 }
 
 // The collapsed-or-not selection as absolute SOURCE character offsets within
-// `el`, `start <= end`. Used by paste to know what range it's replacing.
+// `el`, `start <= end`, plus direction for selection restoration. Used by paste
+// and Enter to know what range they're replacing.
 // Returns null when there's no selection inside `el`.
 export function getSelectionRange(
   el: HTMLElement,
-): { start: number; end: number } | null {
+): { start: number; end: number; backward: boolean } | null {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return null;
   const range = sel.getRangeAt(0);
@@ -293,7 +310,11 @@ export function getSelectionRange(
     return null;
   const start = sourceOffsetUpTo(el, range.startContainer, range.startOffset);
   const end = sourceOffsetUpTo(el, range.endContainer, range.endOffset);
-  return { start, end };
+  const backward =
+    !range.collapsed &&
+    sel.anchorNode === range.endContainer &&
+    sel.anchorOffset === range.endOffset;
+  return { start, end, backward };
 }
 
 // Source length of the content from the start of `el` up to the DOM point
@@ -552,16 +573,14 @@ export function setSelectionOffsets(
   el: HTMLElement,
   start: number,
   end: number,
+  backward = false,
 ): void {
   const sel = window.getSelection();
   if (!sel) return;
   const a = domPointAt(el, start);
   const b = domPointAt(el, end);
-  const range = document.createRange();
-  range.setStart(a.node, a.offset);
-  range.setEnd(b.node, b.offset);
-  sel.removeAllRanges();
-  sel.addRange(range);
+  if (backward) sel.setBaseAndExtent(b.node, b.offset, a.node, a.offset);
+  else sel.setBaseAndExtent(a.node, a.offset, b.node, b.offset);
 }
 
 // Collapse the selection just before/after an atomic folded-link widget, by
@@ -625,8 +644,7 @@ export function revealLinkAtCaret(
     if (document.activeElement !== el) return;
     const text = readSource(el);
     const caret = getCaretOffset(el);
-    decorate(el, text, caret, false);
+    decorate(el, text, caret, true);
     onRevealed?.(text);
-    setCaretOffset(el, caret);
   });
 }

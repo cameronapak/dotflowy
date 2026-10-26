@@ -10,9 +10,8 @@ import type { NodeKind } from "../data/schema";
  */
 export interface NodeCommands {
   onTextChange: (id: string, text: string) => void;
-  // `caretOffset` is the absolute character offset of the caret within the
-  // bullet's text, so the editor can split the line at the caret.
-  onEnter: (id: string, caretOffset: number) => void;
+  // Ordered SOURCE offsets: replace the selection and split at its start.
+  onEnter: (id: string, selection: { start: number; end: number }) => void;
   onIndent: (id: string) => void;
   onOutdent: (id: string) => void;
   // Move a bullet (and its subtree) up/down among siblings; at the edge it

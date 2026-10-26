@@ -2677,7 +2677,7 @@ function useNodeCommands({
           setText(id, text);
         },
 
-        onEnter: (id, caretOffset) => {
+        onEnter: (id, selection) => {
           const initialIndex = getTreeIndex();
           if (guardLocked(initialIndex, id, rowOf(findFocusedId() ?? id)))
             return;
@@ -2707,13 +2707,25 @@ function useNodeCommands({
               const content = idx.byId.get(contentId);
               if (!content) return null;
               const isMirrorRow = contentId !== instanceId;
-              capture(idx, activeKey, null, { label: "create" });
               const offset = Math.max(
                 0,
-                Math.min(caretOffset, content.text.length),
+                Math.min(selection.start, content.text.length),
+              );
+              const end = Math.max(
+                offset,
+                Math.min(selection.end, content.text.length),
               );
               const before = content.text.slice(0, offset);
-              const after = content.text.slice(offset);
+              const after = content.text.slice(end);
+              if (
+                end > offset &&
+                before.trim() === "" &&
+                !isMirrorRow &&
+                content.kind !== "embed" &&
+                guardProtected(contentId, "blank", rowOf(activeKey))
+              )
+                return null;
+              capture(idx, activeKey, null, { label: "create" });
               // Caret at the very START of a bullet that HAS text: this is not a
               // split, it's "make room above". The edited node keeps its id, its
               // text, and its children -- only an empty sibling appears before it.
@@ -2723,7 +2735,7 @@ function useNodeCommands({
               // mapping pointing at it.) Checked BEFORE the mirror redirect: this
               // arm writes nothing to the source and positions the new node beside
               // the INSTANCE, which is the local-position side (ADR 0022).
-              if (offset === 0 && content.text.length > 0) {
+              if (offset === 0 && end === 0 && content.text.length > 0) {
                 // Insert BEFORE = insert after our own predecessor. At the head
                 // that's null, which insertSibling handles by repointing the old
                 // head -- so one call covers head and middle alike.
@@ -2755,6 +2767,17 @@ function useNodeCommands({
               // CONTENT's children but the INSTANCE's collapse (collapse is local).
               const isOpen =
                 !instance.collapsed && childrenOf(idx, contentId).length > 0;
+              // The empty-tail arms insert without splitting. Still remove a
+              // selected suffix in this same history/structural transaction.
+              // Mirrors and embeds keep their existing no-text-split behavior.
+              if (
+                end > offset &&
+                caretAtEnd &&
+                !isMirrorRow &&
+                content.kind !== "embed"
+              ) {
+                setText(contentId, before);
+              }
               let newId: string;
               let atStart = false;
               if (caretAtEnd && isOpen) {

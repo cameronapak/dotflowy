@@ -189,6 +189,7 @@ export interface SelectionSnapshot {
   el: HTMLElement;
   start: number;
   end: number;
+  backward: boolean;
 }
 
 /** Save the focused span's selection, for a touch toolbar press (ADR 0069).
@@ -198,7 +199,7 @@ export function snapshotSelection(): SelectionSnapshot | null {
   if (!el) return null;
   const range = getSelectionRange(el);
   if (!range || range.start === range.end) return null;
-  return { el, start: range.start, end: range.end };
+  return { el, ...range };
 }
 
 /** Put a saved selection back if the press collapsed it in between. Touch
@@ -208,9 +209,15 @@ export function snapshotSelection(): SelectionSnapshot | null {
 export function restoreSelection(snap: SelectionSnapshot | null): void {
   if (!snap || activeEditable() !== snap.el) return;
   const range = getSelectionRange(snap.el);
-  if (range && range.start === snap.start && range.end === snap.end) return;
+  if (
+    range &&
+    range.start === snap.start &&
+    range.end === snap.end &&
+    range.backward === snap.backward
+  )
+    return;
   // The press may have moved the caret out of a revealed run, folding it into
   // an atom. Reveal it again before mapping interior offsets into the live DOM.
   decorate(snap.el, readSource(snap.el), snap.end, false);
-  setSelectionOffsets(snap.el, snap.start, snap.end);
+  setSelectionOffsets(snap.el, snap.start, snap.end, snap.backward);
 }

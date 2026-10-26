@@ -59,6 +59,82 @@ async function caretAt(page: Page, id: string, col: number) {
   await placeCaret(text(page, id), col);
 }
 
+test("Enter replaces a backward selection, undo restores its direction, and immediate typing can split again", async ({
+  page,
+}) => {
+  await load(page, [
+    { id: "n", parentId: null, prevSiblingId: null, text: "ABCDEF" },
+  ]);
+  await text(page, "n").evaluate((el) => {
+    el.focus();
+    const node = el.firstChild!;
+    window.getSelection()!.setBaseAndExtent(node, 4, node, 2);
+  });
+  await page.keyboard.press("Enter");
+  await expect.poll(() => orderedTexts(page)).toEqual(["AB", "EF"]);
+  await expect(focused(page)).toHaveText("EF");
+
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => orderedTexts(page)).toEqual(["ABCDEF"]);
+  await expect
+    .poll(() =>
+      text(page, "n").evaluate((el) => {
+        const sel = window.getSelection()!;
+        return {
+          text: sel.toString(),
+          anchor: sel.anchorOffset,
+          focus: sel.focusOffset,
+          inside: el.contains(sel.anchorNode) && el.contains(sel.focusNode),
+        };
+      }),
+    )
+    .toEqual({ text: "CD", anchor: 4, focus: 2, inside: true });
+
+  // No focus assertions or animation-frame waits between native editing handoffs.
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("X");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Y");
+  await expect.poll(() => orderedTexts(page)).toEqual(["AB", "X", "YEF"]);
+});
+
+test("Enter removes selected prefixes, suffixes, and whole text, including an expanded parent", async ({
+  page,
+}) => {
+  for (const { start, end, children, expected } of [
+    { start: 0, end: 2, children: false, expected: ["", "CDEF"] },
+    { start: 2, end: 6, children: false, expected: ["AB", ""] },
+    { start: 0, end: 6, children: false, expected: ["", ""] },
+    { start: 2, end: 6, children: true, expected: ["AB", "", "child"] },
+  ]) {
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "ABCDEF" },
+      ...(children
+        ? [{ id: "c", parentId: "n", prevSiblingId: null, text: "child" }]
+        : []),
+    ]);
+    await text(page, "n").evaluate(
+      (el, { start, end }) => {
+        el.focus();
+        window
+          .getSelection()!
+          .setBaseAndExtent(el.firstChild!, start, el.firstChild!, end);
+      },
+      { start, end },
+    );
+    await page.keyboard.press("Enter");
+    await expect.poll(() => orderedTexts(page)).toEqual(expected);
+    if (children)
+      await expect(rows(page).nth(1)).toHaveAttribute("data-parent-id", "n");
+    else
+      await expect(rows(page).nth(1)).not.toHaveAttribute(
+        "data-parent-id",
+        /./,
+      );
+    await expect(focused(page)).toHaveText(expected[1]!);
+  }
+});
+
 test("caret mid-text: text right of the caret moves to a new sibling below", async ({
   page,
 }) => {

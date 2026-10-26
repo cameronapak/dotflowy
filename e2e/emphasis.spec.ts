@@ -36,6 +36,79 @@ async function caretAtSource(page: Page, id: string, target: number) {
   await placeCaret(text(page, id), target);
 }
 
+test("caret decoration preserves ranges across revealed emphasis and directional selection round-trips", async ({
+  page,
+}) => {
+  await load(page, [
+    { id: "n", parentId: null, prevSiblingId: null, text: "AB **CD** EF" },
+  ]);
+  const result = await text(page, "n").evaluate(async (el) => {
+    const modulePath = "/src/components/inline-code.ts";
+    const {
+      decorate,
+      getSelectionRange,
+      setSelectionOffsets,
+      sourceOffsetUpTo,
+    } = await import(/* @vite-ignore */ modulePath);
+    const selection = window.getSelection()!;
+    const inspect = () => ({
+      selected: selection.toString(),
+      anchor: sourceOffsetUpTo(
+        el,
+        selection.anchorNode,
+        selection.anchorOffset,
+      ),
+      focus: sourceOffsetUpTo(el, selection.focusNode, selection.focusOffset),
+    });
+    const results = [];
+    el.focus();
+    for (const [anchor, focus] of [
+      [0, 11],
+      [11, 0],
+      [5, 11],
+      [11, 5],
+    ]) {
+      decorate(el, "AB **CD** EF", 4, false);
+      // Select literal characters in the revealed DOM, not offsets derived by
+      // the implementation being checked.
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const points: { node: Node; offset: number }[] = [];
+      let node: Node | null;
+      let offset = 0;
+      while ((node = walker.nextNode())) {
+        for (let i = 0; i <= node.textContent!.length; i++) {
+          points[offset + i] ??= { node, offset: i };
+        }
+        offset += node.textContent!.length;
+      }
+      const a = points[anchor!]!;
+      const f = points[focus!]!;
+      selection.setBaseAndExtent(a.node, a.offset, f.node, f.offset);
+      document.dispatchEvent(new Event("selectionchange"));
+      // Include deferred focus reveal as well as the synchronous watcher.
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      results.push(inspect());
+      const range = getSelectionRange(el);
+      selection.collapse(el, 0);
+      setSelectionOffsets(el, range.start, range.end, range.backward);
+      results.push(inspect());
+    }
+    return results;
+  });
+  expect(result).toEqual([
+    { selected: "AB CD E", anchor: 0, focus: 11 },
+    { selected: "AB CD E", anchor: 0, focus: 11 },
+    { selected: "AB CD E", anchor: 11, focus: 0 },
+    { selected: "AB CD E", anchor: 11, focus: 0 },
+    { selected: "CD** E", anchor: 5, focus: 11 },
+    { selected: "CD** E", anchor: 5, focus: 11 },
+    { selected: "CD** E", anchor: 11, focus: 5 },
+    { selected: "CD** E", anchor: 11, focus: 5 },
+  ]);
+});
+
 test("folded emphasis preserves each delimiter, flat precedence, and literal near-misses", async ({
   page,
 }) => {
