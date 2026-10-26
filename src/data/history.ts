@@ -143,8 +143,6 @@ export function clearHistory(): boolean {
   const hadHistory = undoStack.length + redoStack.length > 0;
   epoch++;
   undoStack.length = redoStack.length = 0;
-  redoBackup = null;
-  lastCaptureRefused = false;
   notify();
   return hadHistory;
 }
@@ -175,15 +173,6 @@ export function finishHistoryScope(scope: string, index?: TreeIndex): void {
   notify();
 }
 
-// The redo stack as it stood just before the most recent `capture` cleared it,
-// so a captured-then-dropped no-op can put it back (see `drop`).
-let redoBackup: Entry[] | null = null;
-
-// Did the most recent `capture` refuse (empty index)? The command layer pairs
-// every capture with a `drop()` on the no-op arm, and that drop would otherwise
-// pop an UNRELATED older entry the refused capture never pushed. See `drop`.
-let lastCaptureRefused = false;
-
 function snapshot(index: TreeIndex): Node[] {
   // Nodes are flat records, so a shallow per-node copy is a full deep copy.
   return Array.from(index.byId.values()).map((n) => ({ ...n }));
@@ -201,6 +190,11 @@ function snapshot(index: TreeIndex): Node[] {
  * An empty snapshot is valid only after successful sync and when the live
  * collection is also empty. Refuse incomplete reads rather than classifying
  * every live node as a delete; genuinely empty outlines can undo creation.
+ *
+ * The returned `drop` rolls back this capture if the action is a no-op or
+ * fails. Only the caller owns that rollback backup: let the handle go after
+ * success, or keep it across an awaited operation that can roll back. History
+ * itself must not retain an abandoned redo timeline after a successful edit.
  */
 export function capture(
   index: TreeIndex,
@@ -211,64 +205,51 @@ export function capture(
     scope?: string | null;
     location?: HistoryLocation;
   } = {},
-): void {
+): () => void {
   if (
     index.byId.size === 0 &&
     (!isSyncReady() || nodesLoadError() || nodesCollection.size !== 0)
   ) {
-    lastCaptureRefused = true;
     if (import.meta.env.DEV) {
       console.error(
         "[history] capture() refused an unsynced or inconsistent empty index.",
         { focusId, tag },
       );
     }
-    return;
+    return () => {};
   }
-  lastCaptureRefused = false;
 
   const top = undoStack[undoStack.length - 1];
-  if (tag !== null && top && top.tag === tag && redoStack.length === 0) return;
+  if (tag !== null && top && top.tag === tag && redoStack.length === 0)
+    return () => {};
   const location = options.location ?? readLocation?.(focusId) ?? null;
-  undoStack.push({
+  const entry: Entry = {
     nodes: snapshot(index),
     focusId: location?.rowKey ?? focusId,
     tag,
     scope: options.scope ?? null,
     location,
     label: options.label ?? (tag?.startsWith("text:") ? "typing" : "edit"),
-  });
-  if (undoStack.length > MAX_ENTRIES) undoStack.shift();
+  };
+  undoStack.push(entry);
+  const overflow =
+    undoStack.length > MAX_ENTRIES ? undoStack.shift() : undefined;
   // A fresh action forks the timeline: the forward history no longer applies.
-  // Stash it first so a no-op that gets dropped can restore it.
-  redoBackup = redoStack.slice();
+  // Keep rollback-only references in the caller's handle, never global state.
+  const redoBackup = redoStack.slice();
+  const atEpoch = epoch;
   redoStack.length = 0;
   notify();
-}
-
-/**
- * Drop the most recent undo point. Used when a command captured but its
- * mutation turned out to be a no-op (e.g. indent at the top of a list), so we
- * don't leave a redundant entry that makes Cmd+Z look like it did nothing.
- * Also restores the redo stack the matching `capture` cleared, since a no-op
- * never actually forked the timeline.
- *
- * No-ops when the matching `capture` REFUSED: there is no entry of ours to pop,
- * and popping anyway would silently eat an unrelated older undo point. A
- * refusal never cleared `redoStack` either, so there is nothing to restore.
- */
-export function drop(): void {
-  if (lastCaptureRefused) {
-    lastCaptureRefused = false;
-    return;
-  }
-  undoStack.pop();
-  if (redoBackup) {
+  return () => {
+    // An external edit or a newer action must never lose its history to an
+    // older asynchronous failure. Refused/coalesced captures return a no-op.
+    if (epoch !== atEpoch || undoStack.at(-1) !== entry) return;
+    undoStack.pop();
+    if (overflow) undoStack.unshift(overflow);
     redoStack.length = 0;
     redoStack.push(...redoBackup);
-    redoBackup = null;
-  }
-  notify();
+    notify();
+  };
 }
 
 /**

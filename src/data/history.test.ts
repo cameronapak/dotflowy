@@ -5,7 +5,6 @@ import type { Node } from "./tree";
 import {
   capture,
   clearHistory,
-  drop,
   finishHistoryScope,
   getHistoryState,
   redo,
@@ -95,8 +94,8 @@ test("undo and redo move one entry between the stacks; capture and drop manage r
   expect(undo(idx)).not.toBeNull(); // the redo stack now holds it again
 
   // A no-op mutation captures (clearing redo), then drops: redo comes back.
-  capture(idxB, "b");
-  drop();
+  const dropNoop = capture(idxB, "b");
+  dropNoop();
   expect(redo(idxB)).not.toBeNull();
 
   // A real new action forks the timeline: redo is gone for good.
@@ -106,7 +105,7 @@ test("undo and redo move one entry between the stacks; capture and drop manage r
 
   // drop with no redo to restore just pops the undo point.
   clearHistory();
-  capture(idx, "a");
+  const drop = capture(idx, "a");
   drop();
   expect(undo(idx)).toBeNull();
 });
@@ -136,7 +135,7 @@ test("drop after a refused capture keeps the newest real entry", () => {
 
   capture(idxOlder, "older");
   capture(idxNewer, "newer");
-  capture(EMPTY, "ghost");
+  const drop = capture(EMPTY, "ghost");
   drop(); // the command's no-op arm: must NOT eat the "newer" entry
 
   expect(undo(idxNewer)!.focusId).toBe("newer");
@@ -145,11 +144,37 @@ test("drop after a refused capture keeps the newest real entry", () => {
 
 test("a refused capture does not disarm the NEXT drop", () => {
   const idxA = buildTreeIndex([createNode({ id: "a" })]);
-  capture(EMPTY, "ghost"); // refused, arms the guard
-  capture(idxA, "a"); // a real push, disarms it
+  capture(EMPTY, "ghost"); // refused, owns no undo point
+  const drop = capture(idxA, "a"); // a real push owns its rollback
   drop(); // must pop the real entry
 
   expect(undo(idxA)).toBeNull();
+});
+
+test("a coalesced no-op keeps the typing run and a late drop cannot replace newer history", async () => {
+  const idx = buildTreeIndex([createNode({ id: "a", text: "before" })]);
+  const edited = buildTreeIndex([createNode({ id: "a", text: "after" })]);
+  capture(idx, "a", "text:a");
+  capture(edited, "a", "text:a")();
+  expect(undo(edited)?.opCount).toBe(1);
+
+  // A pending action owns the old redo only until it completes. Another
+  // action may finish first; the older failure must not pop that newer entry.
+  const dropPending = capture(idx, "a", null, { label: "import" });
+  await Promise.resolve();
+  capture(edited, "a", null, { label: "move" });
+  dropPending();
+  expect(getHistoryState().undoLabel).toBe("Undo move");
+  expect(getHistoryState().canRedo).toBe(false);
+  expect(undo(idx)?.opCount).toBe(1);
+  expect(undo(idx)?.label).toBe("import");
+
+  const dropCleared = capture(idx, "a");
+  clearHistory();
+  capture(edited, "a", null, { label: "create" });
+  dropCleared();
+  expect(getHistoryState().undoLabel).toBe("Undo create");
+  expect(getHistoryState().canRedo).toBe(false);
 });
 
 describe("MAX_ENTRIES eviction", () => {
@@ -172,6 +197,23 @@ describe("MAX_ENTRIES eviction", () => {
     expect(focuses).not.toContain("f0");
     expect(focuses).not.toContain("f4");
   });
+});
+
+test("a no-op at the cap restores the evicted undo point", () => {
+  const idx = buildTreeIndex(createNodes(101, "f"));
+  for (let i = 0; i < 100; i++) capture(idx, `f${i}`);
+  const drop = capture(idx, "f100");
+  drop();
+  drop(); // consuming the handle twice cannot eat another action
+  const focuses: (string | null)[] = [];
+  let plan = undo(idx);
+  while (plan) {
+    focuses.push(plan.focusId);
+    plan = undo(idx);
+  }
+  expect(focuses).toHaveLength(100);
+  expect(focuses[0]).toBe("f99");
+  expect(focuses[99]).toBe("f0");
 });
 
 const tagIdx = buildTreeIndex([createNode({ id: "a" })]);

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { nodesCollection } from "../data/collection";
-import { capture, drop } from "../data/history";
+import { capture } from "../data/history";
 import { runStructuralSliced } from "../data/structural";
 import { now, planRemoveSubtrees } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
@@ -72,7 +72,7 @@ export function DeleteConfirmDialog() {
     await new Promise((r) => setTimeout(r, 0));
 
     // ONE undo point BEFORE the batch: a single Cmd+Z restores everything.
-    capture(index, captureKey, null, { label: "delete" });
+    const drop = capture(index, captureKey, null, { label: "delete" });
 
     let applied = 0;
     const slices: Array<() => void> = [];

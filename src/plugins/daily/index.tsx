@@ -50,7 +50,7 @@ import {
   useEditorFeatures,
 } from "../../data/editor-features";
 import { isMirrorsEnabled } from "../../data/flags";
-import { capture, drop } from "../../data/history";
+import { capture } from "../../data/history";
 import { getLiveNodes } from "../../data/live-nodes";
 import {
   mirrorManyNodes,
@@ -132,8 +132,8 @@ function scaffoldProtection(
  * Every daily command captures through this helper so it sees optimistic
  * changes synchronously rather than waiting for the tree-store notification.
  */
-function captureLive(focusId: string): void {
-  capture(buildTreeIndex(getLiveNodes()), focusId);
+function captureLive(focusId: string): () => void {
+  return capture(buildTreeIndex(getLiveNodes()), focusId);
 }
 
 /** Move an external drag's ordered structural roots to the end of one Daily
@@ -165,8 +165,8 @@ async function moveNodesToDay(
   )
     return;
 
+  const drop = captureLive(targets[0]!);
   const moved = runStructural(() => {
-    captureLive(targets[0]!);
     return moveManyNodes(dayId, [...targets]);
   });
   if (!moved) {
@@ -457,8 +457,8 @@ export default definePlugin({
         // as today's last child -- identical to the old hand-rolled block and the
         // runMany twin below. Capture the FRESH index (today may have just been
         // created), so undo restores the move without deleting the new day note.
+        const drop = captureLive(nodeId);
         const moved = runStructural(() => {
-          captureLive(nodeId);
           return moveManyNodes(todayId, [nodeId]);
         });
         // No-op move (already last child of today) still captured an undo
@@ -483,8 +483,8 @@ export default definePlugin({
         if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
         const targets = ids.filter((id) => id !== todayId);
         if (targets.length === 0) return;
+        const drop = captureLive(targets[0]!);
         const moved = runStructural(() => {
-          captureLive(targets[0]!);
           return moveManyNodes(todayId, targets);
         });
         if (!moved) {
@@ -519,8 +519,8 @@ export default definePlugin({
         // ready-and-empty `nodesCollection` fails `mirrorNode`'s first guard on
         // the Lunora path, so every mirror-to-today toasted an error.
         const index = buildTreeIndex(getLiveNodes());
+        const drop = capture(index, nodeId);
         const newId = runStructural(() => {
-          capture(index, nodeId);
           return mirrorNode(index, nodeId, todayId);
         });
         if (!newId) {
@@ -538,8 +538,8 @@ export default definePlugin({
       runMany: async (ids, ctx) => {
         const todayId = await getOrCreateDay(localDateKey());
         if (!todayId) return; // getOrCreateDay owns the generic toast now (F3)
+        const drop = captureLive(ids[0]!);
         const made = runStructural(() => {
-          captureLive(ids[0]!);
           return mirrorManyNodes(todayId, ids);
         });
         if (!made) {

@@ -12,7 +12,7 @@ import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 
-import { capture, drop } from "../data/history";
+import { capture } from "../data/history";
 import { mirrorManyNodes, moveManyNodes } from "../data/mutations";
 import { runStructural } from "../data/structural";
 import {
@@ -217,8 +217,8 @@ function MoveDialogInner({
     if (!nodeIds || nodeIds.length === 0) return;
     const ids = nodeIds;
     onOpenChange(false);
+    const drop = capture(index, ids[0]!, null, { label: "mirror" });
     const made = runStructural(() => {
-      capture(index, ids[0]!, null, { label: "mirror" });
       return mirrorManyNodes(targetId, ids);
     });
     // Nothing created => every source would have cycled (or vanished); the
@@ -241,8 +241,8 @@ function MoveDialogInner({
     // Append the whole run as the destination's last children (or last top-level
     // for Home), in ONE atomic batch (moveManyNodes keeps their relative order
     // and rebuilds the index per move so the sibling chain stays intact).
+    const drop = capture(index, ids[0]!, null, { label: "move" });
     const moved = runStructural(() => {
-      capture(index, ids[0]!, null, { label: "move" });
       return moveManyNodes(targetId, ids);
     });
     // A no-op move (already at the exact destination) still captured an undo

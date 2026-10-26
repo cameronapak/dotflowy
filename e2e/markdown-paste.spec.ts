@@ -212,11 +212,20 @@ test("sliced paste batches notifications, restores exact rows, and rolls back a 
   await expect.poll(async () => authoring(await saved())).toEqual(pasted);
   await expect(page.getByTestId("history-restore-dialog")).toHaveCount(0);
   await caretAt(page, "n", 0);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(async () => authoring(await saved())).toEqual(original);
+  await expect(page.getByTestId("history-restore-dialog")).toHaveCount(0);
+  await caretAt(page, "n", 0);
   server.failNextWrite();
   await pasteInto(text(page, "n"), input);
   await expect(
     page.getByText("The paste could not be saved. Nothing was pasted."),
   ).toBeVisible();
+  await expect.poll(async () => authoring(await saved())).toEqual(original);
+  // The failed asynchronous paste must restore the redo timeline it held.
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByRole("option", { name: /^Redo paste/ }).click();
   await expect.poll(async () => authoring(await saved())).toEqual(pasted);
   // Reload verifies the persisted graph, not only the optimistic DOM.
   await page.reload();
