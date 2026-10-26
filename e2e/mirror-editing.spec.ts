@@ -40,6 +40,79 @@ const MIRROR_TREE: SeedNode[] = [
 
 const focused = (page: Page) => page.locator(".node-text:focus");
 
+for (const mirrored of [false, true]) {
+  test(`selection exits and deletion skip the whole ${mirrored ? "mirror" : "source"} subtree`, async ({
+    page,
+  }) => {
+    const target = mirrored ? "M" : "A";
+    await seedOutline(page, [
+      ...(mirrored
+        ? [
+            {
+              id: "M",
+              parentId: null,
+              prevSiblingId: null,
+              text: "",
+              mirrorOf: "A",
+            },
+          ]
+        : []),
+      {
+        id: "A",
+        parentId: null,
+        prevSiblingId: mirrored ? "B" : null,
+        text: "Source",
+      },
+      { id: "child", parentId: "A", prevSiblingId: null, text: "Child" },
+      { id: "deep", parentId: "child", prevSiblingId: null, text: "Deep" },
+      { id: "B", parentId: null, prevSiblingId: target, text: "After" },
+    ]);
+    await openSeededOutline(page, { anchorId: target });
+    await placeCaret(text(page, target), "end");
+    await page.keyboard.press("Shift+ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await expect(text(page, "B")).toBeFocused();
+    await expect(page.locator("[data-selected]")).toHaveCount(0);
+
+    // No row exists above this selection. Deletion must use the below fallback,
+    // not a windowed child whose render path disappears with its mirror.
+    await placeCaret(text(page, target), "end");
+    await page.keyboard.press("Shift+ArrowDown");
+    await page.keyboard.press("Backspace");
+    await expect(text(page, target)).toHaveCount(0);
+    await expect(text(page, "B")).toBeFocused();
+    if (mirrored) {
+      await expect(text(page, "A")).toHaveText("Source");
+      await expect(text(page, "deep")).toHaveCount(1);
+    }
+
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect(text(page, target)).toBeVisible();
+    await expect(text(page, "deep")).toHaveCount(mirrored ? 2 : 1);
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const path = "/src/data/history.ts";
+          return (await import(path)).getHistoryState().canRedo;
+        }),
+      )
+      .toBe(true);
+    await page.keyboard.press("ControlOrMeta+Shift+z");
+    await expect(text(page, target)).toHaveCount(0);
+    await expect
+      .poll(async () => {
+        const nodes: SeedNode[] = await page.evaluate(async () =>
+          (await fetch("/api/nodes")).json(),
+        );
+        return nodes.map((node) => node.id).sort();
+      })
+      .toEqual(mirrored ? ["A", "B", "child", "deep"] : ["B"]);
+    await page.reload();
+    await expect(text(page, "B")).toBeVisible();
+    await expect(text(page, target)).toHaveCount(0);
+  });
+}
+
 // The flat-list order of node ids as rendered (document order === visible order).
 // A windowed source child appears twice, so the same id repeats -- exactly what
 // lets us prove a reorder lands in BOTH the source and the mirror.
@@ -505,6 +578,13 @@ test("selecting a mirror selects the INSTANCE, so delete removes only the mirror
   await expect(
     page.locator('li[data-node-id="a2"]').nth(0),
   ).not.toHaveAttribute("data-selected", /.*/);
+
+  // At the end of the view there is no following row. Stay at the bottom of
+  // this instance, never its source copy or the first windowed child.
+  await page.keyboard.press("ArrowDown");
+  await expect(text(page, "a2").nth(1)).toBeFocused();
+  await placeCaret(text(page, "M"), "end");
+  await page.keyboard.press("Shift+ArrowDown");
 
   // Delete the selection (selection-mode Backspace). Only the mirror goes; the
   // source and its children survive, now rendering once.
