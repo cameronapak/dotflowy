@@ -1,5 +1,15 @@
 # dotflowy
 
+## 1.29.1
+
+### Patch Changes
+
+- a3bc63a: Fix Enter retaining selected text, formatting collapsing text selections, and backward selections losing their direction when restored.
+- df71ae3: Keep rapid typing and splits in persistence order. Retain acknowledged splits while recovering missing sync echoes instead of reverting them after eight seconds.
+- 7c7dff4: Release unused redo history after a new edit to reduce memory use in large outlines. Keep redo available when a command does nothing or a large operation rolls back.
+- 60c6d49: Clean up caret listeners when Quick-add closes or a focused title unmounts. Expose locked rows and titles as read-only textboxes, announce disclosure state, and remove inactive disclosure buttons from leaf rows.
+- ea86959: Drag nodes to the correct position after your outline first loads. Pressing Escape after scrolling selected nodes offscreen restores the caret so you can keep typing.
+
 ## 1.29.0
 
 ### Minor Changes
