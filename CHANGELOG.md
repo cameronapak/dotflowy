@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.29.4
+
+### Patch Changes
+
+- c024ff6: Keep rapid typing in the correct bullet after Enter, and accept edits immediately after undo restores your selection.
+
 ## 1.29.3
 
 ### Patch Changes
