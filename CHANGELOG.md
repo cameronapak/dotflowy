@@ -1,5 +1,12 @@
 # dotflowy
 
+## 1.29.3
+
+### Patch Changes
+
+- f4246bf: Reduce repeated tree work when moving nodes in large outlines.
+- 96301bb: Hide mobile editing actions when the software keyboard closes or the focused node leaves the rendered outline.
+
 ## 1.29.2
 
 ### Patch Changes
