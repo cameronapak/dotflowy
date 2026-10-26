@@ -100,10 +100,20 @@ test("the window bounds mounted rows, preserves depth, and follows scrolling", a
   await expect(page.locator('li[data-node-id="p0"]')).toBeVisible();
 });
 
-test("offscreen selection keeps its logical identity and Escape restores the focus-end caret", async ({
+test("offscreen filtered selection keeps its logical identity and Escape restores the focus-end caret", async ({
   page,
 }) => {
-  await loadBig(page);
+  await seedOutline(
+    page,
+    bigTree().map((node) => ({
+      ...node,
+      text:
+        node.id === "p0c1" || node.parentId === null
+          ? node.text
+          : `${node.text} visible`,
+    })),
+  );
+  await openSeededOutline(page, { path: "/?q=visible", anchorId: "p0" });
   await placeCaret(text(page, "p0c2"), "start");
   await page.keyboard.press("Shift+ArrowUp");
   await page.keyboard.press("Shift+ArrowUp");
@@ -121,7 +131,7 @@ test("offscreen selection keeps its logical identity and Escape restores the foc
     parentId: "p0",
     anchorId: "p0c2",
     focusId: "p0c0",
-    rootIds: ["p0c0", "p0c1", "p0c2"],
+    rootIds: ["p0c0", "p0c2"],
   };
   await expect.poll(selection).toEqual(expected);
 
@@ -137,9 +147,9 @@ test("offscreen selection keeps its logical identity and Escape restores the foc
   await expect.poll(selection).toBeNull();
   await expect(text(page, "p0c0")).toBeFocused();
   await page.keyboard.type(" appended");
-  await expect(text(page, "p0c0")).toHaveText("Item 0.0 appended");
-  await expect(text(page, "p0c1")).toHaveText("Item 0.1");
-  await expect(text(page, "p0c2")).toHaveText("Item 0.2");
+  await expect(text(page, "p0c0")).toHaveText("Item 0.0 visible appended");
+  await expect(text(page, "p0c1")).toHaveCount(0);
+  await expect(text(page, "p0c2")).toHaveText("Item 0.2 visible");
   await expect
     .poll(async () => {
       const nodes = await page.evaluate(async () =>
@@ -147,7 +157,7 @@ test("offscreen selection keeps its logical identity and Escape restores the foc
       );
       return nodes.find((node: SeedNode) => node.id === "p0c0")?.text;
     })
-    .toBe("Item 0.0 appended");
+    .toBe("Item 0.0 visible appended");
 });
 
 test("typing reuses a wide parent's child list; completion and inserts invalidate it", async ({

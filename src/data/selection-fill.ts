@@ -4,11 +4,13 @@ import type { VisibleRow } from "./visible-order";
 
 import { hasWindow } from "../env";
 import {
+  clearSelection,
   getSelectionState,
   subscribeSelection,
   type SelectionData,
   type SelectionEdge,
 } from "./selection-state";
+import { parentKeyOf, rowKeyFor } from "./visible-order";
 
 /**
  * Per-row selection FILL for the windowed list (2e-2, ADR 0019/0022). The old
@@ -34,13 +36,8 @@ export type SelectionFill = SelectionEdge;
  * descendant, not the root -- not on `rootIds[0]`/`rootIds[last]` (the old
  * root-only edge map's anchors).
  *
- * Coverage is matched by row id against `rootIds`, the same identity the old
- * `edgeMapFor` used -- so it inherits the same known limitation: a node
- * rendered at two row keys at once (a windowed mirror descendant whose source
- * is ALSO visible elsewhere) covers both occurrences. Killing that fully needs
- * the selection itself to carry a row key, not just a node id -- out of scope
- * here (issue 03's 2e bullet tracks it separately); this only fixes the named
- * bug, that a covered descendant gets no tint at all.
+ * Roots use the anchor's render-path prefix, so selecting children inside one
+ * mirror does not paint other instances of those same nodes.
  */
 function computeFillMap(
   rows: VisibleRow[],
@@ -49,8 +46,9 @@ function computeFillMap(
   const map = new Map<string, SelectionFill>();
   // SAFETY: the selection schema stores rootIds as an array of strings; this is a readonly-to-mutable variance cast only.
   const rootIds = data?.rootIds as readonly string[] | undefined;
-  if (!rootIds || rootIds.length === 0) return map;
-  const rootSet = new Set(rootIds);
+  if (!data || !rootIds || rootIds.length === 0) return map;
+  const prefix = parentKeyOf(data.anchorId);
+  const rootSet = new Set(rootIds.map((id) => rowKeyFor(prefix, id)));
   const covered: string[] = [];
   let openDepth: number | null = null;
   for (const row of rows) {
@@ -59,7 +57,7 @@ function computeFillMap(
       continue;
     }
     openDepth = null;
-    if (rootSet.has(row.id)) {
+    if (rootSet.has(row.key)) {
       covered.push(row.key);
       openDepth = row.depth;
     }
@@ -102,6 +100,16 @@ function ensureStarted() {
 export function useSyncSelectionFillRows(nextRows: VisibleRow[]): void {
   useEffect(() => {
     rows = nextRows;
+    const data = getSelectionState();
+    if (data) {
+      const visible = new Set(rows.map((row) => row.key));
+      const prefix = parentKeyOf(data.anchorId);
+      // This is the complete row model, not the mounted virtual window. If a
+      // filter or structural edit prunes a selected root, stop selecting it.
+      if (data.rootIds.some((id) => !visible.has(rowKeyFor(prefix, id)))) {
+        clearSelection();
+      }
+    }
     recompute();
   }, [nextRows]);
 }

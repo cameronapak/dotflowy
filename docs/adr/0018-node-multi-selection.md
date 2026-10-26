@@ -21,6 +21,22 @@ ambiguous. The one allowed cross-level move is a **single-root** selection walki
 sibling boundary (climb to parent / dive to first child) — it's still exactly one subtree, so no
 operation is ever ambiguous; the rejection is specifically of **multi-root** ranges that span parents.
 
+**Filtered selection (2026-10-26, issue #245).** Contiguity means visible sibling
+order, not stored adjacency. Shift+arrow and Cmd+A skip roots excluded by the
+active query or hide-completed setting. Matches, dimmed context, and revealed
+descendants are selectable; a collapsed context node can lead to a revealed
+child. Selecting a root still includes its whole subtree, including descendants
+hidden by collapse or filtering. Filters never change stored collapse state.
+
+Anchor and focus are render keys; mutation roots remain instance node IDs.
+This keeps a mirror's visible sibling run separate from another instance's
+revealed children. Selection fill, caret exits, and undo use the same path.
+Reversing direction shrinks toward the anchor. If a view update prunes a selected
+root, the selection clears; scrolling it out of the virtual window does not.
+Batch operations receive only the selected roots. Indent still targets the first
+root's actual previous sibling, and outdent still lands after the real parent.
+Hidden siblings between selected roots remain in place.
+
 **Caret and selection are mutually exclusive.** While nodes are selected there is no text caret;
 while you have a caret you're editing one bullet. The transitions are the whole interaction:
 
