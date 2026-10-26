@@ -449,6 +449,7 @@ for (const collapsed of [undefined, false, true]) {
     await page.keyboard.type("X");
     await expect(text(page, "keepme")).toHaveText("Xalpha");
     await page.reload();
+    await text(page, "keepme").waitFor({ state: "visible" });
     await expect(text(page, "keepme")).toHaveText("Xalpha");
     await expect
       .poll(() => orderedTexts(page))

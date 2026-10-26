@@ -82,6 +82,37 @@ Cloudflare; deployment authentication is unchanged.
 The token template grants account-level Worker access, not access limited to
 these two Workers. Keep account and zone resource scopes as narrow as possible.
 
+### Verify production source maps
+
+The app build sets `SENTRY_RELEASE` to the prepared candidate's Git SHA, after
+release preparation. Sentry uses that value for both the uploaded artifacts and
+the browser SDK. Do not use `GITHUB_SHA`: it identifies the triggering commit,
+not necessarily the selected base or the generated release commit.
+
+Source-map generation and a successful upload do not prove symbolication. With
+authorized Sentry read access, verify a fresh, content-free synthetic exception
+from the deployed app in a signed-out browser:
+
+1. Match the deployed version, release commit, browser event's `release`, and
+   upload log. Match its `debug_meta` ID to the uploaded artifact bundle.
+2. Inspect the processed event in Sentry. Confirm an original `src/` filename,
+   function, line, and source context, not just a minified asset frame. Confirm
+   the matching artifact is available under the project's **Source Maps**.
+3. Verify that public `.map` URLs do not return source maps. The SPA can return
+   HTML with status 200 for a missing asset, so inspect the content type and body.
+
+Use no account, outline content, cookies, query strings, or user breadcrumbs in
+the sentinel. Keep `SENTRY_AUTH_TOKEN` build-time only. Local tokenless builds
+still skip source maps; uploaded client maps are deleted before deployment.
+Cloudflare's Worker source-map upload is separate and does not prove browser
+symbolication in Sentry.
+
+Sentry documents [90-day idle retention for Debug ID artifacts](https://docs.sentry.io/platforms/javascript/sourcemaps/troubleshooting_js/debug-ids/#retention-policy),
+renewed by event processing, not indefinite retention. An upload log is evidence
+of upload at that time, not current availability. Without Sentry read access,
+report processed frames, source context, and artifact availability as unverified;
+an ingestion HTTP 200 alone is not enough to close the verification.
+
 ### Failures and retries
 
 A failed step stops the run. If landing deploys but the app fails, the sites can

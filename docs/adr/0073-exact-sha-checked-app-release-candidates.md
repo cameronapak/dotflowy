@@ -32,7 +32,9 @@ is no app news, or the app release commit directly atop it.
 1. Keep the existing production concurrency group and current-main selection.
    Run the existing full app quality workflow against the selected base.
 2. Prepare the app release and build both sites as today. Keep the generated tag
-   local. Do not publish a GitHub Release or deploy either site yet.
+   local. Set the app build's `SENTRY_RELEASE` to this prepared Git SHA, not the
+   workflow event's `GITHUB_SHA`, so uploaded artifacts and browser errors identify
+   the candidate. Do not publish a GitHub Release or deploy either site yet.
 3. Push only the candidate to a unique temporary branch, named with the parent
    workflow run ID and attempt. Never reuse, update, or force-push that branch.
    Use the same protocol when there is no news; do not manufacture a commit or
