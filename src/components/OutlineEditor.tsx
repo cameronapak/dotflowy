@@ -2308,8 +2308,12 @@ function FocusPass({
   pendingFocusAtStart: RefObject<boolean>;
   pendingFlash: RefObject<string | null>;
 }) {
-  useTreeIndex();
+  const index = useTreeIndex();
   useEffect(() => {
+    // flushSync can drain a previous commit's passive effects AFTER the next
+    // edit has queued focus. That commit's ready flag and virtual row index
+    // cannot decide whether the new target exists. Leave it for the new commit.
+    if (index !== getTreeIndex()) return;
     // Completion presentation reconciles in a layout effect. A structural
     // insert can reach this pass before its row is in the presentation list;
     // leave its pending focus/flash for the next commit and mount claim.
