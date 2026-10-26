@@ -61,6 +61,7 @@ import {
 } from "../data/view-state";
 import { scrollRowIntoView } from "../data/virtual-nav";
 import {
+  buildVisibleRows,
   findVisibleNeighbor,
   lastVisibleDescendant,
 } from "../data/visible-order";
@@ -211,16 +212,10 @@ function makeSelectionOps({
       filter,
       mirrorsOn,
     );
-    const bottom = lastVisibleDescendant(index, lastDel, isHidden, filter);
-    const below = findVisibleNeighbor(
-      index,
-      rootId,
-      bottom,
-      "down",
-      isHidden,
-      filter,
-      mirrorsOn,
-    );
+    const rows = buildVisibleRows(index, rootId, isHidden, filter, mirrorsOn);
+    const bottom = lastVisibleDescendant(rows, lastDel);
+    const bottomIndex = rows.findIndex((row) => row.key === bottom);
+    const below = bottomIndex === -1 ? null : rows[bottomIndex + 1]?.key;
     runStructural(() => {
       capture(getTreeIndex(), deletable[0]!, null, { label: "delete" });
       removeManyNodes(deletable);
@@ -309,17 +304,17 @@ function makeSelectionOps({
     const isHidden = getViewIsHidden();
     const filter = getViewFilter();
     const lastRoot = state.rootIds[state.rootIds.length - 1]!;
-    const bottom = lastVisibleDescendant(index, lastRoot, isHidden, filter);
+    const rows = buildVisibleRows(
+      index,
+      getViewRootId(),
+      isHidden,
+      filter,
+      isMirrorsEnabled(),
+    );
+    const bottom = lastVisibleDescendant(rows, lastRoot);
+    const bottomIndex = rows.findIndex((row) => row.key === bottom);
     const target =
-      findVisibleNeighbor(
-        index,
-        getViewRootId(),
-        bottom,
-        "down",
-        isHidden,
-        filter,
-        isMirrorsEnabled(),
-      ) ?? bottom;
+      (bottomIndex === -1 ? null : rows[bottomIndex + 1]?.key) ?? bottom;
     clearSelection();
     focusNode(target);
   };

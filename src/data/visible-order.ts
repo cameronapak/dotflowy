@@ -352,35 +352,21 @@ export function focusKeyAfterEdit(
 }
 
 /**
- * The last visible row inside `id`'s own subtree, walking down the last visible
- * child at each level until a leaf (or a collapsed node, whose hidden children
- * don't render). Returns `id` itself when it has no visible descendants. This is
- * the BOTTOM row of a selected subtree -- the anchor for "drop the caret below
- * the selection" (the row just after the deepest-last descendant), which is not
- * the same as the row after the subtree's root.
- *
- * `filter` mirrors {@link buildVisibleRows}'s walk exactly: with a filter the
- * descent ignores `collapsed` (filter-mode force-descends) and children are
- * gated on `visibleIds` -- so a collapsed match still ends the walk (its
- * children aren't in `visibleIds`) while a collapsed context ancestor descends
- * to its revealed match.
+ * The bottom render key of a subtree in {@link buildVisibleRows}'s output.
+ * Descendants are the contiguous deeper rows after the root, including children
+ * windowed through mirrors. Reusing the rendered order preserves collapse,
+ * filtering, hidden content, and cycle caps without a second tree-walk contract.
+ * Returns `key` for a leaf or a row absent from this view.
  */
 export function lastVisibleDescendant(
-  index: TreeIndex,
-  id: string,
-  isHidden: (n: Node) => boolean,
-  filter: QueryFilter | null = null,
+  rows: readonly VisibleRow[],
+  key: string,
 ): string {
-  let last = id;
-  let node = index.byId.get(id);
-  let guard = index.byId.size + 1;
-  while (node && (filter !== null || !node.collapsed) && guard-- > 0) {
-    const kids = childrenOf(index, node.id).filter(
-      (n) => !isHidden(n) && (filter === null || filter.visibleIds.has(n.id)),
-    );
-    if (kids.length === 0) break;
-    last = kids[kids.length - 1]!.id;
-    node = index.byId.get(last);
+  const start = rows.findIndex((row) => row.key === key);
+  if (start === -1) return key;
+  let end = start;
+  while (end + 1 < rows.length && rows[end + 1]!.depth > rows[start]!.depth) {
+    end++;
   }
-  return last;
+  return rows[end]!.key;
 }

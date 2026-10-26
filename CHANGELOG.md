@@ -1,5 +1,29 @@
 # dotflowy
 
+## 1.29.9
+
+### Patch Changes
+
+- 511f103: Backspace removes the empty line inserted above a parent by Enter, preserving its children and caret. Empty parents are no longer mistaken for disposable blank lines.
+
+## 1.29.8
+
+### Patch Changes
+
+- 996955f: Keep selection exit and deletion focus outside a mirror's expanded subtree.
+
+## 1.29.7
+
+### Patch Changes
+
+- 2203ed7: Keep typing responsive when a leaf stops matching a text or tag filter in an outline without mirrors.
+
+## 1.29.6
+
+### Patch Changes
+
+- 9d1c60e: Keep rapid typing in the new bullet after pressing Enter, even when an earlier render still has pending focus work.
+
 ## 1.29.5
 
 ### Patch Changes
