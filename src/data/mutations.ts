@@ -709,12 +709,24 @@ export function moveNode(
   }
 
   // Detach, then re-splice. Reads above are all from the pre-mutation index, so
-  // ordering of the writes below doesn't matter.
-  if (oldNext) update(oldNext.id, { prevSiblingId: node.prevSiblingId });
-  update(nodeId, { parentId: newParentId, prevSiblingId: afterSiblingId });
-  if (newNext && newNext.id !== nodeId) {
-    update(newNext.id, { prevSiblingId: nodeId });
-  }
+  // publish the complete chain together instead of copying the whole tree's
+  // Maps and sorting siblings once per pointer. The surrounding structural
+  // transaction still owns persistence, echo holding, and rollback.
+  const ids = new Set([nodeId]);
+  if (oldNext) ids.add(oldNext.id);
+  if (newNext && newNext.id !== nodeId) ids.add(newNext.id);
+  nodesCollection.update([...ids], (drafts) => {
+    for (const draft of drafts) {
+      if (draft.id === oldNext?.id) draft.prevSiblingId = node.prevSiblingId;
+      if (draft.id === nodeId) {
+        draft.parentId = newParentId;
+        draft.prevSiblingId = afterSiblingId;
+      } else if (draft.id === newNext?.id) {
+        draft.prevSiblingId = nodeId;
+      }
+      draft.updatedAt = now();
+    }
+  });
   return true;
 }
 

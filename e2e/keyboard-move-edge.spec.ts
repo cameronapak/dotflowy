@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  placeCaret,
+  seedOutline,
+  text,
+  type ApiNode,
+  type SeedNode,
+} from "./fixtures";
 
 // "nodeId is a child of ancestorId", asserted via the row's data-parent-id (the
 // node's real parent) rather than DOM nesting -- the flat windowed render has no
@@ -67,4 +73,88 @@ test("move down at the bottom edge lands as the first child of the parent's next
   await expect(nestedUnder(page, "parent", "last")).toHaveCount(0);
   await expect(text(page, "last")).toBeFocused();
   await expect(text(page, "last")).toHaveText("last");
+});
+
+test("a move publishes one complete chain, undoes, and survives rollback and reload", async ({
+  page,
+}) => {
+  const server = await seedOutline(page, TREE);
+  await page.goto("/");
+  await placeCaret(text(page, "uncle"), "end");
+  await page.evaluate(async () => {
+    const path = "/src/data/collection.ts";
+    const { nodesCollection } = await import(path);
+    nodesCollection.subscribeChanges((changes: { key: string }[]) => {
+      if (!document.documentElement.dataset.moveBatch)
+        document.documentElement.dataset.moveBatch = JSON.stringify(
+          changes.map((c) => c.key).sort(),
+        );
+    });
+  });
+  const saved = (): Promise<ApiNode[]> =>
+    page.evaluate(async () => (await fetch("/api/nodes")).json());
+  const authoring = (rows: ApiNode[]) =>
+    rows
+      .map((n) => ({ ...n, updatedAt: 0 }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  const original = authoring(await saved());
+  const moved = original.map((n) =>
+    n.id === "uncle"
+      ? { ...n, prevSiblingId: "parent" }
+      : n.id === "parent"
+        ? { ...n, prevSiblingId: null }
+        : n.id === "aunt"
+          ? { ...n, prevSiblingId: "uncle" }
+          : n,
+  );
+  await page.keyboard.press("ControlOrMeta+Shift+ArrowDown");
+  // Three changed pointers must reach subscribers together, not three full-tree
+  // invalidations with a transient broken chain between them.
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-move-batch",
+    JSON.stringify(["aunt", "parent", "uncle"]),
+  );
+  await expect.poll(async () => authoring(await saved())).toEqual(moved);
+  await expect(text(page, "uncle")).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(async () => authoring(await saved())).toEqual(original);
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = "/src/data/history.ts";
+        return (await import(path)).getHistoryState().busy;
+      }),
+    )
+    .toBe(false);
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByRole("option", { name: /^Redo move/ }).click();
+  await expect.poll(async () => authoring(await saved())).toEqual(moved);
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = "/src/data/history.ts";
+        return (await import(path)).getHistoryState().busy;
+      }),
+    )
+    .toBe(false);
+  server.failNextWrite();
+  await placeCaret(text(page, "uncle"), "end");
+  const failure = page.waitForResponse(
+    (r) => r.url().includes("/api/nodes") && r.status() === 500,
+  );
+  await page.keyboard.press("ControlOrMeta+Shift+ArrowUp");
+  await failure;
+  await expect
+    .poll(() =>
+      page
+        .locator('li[data-depth="0"]')
+        .evaluateAll((rows) => rows.map((r) => r.getAttribute("data-node-id"))),
+    )
+    .toEqual(["parent", "uncle", "aunt"]);
+  expect(authoring(await saved())).toEqual(moved);
+  await page.reload();
+  await text(page, "uncle").waitFor();
+  expect(authoring(await saved())).toEqual(moved);
+  await expect(text(page, "grandchild")).toHaveText("grandchild");
 });
