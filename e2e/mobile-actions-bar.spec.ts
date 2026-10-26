@@ -265,6 +265,39 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     ).toBe(594); // Keyboard-open frame is unchanged by pinch zoom.
   });
 
+  test("an embedded outline retains focus-only actions without a distinct visual viewport", async ({
+    page,
+    baseURL,
+  }) => {
+    await seedOutline(page, STANDARD_TREE);
+    // An iframe viewport equals its layout viewport, even when the containing
+    // page's keyboard is open. Use a local host page for the embedded app.
+    const host = `${baseURL}/toolbar-frame`;
+    await page.route(host, (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: `<meta name="viewport" content="width=device-width,initial-scale=1"><iframe title="Outline demo" src="${baseURL}/" style="width:380px;height:700px"></iframe>`,
+      }),
+    );
+    await page.goto(host);
+    const frame = page.frameLocator('iframe[title="Outline demo"]');
+    const input = frame.locator('li[data-node-id="alpha"] .node-text');
+    const toolbar = frame.getByRole("toolbar", { name: "Editing actions" });
+    await input.evaluate(() => {
+      Object.defineProperty(visualViewport!, "height", {
+        configurable: true,
+        get: () => innerHeight,
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    await input.tap();
+    await expect(input).toBeFocused();
+    await expect(toolbar).toBeVisible();
+    // SAFETY: .node-text selects the outline's HTML contenteditable span.
+    await input.evaluate((el) => (el as HTMLElement).blur());
+    await expect(toolbar).toHaveCount(0);
+  });
+
   test("falls back to window resizing without the Visual Viewport API", async ({
     page,
   }) => {
@@ -447,6 +480,12 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     ]);
     await page.goto("/");
     await placeCaret(text(page, "n"), 4);
+    // Focus reveals the folded atom on the next frame. Selecting it before
+    // that reveal tests a selected chip, not the editable interior below.
+    await expect(text(page, "n").locator("strong")).not.toHaveAttribute(
+      "contenteditable",
+      "false",
+    );
     await text(page, "n")
       .locator("strong")
       .evaluate((el) => {

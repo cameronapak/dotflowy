@@ -30,8 +30,9 @@ the visual viewport positions the bar:
   pixels. Scaling removes pinch zoom from that estimate; ignoring small differences avoids mistaking
   browser chrome for a keyboard. Panning does not subtract from keyboard size. This is a heuristic for
   docked keyboards, not a universal keyboard visibility API: floating/overlay keyboards and hardware
-  keyboards do not produce the required reduction. Engines without Visual Viewport retain focus-only
-  visibility as a compatibility fallback.
+  keyboards do not produce the required reduction. Engines without Visual Viewport and embedded frames
+  (including the landing demo) retain focus-only visibility as a compatibility fallback. Iframe visual
+  viewport dimensions always match their layout viewport, so they cannot detect keyboard dismissal.
 - **Position = visual viewport.** `useKeyboardViewport` uses Adobe's `useViewportSize` from
   `@react-aria/utils` for keyboard-aware height and tracks `visualViewport.offsetTop` on rAF-throttled
   resize/scroll events. A fixed, pointer-transparent frame fits that visible band, with the interactive

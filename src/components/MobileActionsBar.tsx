@@ -52,7 +52,9 @@ function useOutlineEditing(
   const [editing, setEditing] = useState(false);
   useEffect(() => {
     if (!coarse) return;
-    const viewport = window.visualViewport;
+    // Iframes (the landing demo) have no distinct visual viewport. Preserve
+    // their focus-only behavior rather than permanently hiding their actions.
+    const viewport = window.top === window ? window.visualViewport : null;
     let raf = 0;
     let observed: HTMLElement | null = null;
     const schedule = () => {
