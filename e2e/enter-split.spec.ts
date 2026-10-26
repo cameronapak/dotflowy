@@ -60,9 +60,11 @@ async function caretAt(page: Page, id: string, col: number) {
 }
 
 test("Enter replaces a backward selection, undo restores its direction, and immediate typing can split again", async ({
-  page,
+  context,
 }) => {
   for (const remount of [false, true]) {
+    // Each page owns its fixture socket and outline, including optimistic edits.
+    const page = await context.newPage();
     await load(page, [
       { id: "n", parentId: null, prevSiblingId: null, text: "ABCDEF" },
     ]);
@@ -121,6 +123,7 @@ test("Enter replaces a backward selection, undo restores its direction, and imme
     await page.keyboard.press("Enter");
     await page.keyboard.type("Y");
     await expect.poll(() => orderedTexts(page)).toEqual(["AB", "X", "YEF"]);
+    await page.close();
   }
 });
 
