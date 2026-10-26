@@ -387,9 +387,40 @@ exit 23
   }
 });
 
-test("only the checked SHA is promoted, including no-news retries, and its temporary branch is cleaned up", () => {
+test("only the checked SHA labels Sentry and is promoted, including no-news retries, and its temporary branch is cleaned up", () => {
   for (const news of [true, false]) {
     const { dir, base, sha, branch, env } = candidateFixture(news);
+    // Exercise the real workflow shell with distinct event/base/candidate
+    // identities. Only the build process is replaced; Git and release prep run.
+    writeFileSync(
+      join(dir, ".test-bin/bun"),
+      `#!/bin/sh
+test "$*" = 'run build:cf' || exit 1
+printf '%s' "$SENTRY_RELEASE" > .test-bin/sentry-release
+`,
+    );
+    chmodSync(join(dir, ".test-bin/bun"), 0o755);
+    const build = run(
+      dir,
+      [
+        "bash",
+        "-e",
+        "-o",
+        "pipefail",
+        "-c",
+        workflowStep("deploy.yml", "deploy", "Build app"),
+      ],
+      {
+        ...env,
+        GITHUB_SHA: "1111111111111111111111111111111111111111",
+        SENTRY_RELEASE: "stale-inherited-release",
+      },
+    );
+    expect(build.code, build.err).toBe(0);
+    expect(readFileSync(join(dir, ".test-bin/sentry-release"), "utf8")).toBe(
+      sha,
+    );
+    rmSync(join(dir, ".test-bin/bun"));
     const result = promote(dir, env);
     expect(result.code, result.err).toBe(0);
     expect(git(dir, "ls-remote", "origin", "refs/heads/main")).toBe(

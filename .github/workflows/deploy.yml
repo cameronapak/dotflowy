@@ -75,7 +75,12 @@ jobs:
       - name: Typecheck landing
         run: bun run --cwd landing typecheck
       - name: Build app
-        run: bun run build:cf
+        run: |
+          # Sentry otherwise prefers GITHUB_SHA, which predates release prep
+          # and can even precede the selected base on a queued run or retry.
+          SENTRY_RELEASE=$(git rev-parse HEAD)
+          export SENTRY_RELEASE
+          bun run build:cf
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       - name: Build landing
