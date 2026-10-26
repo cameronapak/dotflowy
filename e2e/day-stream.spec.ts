@@ -315,19 +315,24 @@ test.describe("day navigation on touch", () => {
       for (const event of ["beforeinput", "compositionstart", "input"]) {
         await today.tap();
         await seated();
-        await last.evaluate(
-          (el, event) =>
-            el.dispatchEvent(
-              event === "compositionstart"
-                ? new CompositionEvent(event, { bubbles: true, data: "" })
-                : new InputEvent(event, {
-                    bubbles: true,
-                    inputType: "insertText",
-                    data: "",
-                  }),
-            ),
-          event,
-        );
+        const neighborsMounted = await last.evaluate(async (el, event) => {
+          el.dispatchEvent(
+            event === "compositionstart"
+              ? new CompositionEvent(event, { bubbles: true, data: "" })
+              : new InputEvent(event, {
+                  bubbles: true,
+                  inputType: "insertText",
+                  data: "",
+                }),
+          );
+          // The reveal must update the virtual window, not only keep the
+          // focused row pinned until the scroll-idle notification.
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+          return document.querySelector('[data-node-id="entry-78"]') !== null;
+        }, event);
+        expect(neighborsMounted).toBe(true);
         await expect(page.locator(".outline-chrome")).toHaveCSS(
           "position",
           "relative",
@@ -421,17 +426,25 @@ test.describe("day navigation on touch", () => {
     test(`input reveals a short day's caret behind the toolbar, spotlight ${spotlight}`, async ({
       page,
     }) => {
+      await page.clock.install();
       await page.clock.setFixedTime(new Date("2030-06-12T12:00:00"));
       await seedOutline(page, TREE, { kv: KV });
       await page.addInitScript((enabled) => {
         localStorage.setItem("dotflowy:spotlight", String(enabled));
       }, spotlight);
       await openSeededOutline(page, { anchorId: "alpha" });
+      // Hold the stream's settle until the covered caret is ready.
+      await page.clock.pauseAt(new Date("2030-06-12T12:00:01"));
       await page
         .getByRole("button", { name: "Today's daily note", exact: true })
         .tap();
       const editor = text(page, "standup");
-      await expect(editor).toBeFocused();
+      await expect
+        .poll(async () => {
+          await page.clock.runFor(1);
+          return editor.evaluate((el) => el === document.activeElement);
+        })
+        .toBe(true);
       const caretBottom = await editor.evaluate(
         (el) => el.getBoundingClientRect().bottom,
       );
@@ -453,11 +466,39 @@ test.describe("day navigation on touch", () => {
             aboveToolbar: caret.bottom < bar.top,
           };
         });
-      await expect.poll(caretClear).toEqual({
-        inViewport: true,
-        aboveToolbar: false,
+      await expect
+        .poll(async () => {
+          await page.clock.runFor(1);
+          return caretClear();
+        })
+        .toEqual({
+          inViewport: true,
+          aboveToolbar: false,
+        });
+      // Input after the prepend commits, before native scroll delivery and
+      // late row measurements. Those measurements must preserve the reveal,
+      // not compensate from the virtualizer's pre-input scroll offset.
+      await editor.evaluate((el) => {
+        const row = el.closest("li")!;
+        const observer = new MutationObserver(() => {
+          if (Number(row.dataset.index) <= 1) return;
+          observer.disconnect();
+          el.dispatchEvent(
+            new InputEvent("beforeinput", {
+              bubbles: true,
+              inputType: "insertText",
+              data: " appended",
+            }),
+          );
+          document.execCommand("insertText", false, " appended");
+        });
+        observer.observe(row, {
+          attributes: true,
+          attributeFilter: ["data-index"],
+        });
+        window.dispatchEvent(new PointerEvent("pointerup"));
       });
-      await page.keyboard.insertText(" appended");
+      await page.clock.runFor(500);
       await expect(editor).toHaveText("Standup appended");
       await expect(editor).toBeFocused();
       await expect.poll(caretClear).toEqual({
@@ -561,7 +602,6 @@ test.describe("day navigation on touch", () => {
               // A caret reveal can advance before the dispatched prepend
               // commits. Its scroll must not discard that compensation.
               window.scrollBy({ top: 8, behavior: "instant" });
-              window.dispatchEvent(new Event("scroll"));
             }, ms);
             return settleId;
           }) as typeof window.setTimeout;

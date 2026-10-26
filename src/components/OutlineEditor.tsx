@@ -11,6 +11,7 @@ import {
 } from "@tanstack/react-router";
 import {
   defaultRangeExtractor,
+  observeWindowOffset,
   useWindowVirtualizer,
 } from "@tanstack/react-virtual";
 import { Cause, Effect, Fiber } from "effect";
@@ -1092,7 +1093,18 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     }),
     [items, sectionStarts, streamPage],
   );
+  const observeScrollRef = useRef<
+    ((offset: number, isScrolling: boolean) => void) | null
+  >(null);
   const virtualizer = useWindowVirtualizer<HTMLLIElement>({
+    observeElementOffset: (instance, onChange) => {
+      observeScrollRef.current = onChange;
+      const cleanup = observeWindowOffset(instance, onChange);
+      return () => {
+        observeScrollRef.current = null;
+        cleanup?.();
+      };
+    },
     // Keep the row holding the caret mounted even outside the window. Loading
     // sections above it renders once at the old scroll offset before the
     // offset is corrected; unmounting the focused row there would drop the
@@ -1496,6 +1508,17 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         held.top -= window.scrollY - from;
         held.scrollY = window.scrollY;
       }
+      // A late prepend measurement can beat the native scroll event. Publish
+      // the reveal through the offset observer so compensation AND the mounted
+      // window use the new position, after the reading hold has moved with it.
+      // Notification can synchronously commit a pending prepend and move the
+      // reading hold again. Reconcile that position before another input can
+      // release the hold and let measurements compensate from a stale offset.
+      let observed: number;
+      do {
+        observed = window.scrollY;
+        observeScrollRef.current?.(observed, true);
+      } while (window.scrollY !== observed);
     };
     const onKey = (e: KeyboardEvent) => {
       onEdit(e);
