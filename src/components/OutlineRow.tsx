@@ -433,20 +433,29 @@ function RowChrome({
       }}
     >
       <div className="outline-row" data-faded={faded} data-context={isContext}>
-        <button
-          type="button"
-          className="collapse-toggle touch-hitbox"
-          aria-label={effectiveCollapsed ? "Expand" : "Collapse"}
-          data-has-children={hasChildren}
-          data-collapsed={effectiveCollapsed}
-          onClick={() =>
-            hasChildren &&
-            commands.onToggleCollapsed(instance.id, !instance.collapsed)
-          }
-          tabIndex={-1}
-        >
-          {hasChildren && <ChevronRight size={14} strokeWidth={2.5} />}
-        </button>
+        {hasChildren ? (
+          <button
+            type="button"
+            className="collapse-toggle touch-hitbox"
+            aria-label={effectiveCollapsed ? "Expand" : "Collapse"}
+            aria-expanded={!effectiveCollapsed}
+            data-has-children={true}
+            data-collapsed={effectiveCollapsed}
+            onClick={() =>
+              commands.onToggleCollapsed(instance.id, !instance.collapsed)
+            }
+            tabIndex={-1}
+          >
+            <ChevronRight size={14} strokeWidth={2.5} />
+          </button>
+        ) : (
+          <span
+            className="collapse-toggle"
+            data-has-children={false}
+            aria-hidden="true"
+            inert
+          />
+        )}
         <button
           type="button"
           className="bullet touch-hitbox"
@@ -498,6 +507,7 @@ function RowChrome({
             tabIndex={locked ? 0 : undefined}
             suppressContentEditableWarning
             spellCheck={false}
+            role="textbox"
             aria-label={content.text.trim() || "Empty bullet"}
             aria-readonly={locked}
             aria-multiline="true"

@@ -3336,6 +3336,13 @@ function ZoomedTitle({
   const syncedRef = useRef<string | null>(null);
   const composingRef = useRef(false);
   const caretWatchRef = useRef<(() => void) | null>(null);
+  // Navigation can remove the focused title without firing blur.
+  useEffect(() => {
+    return () => {
+      caretWatchRef.current?.();
+      caretWatchRef.current = null;
+    };
+  }, []);
   useEditorFeatureDecoration(ref, composingRef);
   const { slotsByPosition } = usePluginChrome();
   // The protection rules (no delete/blank/to-do/complete) apply to the zoomed
@@ -3500,6 +3507,7 @@ function ZoomedTitle({
             tabIndex={locked ? 0 : undefined}
             suppressContentEditableWarning
             spellCheck={false}
+            role="textbox"
             aria-label="Title"
             aria-readonly={locked}
             aria-multiline="true"

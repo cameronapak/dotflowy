@@ -245,6 +245,59 @@ test("Enter commits and closes; the off-page toast's 'Go there' opens the captur
   });
 });
 
+for (const surface of ["Quick-add", "title"]) {
+  test(`${surface} releases caret listeners when the focused editor unmounts`, async ({
+    page,
+  }) => {
+    await load(page);
+    const cdp = await page.context().newCDPSession(page);
+    const { result } = await cdp.send("Runtime.evaluate", {
+      expression: "document",
+    });
+    const listenerCount = async () => {
+      const { listeners } = await cdp.send("DOMDebugger.getEventListeners", {
+        objectId: result.objectId!,
+      });
+      return listeners.filter((listener) => listener.type === "selectionchange")
+        .length;
+    };
+    const blur = () =>
+      page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement)
+          document.activeElement.blur();
+      });
+    await blur();
+    const baseline = await listenerCount();
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      if (surface === "Quick-add") {
+        await openQuickAdd(page);
+        await type(page, `capture ${cycle}`);
+        await expect.poll(listenerCount).toBeGreaterThan(baseline);
+        await page.keyboard.press("Enter");
+        await expect(dialog(page)).toBeHidden();
+      } else {
+        await page
+          .locator('li[data-node-id="alpha"]')
+          .getByRole("button", { name: "Zoom in" })
+          .click();
+        await expect(page).toHaveURL(/\/alpha$/);
+        await page.getByLabel("Title", { exact: true }).focus();
+        await expect.poll(listenerCount).toBeGreaterThan(baseline);
+        // Same-document history navigation removes the focused title without
+        // first blurring it by clicking another control.
+        await page.goBack();
+        await expect(page).toHaveURL(/\/$/);
+        await expect(page.getByLabel("Title", { exact: true })).toHaveCount(0);
+      }
+      // Navigation may focus a row; it is not an orphaned editor listener.
+      await blur();
+      await expect.poll(listenerCount).toBe(baseline);
+    }
+    await cdp.detach();
+  });
+}
+
 test("Enter fires no toast when you're already viewing the destination", async ({
   page,
 }) => {
