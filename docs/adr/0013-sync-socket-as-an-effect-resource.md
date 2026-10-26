@@ -32,12 +32,18 @@ _unchanged_ — it moved from `onMessage`'s body into `Stream.runForEach`, re-ho
 **Scope boundary (since narrowed).** This ADR shipped with `waitForSeq`'s Promise/`setTimeout` waiters
 left unconverted. Under the Effect-first posture ([ADR 0021](./0021-effect-first-one-schema-language.md))
 they since became `waitForSeqE`/`waitForNodeE` in `collection.ts` — the registration lifted with
-`Effect.callback`, time-bounded by `Effect.timeoutOrElse` (resolve-on-timeout, the P2 fallback) and
-`Effect.timeout` (fail-on-timeout, the daily loser-path) respectively — and `runStructural` now composes
-the batch send + echo-hold as ONE Effect, bridged once at its async `mutationFn`. The cursor itself
+`Effect.callback`. `waitForSeqE` requests a fresh snapshot after each echo timeout and keeps the
+acknowledged transaction optimistic until sync covers its sequence. Completing on timeout exposed
+the old synced state despite a successful commit, violating P2. `waitForNodeE` still fails on timeout
+for the daily loser-path. `runStructural` composes the batch send + echo-hold as ONE Effect,
+bridged once at its async `mutationFn`. The cursor itself
 (`appliedSeq`, advanced by `advanceAppliedSeq`/`resetAppliedSeq`) stays a plain module value with
-callback resolves; `appliedSeq → SubscriptionRef` remains a later slice. The echo-hold contract
-(ADR 0009) is byte-identical.
+callback resolves; `appliedSeq → SubscriptionRef` remains a later slice. A snapshot releases only
+waiters whose sequences it covers, not newer writes committed after that snapshot was captured.
+Live deltas must be contiguous before they advance that cursor; a gap requests a snapshot instead.
+Recovery requests share the pending connection until its snapshot arrives, so staggered echo
+timeouts cannot repeatedly cancel a slow handshake. Broadcasts received before the handshake
+are ignored because the snapshot or resume reply covers them.
 
 ## Considered and rejected
 

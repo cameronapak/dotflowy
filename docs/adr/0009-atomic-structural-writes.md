@@ -35,6 +35,12 @@ corrupted; the damage clustered in create/delete-heavy areas.)
   bug, despite atomic frames. Serializing makes logical order == persisted order; the overlay is
   already on screen so the added round-trip is invisible.
 
+Field generations and structural writes now share that send order. Each structural submission
+closes the open field generation before reserving its position. Otherwise an earlier PATCH could
+overwrite a split, or fields from opposite sides of a split could merge into the same PATCH.
+The queue releases on the HTTP response, not the echo; each field generation keeps its shared
+success or failure result.
+
 **The structural-vs-field split is deliberate.** Only tree-shape ops route through `runStructural`
 (insert/indent/outdent/move/reparent/remove, history undo/redo restore, the daily get-or-create).
 **Field edits stay direct** (`setText` per keystroke, `toggleCompleted/Collapsed`, `setIsTask`,

@@ -172,21 +172,16 @@ function advanceAppliedSeq(seq: number): void {
   }
 }
 
-/** Reset the cursor to a snapshot's seq and release EVERY pending waiter.
- *  A snapshot is full server truth, so it supersedes the stream regardless of
- *  direction — and seqs are scoped per Durable Object/user, so a same-page
- *  account switch (sign-out/sign-in is SPA-internal, no reload) can hand us a
- *  LOWER seq than the previous user's. `advanceAppliedSeq` would ignore that
- *  (it's monotonic) and leave the cursor stuck high, so `waitForSeq` would
- *  resolve instantly and silently drop the P2 echo-hold for the new outline.
- *  Setting (not advancing) and resolving all waiters makes any in-flight
- *  structural tx trust the snapshot — the same fallback `waitForSeq`'s timeout
- *  already takes. */
+/** A snapshot replaces the cursor, including a lower authoritative sequence.
+ *  Only release writes covered by that snapshot: one captured before a later
+ *  write committed cannot replace that write's optimistic state. */
 function resetAppliedSeq(seq: number): void {
   appliedSeq = seq;
   for (const w of seqWaiters) {
-    seqWaiters.delete(w);
-    w.resolve();
+    if (seq >= w.seq) {
+      seqWaiters.delete(w);
+      w.resolve();
+    }
   }
 }
 
@@ -197,32 +192,21 @@ function resetAppliedSeq(seq: number): void {
  * structural transaction stays optimistic until its write echoes back — never
  * reverting to a pre-op state a fast follow-up edit could read (PLAN.md, P2).
  *
- * An Effect: the `seqWaiters` registration is lifted with `Effect.callback` (the
- * sync-fiber cursor advance still releases it through `w.resolve`), and the
- * fallback is `Effect.timeoutOrElse` resolving to `void`. On timeout it COMPLETES
- * (never fails): a snapshot/resync may have superseded the seq, or the socket is
- * wedged; either way trust the synced snapshot rather than hang the transaction.
- * The interrupt finalizer drops the waiter, so a timed-out wait can't leak.
+ * A missing echo triggers a fresh snapshot, not completion or rollback: the
+ * write is already acknowledged, but the synced base may still be pre-write.
+ * Retain the overlay until a frame covers its seq, retrying resync if needed.
+ * Each timed wait unregisters on interruption, so recovery cannot leak waiters.
  */
 export function waitForSeqE(
   seq: number,
   timeoutMs = 8000,
 ): Effect.Effect<void> {
-  return Effect.callback<void>((resume) => {
-    if (appliedSeq >= seq) {
-      resume(Effect.void);
-      return;
-    }
-    const waiter: SeqWaiter = { seq, resolve: () => resume(Effect.void) };
-    seqWaiters.add(waiter);
-    return Effect.sync(() => {
-      seqWaiters.delete(waiter);
-    });
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: Duration.millis(timeoutMs),
-      orElse: () => Effect.void,
-    }),
+  return waitForSeqStrictE(seq, timeoutMs).pipe(
+    Effect.catchTag("TimeoutError", () =>
+      Effect.sync(resyncNodes).pipe(
+        Effect.andThen(Effect.suspend(() => waitForSeqE(seq, timeoutMs))),
+      ),
+    ),
   );
 }
 
@@ -538,6 +522,23 @@ export const nodesCollection = createCollection({
       // Apply one decoded server frame. Unchanged from the old onMessage body —
       // it just runs on the sync fiber now (driven by Stream.runForEach below).
       const applyMessage = (msg: ServerMessage): void => {
+        const cursor = getCursor();
+        if (msg.type === "change" && cursor !== null && msg.seq <= cursor)
+          return;
+        // Validate coverage before publishing either nodes or calendar state.
+        // A later delta is not evidence that a missing earlier write arrived.
+        if (
+          (msg.type === "change" &&
+            (cursor === null || msg.seq !== cursor + 1)) ||
+          (msg.type === "resume" &&
+            msg.changes.some(
+              (frame, index) =>
+                cursor === null || frame.seq !== cursor + index + 1,
+            ))
+        ) {
+          resyncNodes();
+          return;
+        }
         // Both handshake frames carry the Worker's version; a mismatch means this
         // tab's bundle is stale and offers a reload (ADR 0046). Live `change`
         // frames don't carry it -- a reconnect is when the deploy gap appears.
@@ -571,10 +572,8 @@ export const nodesCollection = createCollection({
           }
           metadata?.collection.set("cursor", msg.seq);
           commit();
-          // A fresh snapshot supersedes every earlier seq (and may be the
-          // resolution a runStructural transaction is waiting on after a
-          // reconnect or a same-page account switch), so reset the cursor to
-          // it — even if it's LOWER than what a prior outline left behind.
+          // Reset to this snapshot's cursor, releasing only writes it covers.
+          // A newer acknowledged write may still be waiting for its own echo.
           resetAppliedSeq(msg.seq);
           initialError = null;
           ensureReady();

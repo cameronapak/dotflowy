@@ -1,4 +1,4 @@
-import { Effect, Latch, Semaphore } from "effect";
+import { Effect, Latch } from "effect";
 
 import type { ChangeOp } from "./realtime";
 import type { Node } from "./schema";
@@ -35,27 +35,12 @@ import {
  * helpers below stay for FIELD edits (text, completed, …) and the first-run
  * seed. See structural.ts and PLAN.md.
  *
- * NOTE: both write-path coordinators are now Effect `Semaphore`s — structural
- * batches (`writeSem`) and the field coalescer (`fieldSem`: generations with a
- * shared per-caller promise that preserves shared-fate failure). See
- * .scratch/effect-tightening issue 02 for the design + timing proof.
+ * Field generations and structural writes share one ordered send lane. A
+ * structural submission seals the open generation, so fields from opposite
+ * sides of a split cannot coalesce or overtake the split on the wire.
  */
 
-// Serializes structural batches so the DO receives them in client-call order.
-// The DO assigns each frame's `seq` in arrival order, but two rapid structural
-// edits open independent transactions whose `mutationFn`s fire concurrently —
-// nothing pins separate fetches to send order (HTTP/2 multiplexing, the Worker
-// dispatch). If batch B reached the DO before batch A, B's repoint of a shared
-// follower would be overwritten by A's stale one, re-creating the very fan this
-// whole change exists to kill. A 1-permit semaphore admits one batch at a time;
-// its FIFO queue makes acquire order == client-call order, and `withPermits`
-// holds the permit across the whole request — so the next batch can't leave the
-// client until the previous one's HTTP response (sent only after the DO commits)
-// lands. Logical order == persisted order. The overlay is already on screen, so
-// the added latency is invisible. `withPermits` releases on success, failure,
-// AND interruption, so one rejected batch can't wedge the queue (its caller's
-// promise still rejects → that transaction rolls back).
-const writeSem = Semaphore.makeUnsafe(1);
+let writeTail = Latch.makeUnsafe(true);
 
 let pendingWrites = 0;
 let acknowledgedSeq = 0;
@@ -78,6 +63,30 @@ function trackWrite<A>(
   });
 }
 
+/** Reserve send order before yielding. Only the HTTP request owns the slot,
+ * never its WebSocket echo. Each caller keeps its own failure result. */
+function enqueueWrite<A>(
+  effect: Effect.Effect<A, NodesError>,
+  closesFields = true,
+): Effect.Effect<A, NodesError> {
+  return trackWrite(
+    Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        if (closesFields) currentGen = null;
+        const previous = writeTail;
+        const finished = Latch.makeUnsafe(false);
+        writeTail = finished;
+        // A canceled queued caller must not release its successor before its
+        // predecessor finishes. The request itself remains interruptible.
+        return previous.await.pipe(
+          Effect.andThen(restore(effect)),
+          Effect.ensuring(Effect.sync(() => finished.openUnsafe())),
+        );
+      }),
+    ),
+  );
+}
+
 /** Replay waits for older writes before planning against the authoritative cursor. */
 export const waitForPendingWritesE = Effect.gen(function* () {
   // Let collection mutationFns armed in this tick enter their send lanes.
@@ -93,9 +102,8 @@ export function waitForPendingWrites(): Promise<number> {
 /**
  * Persist a structural mutation as one atomic batch — the Effect core. The DO
  * applies every op and commits a SINGLE change frame, returning its sequence
- * number. `writeSem` serializes batches so concurrent edits persist in order;
- * the permit is held across the SEND only (it releases on the HTTP response, not
- * the echo), so the next batch can send as soon as this one commits. Exposed in
+ * number. The send lane serializes field and structural writes in submission
+ * order, releasing on the HTTP response, not the echo. Exposed in
  * Effect shape so `runStructural` can compose the P2 echo-wait (`waitForSeqE`)
  * onto it as ONE program (structural.ts), bridged once at the mutationFn seam.
  */
@@ -103,14 +111,12 @@ export const persistBatchE = (
   ops: ChangeOp[],
   expectedSeq?: number,
 ): Effect.Effect<{ seq: number }, NodesError> =>
-  trackWrite(
-    writeSem.withPermits(1)(
-      sendBatchE(ops, expectedSeq).pipe(
-        Effect.tap(({ seq }) =>
-          Effect.sync(() => {
-            acknowledgedSeq = Math.max(acknowledgedSeq, seq);
-          }),
-        ),
+  enqueueWrite(
+    sendBatchE(ops, expectedSeq).pipe(
+      Effect.tap(({ seq }) =>
+        Effect.sync(() => {
+          acknowledgedSeq = Math.max(acknowledgedSeq, seq);
+        }),
       ),
     ),
   );
@@ -125,7 +131,7 @@ export function persistBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
 }
 
 export const createNodes = (nodes: Node[]): Promise<void> =>
-  runPromise(createNodesE(nodes));
+  runPromise(enqueueWrite(createNodesE(nodes)));
 
 // --- Field-edit PATCH: serialize + coalesce ---------------------------------
 //
@@ -142,14 +148,14 @@ export const createNodes = (nodes: Node[]): Promise<void> =>
 //   2) Cost. One Worker + Durable Object invocation (a SQL write + a broadcast)
 //      PER CHARACTER. A 40-character bullet billed 40 round trips.
 //
-// The fix is one `Semaphore(1)` (`fieldSem`) plus coalescing into GENERATIONS. A
+// The fix is an ordered send lane plus coalescing into GENERATIONS. A
 // generation is a pending field-merge map (field-wise last-write-wins -- correct
 // because a PATCH carries only changed columns) plus ONE shared promise. While a
-// PATCH is in flight the permit is held, so every later edit MERGES into the open
-// generation; when the in-flight PATCH returns the permit releases and the next
-// generation drains everything that accumulated as ONE ordered PATCH. The
-// semaphore's FIFO queue gives client-call order for free, and it releases on
-// failure/interruption too, so a rejected PATCH can't wedge the queue.
+// request is in flight, later field edits MERGE into the open generation until
+// it drains or a structural submission seals it. The next generation drains
+// everything accumulated as ONE ordered PATCH. Structural fences prevent a
+// pre-split field value from overwriting a later split, or a newly created
+// node's text PATCH from arriving before its insertion.
 //
 // Shared-fate (the ADR 0010 invariant): every caller that merges into a
 // generation returns that generation's SINGLE `runPromise(flush)` promise, so if
@@ -173,48 +179,43 @@ interface FieldGen {
   promise: Promise<void>;
 }
 
-const fieldSem = Semaphore.makeUnsafe(1);
 let currentGen: FieldGen | null = null;
 
 /**
- * Arm a generation's flush: wait our turn on the permit, then drain everything
+ * Arm a generation's flush: reserve our place, then drain everything
  * that coalesced and PATCH it as one request. `yieldNow` defers the drain past
  * the current synchronous tick so same-tick callers all merge into this
- * generation first; the merge in `updateNodes` runs before this is called, so
- * even a free-permit (synchronous) acquire drains a populated map.
+ * generation first, without letting a later structural write overtake it.
  */
 function startFieldFlush(gen: FieldGen): Promise<void> {
-  const flush = fieldSem.withPermits(1)(
-    Effect.flatMap(Effect.yieldNow, () =>
-      Effect.suspend(() => {
-        // Holding the permit => the prior generation's PATCH has settled. Detach
-        // so new callers open a fresh generation, and snapshot the merge.
-        if (currentGen === gen) currentGen = null;
-        if (gen.pending.size === 0) return Effect.void;
-        const updates = [...gen.pending].map(([id, changes]) => ({
-          id,
-          changes,
-        }));
-        return updateNodesE(updates).pipe(
-          Effect.tap(({ seq }) =>
-            Effect.sync(() => {
-              acknowledgedSeq = Math.max(acknowledgedSeq, seq);
-            }),
-          ),
-          Effect.asVoid,
-        );
-      }),
-    ),
+  const flush = Effect.flatMap(Effect.yieldNow, () =>
+    Effect.suspend(() => {
+      // An older fenced generation must not detach a newer open generation.
+      if (currentGen === gen) currentGen = null;
+      if (gen.pending.size === 0) return Effect.void;
+      const updates = [...gen.pending].map(([id, changes]) => ({
+        id,
+        changes,
+      }));
+      return updateNodesE(updates).pipe(
+        Effect.tap(({ seq }) =>
+          Effect.sync(() => {
+            acknowledgedSeq = Math.max(acknowledgedSeq, seq);
+          }),
+        ),
+        Effect.asVoid,
+      );
+    }),
   );
-  return runPromise(trackWrite(flush));
+  return runPromise(enqueueWrite(flush, false));
 }
 
 export function updateNodes(
   updates: { id: string; changes: Partial<Node> }[],
 ): Promise<void> {
   // Join the open generation, or open one. Assign `currentGen` and merge BEFORE
-  // arming the flush -- a free-permit flush can drain synchronously, so the merge
-  // must already be in the map (else this caller's edit sends as an empty batch).
+  // arming the flush, so its reservation follows this field submission and the
+  // eventual drain includes this caller's changes.
   let gen = currentGen;
   const fresh = !gen;
   if (!gen) {
@@ -230,4 +231,4 @@ export function updateNodes(
 }
 
 export const deleteNodes = (ids: string[]): Promise<void> =>
-  runPromise(deleteNodesE(ids));
+  runPromise(enqueueWrite(deleteNodesE(ids)));
