@@ -98,6 +98,14 @@ A merge during release preparation rejects the atomic push, before the GitHub
 Release or either deployment. The queued run handles the newer `main`. Never
 force or rebase the already-built candidate.
 
+The workflow also checks for a superseded base before release preparation,
+before candidate dispatch, and every 15 seconds while awaiting candidate checks.
+These early exits avoid unnecessary builds and validation; they do not replace
+the final identity checks and atomic push. A merge during app quality checks
+still waits for those checks to finish. Active production runs are not canceled
+by newer pushes, so a deployment already publishing cannot be interrupted by
+PR-style concurrency cancellation.
+
 Failed, missing, skipped, cancelled, or timed-out candidate checks stop before
 promotion. The workflow summary records the candidate SHA, captured base, and
 validation run ID. Inspect that run rather than looking for any green check on
