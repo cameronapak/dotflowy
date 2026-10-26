@@ -514,6 +514,39 @@ export function buildQueryFilter(
   return result;
 }
 
+/** Prove that a field-only batch cannot change a text/tag filter. The caller
+ * must hold the same view, focus, date, and structure. Registered operators
+ * may read the entire index; mirrors may resolve content along several paths.
+ * Both keep the full evaluator rather than guessing their dependencies. */
+export function queryMembershipUnchanged(
+  index: TreeIndex,
+  query: string | undefined,
+  changes: ReadonlyArray<{ before: Node; after: Node }>,
+  isHidden: (node: Node) => boolean,
+  operators: FilterOperatorMap,
+  today = localDateKey(),
+): boolean {
+  if (index.mirrorsBySource.size > 0) return false;
+  const parsed = parseFilterQuery(query);
+  if (
+    parsed.groups.length === 0 ||
+    parsed.groups.some((group) =>
+      group.terms.some(
+        (term) =>
+          term.type === "operator" &&
+          operators.has(pairKey(term.key, term.value)),
+      ),
+    )
+  )
+    return false;
+  return changes.every(
+    ({ before, after }) =>
+      isHidden(before) === isHidden(after) &&
+      nodeMatches(parsed, before, index, operators, today) ===
+        nodeMatches(parsed, after, index, operators, today),
+  );
+}
+
 /**
  * The precomputed visible-set a `?q=` filter produces -- the shape the render
  * path (`buildVisibleRows`, the row's dimming derivation) and the plugin Seam-G

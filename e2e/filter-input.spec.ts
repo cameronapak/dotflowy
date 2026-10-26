@@ -174,7 +174,21 @@ test("a row that still matches after editing stays visible on blur", async ({
   await placeCaret(editor, "end");
   const before = await page.evaluateHandle(async () => {
     const path = "/src/data/view-state.ts";
-    return (await import(path)).getViewFilter();
+    const storePath = "/src/data/tree-store.ts";
+    const { byId } = (await import(storePath)).getTreeIndex();
+    const get = byId.get;
+    let unrelatedReads = 0;
+    byId.get = function (id: string) {
+      if (id === "mom") unrelatedReads++;
+      return get.call(this, id);
+    };
+    return {
+      filter: (await import(path)).getViewFilter(),
+      reads: () => unrelatedReads,
+      restore: () => {
+        byId.get = get;
+      },
+    };
   });
   await editor.fill("Buy more milk #work");
   // Membership did not change, so list consumers keep the same snapshot.
@@ -185,9 +199,14 @@ test("a row that still matches after editing stays visible on blur", async ({
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       );
       const path = "/src/data/view-state.ts";
-      return previous === (await import(path)).getViewFilter();
+      const result = {
+        sameFilter: previous.filter === (await import(path)).getViewFilter(),
+        unrelatedReads: previous.reads(),
+      };
+      previous.restore();
+      return result;
     }, before),
-  ).toBe(true);
+  ).toEqual({ sameFilter: true, unrelatedReads: 0 });
   await before.dispose();
   await input(page).focus();
   await expect(editor).toHaveText("Buy more milk #work");

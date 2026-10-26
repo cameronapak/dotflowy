@@ -41,6 +41,7 @@ import type {
 
 import { registerWidget } from "../components/plugin-widget";
 import { CORE_FILTER_OPERATORS } from "../data/core-filter-operators";
+import { localDateKey } from "../data/date-links";
 import {
   getEditorFeatures,
   subscribeEditorFeatures,
@@ -50,10 +51,15 @@ import {
   buildFilterOperatorMap,
   buildQueryFilter,
   collectOperatorKeyInfos,
+  queryMembershipUnchanged,
   type QueryFilter,
 } from "../data/filter-query";
 import { isMirrorsEnabled } from "../data/flags";
-import { getTreeIndex, subscribeTree } from "../data/tree-store";
+import {
+  getTreeFieldChangesSince,
+  getTreeIndex,
+  subscribeTree,
+} from "../data/tree-store";
 import { editorFeaturePlugins, plugins } from "./index";
 
 // No plugin styles seam: ADR 0031 retired raw plugin CSS (it could restyle the
@@ -319,10 +325,9 @@ export function buildViewFilter(
  * Subscribe to the active view filter, re-rendering ONLY while a filter is live.
  * When no plugin wants to filter (no `?q=` query) {@link buildViewFilter}
  * returns null, so the cached snapshot stays a stable `null` and a no-filter
- * keystroke never re-renders the editor shell. While a filter IS active it
- * recomputes against the live tree on every change so the pruned view tracks
- * edits -- the one render-time read that legitimately depends on node text,
- * scoped so it only costs when filtering. The cache (keyed on the shared index's
+ * keystroke never re-renders the editor shell. A field-only edit whose text/tag
+ * membership is unchanged reuses the filter without walking the tree. Other
+ * edits recompute against the live tree. The cache (keyed on the shared index's
  * identity, which is stable between edits) keeps getSnapshot referentially
  * stable, as `useSyncExternalStore` requires. See ADR 0014 and ADR 0001 (Seam G).
  */
@@ -337,18 +342,37 @@ export function useViewFilter(
     isHidden: (node: Node) => boolean;
     focusedKey: string | null;
     filter: QueryFilter | null;
+    today: string;
   } | null>(null);
   const getSnapshot = useCallback(() => {
     const index = getTreeIndex();
     const prev = cache.current;
+    const today = localDateKey();
     if (
       prev &&
-      prev.index === index &&
       prev.ctx === ctx &&
       prev.isHidden === isHidden &&
-      prev.focusedKey === focusedKey
-    )
-      return prev.filter;
+      prev.focusedKey === focusedKey &&
+      prev.today === today
+    ) {
+      if (prev.index === index) return prev.filter;
+      const changes = getTreeFieldChangesSince(prev.index);
+      if (
+        prev.filter &&
+        changes &&
+        queryMembershipUnchanged(
+          index,
+          ctx.search.q,
+          changes,
+          isHidden,
+          filterOperatorMap,
+          today,
+        )
+      ) {
+        cache.current = { ...prev, index };
+        return prev.filter;
+      }
+    }
     let filter: QueryFilter | null = buildViewFilter(
       index,
       ctx,
@@ -356,9 +380,8 @@ export function useViewFilter(
       focusedKey,
     );
     const previous = prev?.filter;
-    // Still evaluate every change: operator predicates can inspect the whole
-    // index. But unchanged membership must not invalidate the visible-row list
-    // or virtualizer geometry. Focus-only retention is part of that contract.
+    // Fallback evaluations can also leave membership unchanged. Keep the
+    // visible-row list and virtualizer geometry stable in that case too.
     if (
       filter &&
       previous &&
@@ -370,7 +393,7 @@ export function useViewFilter(
       [...filter.matchIds].every((id) => previous.matchIds.has(id))
     )
       filter = previous;
-    cache.current = { index, ctx, isHidden, focusedKey, filter };
+    cache.current = { index, ctx, isHidden, focusedKey, filter, today };
     return filter;
   }, [ctx, isHidden, focusedKey]);
   return useSyncExternalStore(subscribeTree, getSnapshot, () => null);

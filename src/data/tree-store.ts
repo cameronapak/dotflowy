@@ -65,6 +65,13 @@ let index: TreeIndex = {
 const listeners = new Set<() => void>();
 let started = false;
 
+// Keep only the latest batch, not a history of index wrappers. Readers that
+// missed a notification must rebuild rather than reuse an incomplete delta.
+let fieldChanges: {
+  previous: TreeIndex;
+  changes: Array<{ before: Node; after: Node }>;
+} | null = null;
+
 // Monotonic counter bumped only when the VISIBLE STRUCTURE changes -- an
 // insert/delete/reparent/reorder (dirty parents) OR a collapse/completed flip
 // (field edits that nonetheless add/remove rows or change fade inheritance). A
@@ -109,6 +116,8 @@ function notify() {
  * unchanged structure never rescans a wide parent's children on a keystroke.
  */
 function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
+  const previous = index;
+  const updated: Array<{ before: Node; after: Node }> = [];
   const dirty = new Set<string>(); // parents whose child order may have changed
   // A collapse or completed flip is a field edit (no parent dirties) but it DOES
   // change the visible row set / fade inheritance, so it must bump structureRev
@@ -166,6 +175,7 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
     }
     const next = change.value;
     const prev = index.byId.get(next.id);
+    if (prev) updated.push({ before: prev, after: next });
     index.byId.set(next.id, next);
     if ((prev?.text ?? "") !== next.text) {
       const before = prev ? parseNodeLinks(prev.text) : [];
@@ -310,6 +320,10 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
   // pure text/isTask edit leaves it untouched (the typing hot path). See
   // useVisibleRows.
   if (dirty.size > 0 || visibilityChanged || mirrorsChanged) structureRev++;
+  fieldChanges =
+    structural || visibilityChanged || mirrorsChanged
+      ? null
+      : { previous, changes: updated };
   notify();
 }
 
@@ -455,6 +469,14 @@ export function subscribeTree(cb: () => void): () => void {
 export function getTreeIndex(): TreeIndex {
   ensureStarted();
   return index;
+}
+
+/** Field-only changes since this exact snapshot, or null when a full read is
+ * needed. Old wrappers share mutable Maps, so consumers use these saved rows,
+ * never `previous.byId`, to evaluate the pre-edit state. */
+export function getTreeFieldChangesSince(previous: TreeIndex) {
+  ensureStarted();
+  return fieldChanges?.previous === previous ? fieldChanges.changes : null;
 }
 
 /** Whole-index subscription. Re-renders on every change -- use sparingly. */

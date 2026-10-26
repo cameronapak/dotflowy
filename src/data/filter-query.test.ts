@@ -10,6 +10,7 @@ import {
   collectOperatorKeyInfos,
   type FilterOperator,
   parseFilterQuery,
+  queryMembershipUnchanged,
   tokenizeQuery,
 } from "./filter-query";
 import { buildTreeIndex, createNode, type Node } from "./tree";
@@ -20,6 +21,88 @@ const never = () => false;
 
 // Exercise the registered pure operators, not handwritten predicate twins.
 const ops = queryOperators;
+
+test.each<[string, boolean]>([
+  ["milk", true],
+  ["#work", true],
+  ["milk OR bread -#home", true],
+  ["unknown:x", true],
+  ["-bread", true],
+  ["more", false],
+  ["-more", false],
+  ['"more milk"', false],
+  ["#home OR more", false],
+])("field deltas preserve membership for %s: %s", (query, unchanged) => {
+  const before = createNode({ id: "a", text: "Milk #work" });
+  const after = { ...before, text: "More milk #work" };
+  expect(
+    queryMembershipUnchanged(
+      index([after]),
+      query,
+      [{ before, after }],
+      never,
+      ops,
+    ),
+  ).toBe(unchanged);
+});
+
+test("field deltas fall back for changing visibility and nonlocal dependencies", () => {
+  const before = createNode({ id: "a", text: "Milk #work" });
+  const after = { ...before, text: "More milk #work" };
+  const tree = index([after]);
+  expect(
+    queryMembershipUnchanged(
+      tree,
+      "milk",
+      [
+        { before, after },
+        { before: after, after: { ...after, text: "Bread #work" } },
+      ],
+      never,
+      ops,
+    ),
+  ).toBe(false);
+  expect(
+    queryMembershipUnchanged(
+      tree,
+      "milk",
+      [{ before, after }],
+      (n) => n.text.startsWith("More"),
+      ops,
+    ),
+  ).toBe(false);
+
+  // An operator can depend on another node, even when the edited node's own
+  // result stays false. Never infer node-locality from one pair of results.
+  const globalOps = buildFilterOperatorMap([
+    {
+      key: "has",
+      values: ["milk"],
+      description: "Index-dependent predicate",
+      predicate: (node, current) =>
+        node.id === "b" && current.byId.get("a")?.text === "Milk #work",
+    },
+  ]);
+  expect(
+    queryMembershipUnchanged(
+      tree,
+      "has:milk",
+      [{ before, after }],
+      never,
+      globalOps,
+    ),
+  ).toBe(false);
+  expect(
+    queryMembershipUnchanged(tree, "is:todo", [{ before, after }], never, ops),
+  ).toBe(false);
+  const mirrored = index([after, createNode({ id: "m", mirrorOf: "a" })]);
+  expect(
+    queryMembershipUnchanged(mirrored, "milk", [{ before, after }], never, ops),
+  ).toBe(false);
+  expect(
+    queryMembershipUnchanged(tree, "", [{ before, after }], never, ops),
+  ).toBe(false);
+});
 
 test.each<[string, string | undefined, string[]]>([
   ["undefined is no tokens", undefined, []],
