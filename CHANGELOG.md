@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.29.6
+
+### Patch Changes
+
+- 9d1c60e: Keep rapid typing in the new bullet after pressing Enter, even when an earlier render still has pending focus work.
+
 ## 1.29.5
 
 ### Patch Changes
