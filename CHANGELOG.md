@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.29.5
+
+### Patch Changes
+
+- 37879e7: Typing under text and tag filters is faster when an edit keeps the same matches in outlines without mirrors. Matching changes and other filters keep their existing behavior.
+
 ## 1.29.4
 
 ### Patch Changes
