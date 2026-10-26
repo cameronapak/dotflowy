@@ -32,6 +32,7 @@ import { getSelectionState, selectSingle } from "../data/selection-state";
 import { runStructuralTracked, runStructuralSliced } from "../data/structural";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
+import { virtualRowRect } from "../data/virtual-nav";
 import {
   setRestoreProgress,
   setRestoreProgressOpener,
@@ -42,7 +43,10 @@ import {
   getSelectionRange,
   setSelectionOffsets,
 } from "./inline-code";
-import { setPendingCaretSelection } from "./pending-caret";
+import {
+  clearPendingCaretOffset,
+  setPendingCaretSelection,
+} from "./pending-caret";
 import {
   Dialog,
   DialogContent,
@@ -218,6 +222,7 @@ const applyHistoryE = Effect.fn("History.restore")((
     const expectedSeq = getAppliedSeq();
     plan = (kind === "undo" ? undo : redo)(getTreeIndex(), focusId, scope);
     if (!plan) return null;
+    clearPendingCaretOffset();
     const before = visibleChanges(plan.changedIds);
     if (plan.opCount < RESTORE_SLICE_OPS) {
       yield* restoreAttempt(
@@ -240,8 +245,10 @@ const applyHistoryE = Effect.fn("History.restore")((
     }
     committed = true;
     setRestoreProgress({ kind: "closed" });
+    // Returning to the location already waits for rendering before its final
+    // caret handoff. Don't yield again with input blocked after that handoff.
     if (!scope && returnToLocation) yield* returnToLocation(plan);
-    yield* afterRenderE;
+    else yield* afterRenderE;
     const after = visibleChanges(plan.changedIds);
     if (
       !scope &&
@@ -413,6 +420,8 @@ export function HistoryRestoreDialog() {
   useEffect(() => {
     returnToLocation = (plan) =>
       Effect.gen(function* () {
+        // Also covers the toast's View node action, outside requestRestore.
+        clearPendingCaretOffset();
         const root = plan.location?.rootId ?? null;
         const rootId = root && getTreeIndex().byId.has(root) ? root : null;
         // The rendered view mirror can lag navigation during a zoom transition.
@@ -433,20 +442,29 @@ export function HistoryRestoreDialog() {
               navigate({ to: "/", search: (prev) => prev }),
             );
         }
-        if (!plan.focusId) return;
+        if (!plan.focusId) return yield* afterRenderE;
         const key = plan.focusId;
-        if (plan.location?.caret)
-          setPendingCaretSelection(key, plan.location.caret);
+        // Prepare scrolling/mounting without publishing the restored range:
+        // FocusPass and a row's mount effect can run during this render wait.
         getNodeActionBridge()?.focusNode(key);
         yield* afterRenderE;
         const el = document.querySelector<HTMLElement>(
           `[data-history-key="${CSS.escape(key)}"]`,
         );
-        if (!el) return;
+        const caret = plan.location?.caret;
+        if (!el) {
+          // A windowed row may still be mounting. Hand it the range only now,
+          // with no further yield before busy is released. Hidden/filtered
+          // rows must not leave a stale caret for some unrelated later mount.
+          if (caret && virtualRowRect(key, window.scrollY)) {
+            setPendingCaretSelection(key, caret);
+            getNodeActionBridge()?.focusNode(key);
+          }
+          return;
+        }
         el.focus({ preventScroll: true });
         el.scrollIntoView({ block: "nearest" });
         const node = getTreeIndex().byId.get(el.dataset.historyNodeId ?? key);
-        const caret = plan.location?.caret;
         if (node)
           decorate(el, node.text, caret?.start ?? node.text.length, true);
         if (caret)

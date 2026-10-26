@@ -21,6 +21,11 @@ on:
 permissions:
   contents: read
 
+# Superseded PRs can stop; exact-candidate dispatches must finish independently.
+concurrency:
+  group: cli-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     strategy:

@@ -257,14 +257,15 @@ browser.
 - Wait on state (`expect(...)` retries, `expect.poll`), never on a fixed
   `waitForTimeout`.
 - **CI's `quality` gate requires all checks and the full browser regression.**
-  Nonbrowser checks and the real-Worker suite run once, then four isolated CI
-  runners each run one app shard with one worker, zero retries, and retained
+  Nonbrowser checks and the real-Worker suite run once, alongside eight isolated CI
+  runners that each run one app shard with one worker, zero retries, and retained
   failure traces. Every app test runs on exactly one shard; each shard stops at
   its first failure without canceling the others. Per-test JSON timing reports
   are uploaded on every run. Require `quality` in branch rules before relying
   on it instead of a full local browser run.
   PRs run CI directly; `main` uses deployment's exact-commit call, not a second
-  standalone CI run.
+  standalone CI run. New PR revisions cancel superseded CI and CLI runs;
+  production validation and exact-candidate dispatches are not canceled this way.
   The full app run includes the editor performance cases; use `bun run test:perf`
   for focused local iteration, not a duplicate CI run.
   `bun run test:e2e:app` is the app-only run;

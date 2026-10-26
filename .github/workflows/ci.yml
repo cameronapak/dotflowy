@@ -14,6 +14,12 @@ on:
 permissions:
   contents: read
 
+# Only superseded PR validation is disposable. A reusable production call uses
+# its caller's run ID and must never cancel the parent deployment or another run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -69,7 +75,10 @@ jobs:
       - name: Real Worker regression
         run: bun run test:e2e:retirement --workers=1 --retries=0 --max-failures=1
       - name: Install Worker browser
-        run: bunx playwright install --with-deps chromium
+        run: |
+          # Use the same mirror workaround as the app shards below.
+          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          bunx playwright install --with-deps chromium
       - name: Real Worker browser persistence
         run: bun run test:e2e:worker-browser
       - name: Upload Worker failure diagnostics
@@ -82,14 +91,15 @@ jobs:
           retention-days: 7
 
   app:
-    needs: checks
+    # Independent runners need no output from checks. The quality gate below
+    # still requires both lanes, including failed or skipped prerequisites.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       # Finish other shards so one failure does not hide independent failures.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -108,7 +118,7 @@ jobs:
           sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
           bunx playwright install --with-deps chromium webkit
       - name: App browser regression
-        run: bun run test:e2e:app --shard=${{ matrix.shard }}/4 --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
+        run: bun run test:e2e:app --shard=${{ matrix.shard }}/${{ strategy.job-total }} --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
       - name: Upload browser timings

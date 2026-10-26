@@ -60,42 +60,71 @@ async function caretAt(page: Page, id: string, col: number) {
 }
 
 test("Enter replaces a backward selection, undo restores its direction, and immediate typing can split again", async ({
-  page,
+  context,
 }) => {
-  await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "ABCDEF" },
-  ]);
-  await text(page, "n").evaluate((el) => {
-    el.focus();
-    const node = el.firstChild!;
-    window.getSelection()!.setBaseAndExtent(node, 4, node, 2);
-  });
-  await page.keyboard.press("Enter");
-  await expect.poll(() => orderedTexts(page)).toEqual(["AB", "EF"]);
-  await expect(focused(page)).toHaveText("EF");
+  for (const remount of [false, true]) {
+    // Each page owns its fixture socket and outline, including optimistic edits.
+    const page = await context.newPage();
+    await load(page, [
+      { id: "n", parentId: null, prevSiblingId: null, text: "ABCDEF" },
+    ]);
+    await text(page, "n").evaluate((el) => {
+      el.focus();
+      const node = el.firstChild!;
+      window.getSelection()!.setBaseAndExtent(node, 4, node, 2);
+    });
+    await page.keyboard.press("Enter");
+    await expect.poll(() => orderedTexts(page)).toEqual(["AB", "EF"]);
+    await expect(focused(page)).toHaveText("EF");
 
-  await page.keyboard.press("ControlOrMeta+z");
-  await expect.poll(() => orderedTexts(page)).toEqual(["ABCDEF"]);
-  await expect
-    .poll(() =>
-      text(page, "n").evaluate((el) => {
-        const sel = window.getSelection()!;
-        return {
-          text: sel.toString(),
-          anchor: sel.anchorOffset,
-          focus: sel.focusOffset,
-          inside: el.contains(sel.anchorNode) && el.contains(sel.focusNode),
-        };
-      }),
-    )
-    .toEqual({ text: "CD", anchor: 4, focus: 2, inside: true });
+    if (remount) {
+      // Leave the editing root without changing history. Undo must mount the
+      // original row again; its mount/FocusPass must not expose the saved range
+      // while restore still blocks input.
+      await row(page, "n")
+        .getByRole("button", { name: "Zoom in", exact: true })
+        .click();
+      await expect(page).toHaveURL(/\/n$/);
+      await expect(text(page, "n")).toHaveCount(0);
+    }
 
-  // No focus assertions or animation-frame waits between native editing handoffs.
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("X");
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("Y");
-  await expect.poll(() => orderedTexts(page)).toEqual(["AB", "X", "YEF"]);
+    // Slow frames expose the interval between restoring the selection and
+    // releasing history's input guard. This perturbs scheduling, not readiness:
+    // the next edit still starts as soon as the public selection is restored.
+    await page.evaluate(() => {
+      const requestFrame = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (callback) =>
+        requestFrame((time) => {
+          setTimeout(() => callback(time), 100);
+        });
+    });
+
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect.poll(() => orderedTexts(page)).toEqual(["ABCDEF"]);
+    await expect
+      .poll(
+        () =>
+          text(page, "n").evaluate((el) => {
+            const sel = window.getSelection()!;
+            return {
+              text: sel.toString(),
+              anchor: sel.anchorOffset,
+              focus: sel.focusOffset,
+              inside: el.contains(sel.anchorNode) && el.contains(sel.focusNode),
+            };
+          }),
+        { intervals: [10] },
+      )
+      .toEqual({ text: "CD", anchor: 4, focus: 2, inside: true });
+
+    // No focus assertions or animation-frame waits between native editing handoffs.
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("X");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Y");
+    await expect.poll(() => orderedTexts(page)).toEqual(["AB", "X", "YEF"]);
+    await page.close();
+  }
 });
 
 test("Enter removes selected prefixes, suffixes, and whole text, including an expanded parent", async ({
