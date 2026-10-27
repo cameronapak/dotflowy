@@ -582,12 +582,27 @@ test("selection menu keyboard navigation preserves the slab, IME, and caret rest
   const dot = li(page, "b").locator(":scope > .outline-row .bullet");
   const box = (await dot.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const pressedPointer = await dot.evaluateHandle((el) => {
+    const pointer = { pointerId: -1, pointerType: "" };
+    el.addEventListener(
+      "pointerdown",
+      (event) => {
+        // SAFETY: the browser's pointerdown event is a PointerEvent.
+        const { pointerId, pointerType } = event as PointerEvent;
+        Object.assign(pointer, { pointerId, pointerType });
+      },
+      { once: true },
+    );
+    return pointer;
+  });
   await page.mouse.down();
+  const pointer = await pressedPointer.jsonValue();
+  await pressedPointer.dispose();
   await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2);
   await expect(page.locator("body")).toHaveClass(/dragging-active/);
-  await dot.dispatchEvent("pointercancel");
-  await page.mouse.up();
+  await dot.dispatchEvent("pointercancel", pointer);
   await expect(page.locator("body")).not.toHaveClass(/dragging-active/);
+  await page.mouse.up();
   await expect(copy).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(move).toBeFocused();

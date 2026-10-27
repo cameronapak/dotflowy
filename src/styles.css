@@ -615,9 +615,9 @@ h2 span.protection-indicator {
   align-items: center;
   justify-content: center;
   border-radius: 99px;
-  /* A touch starting on the dot is a drag (or a tap-to-zoom), never a scroll,
-     so the gesture stays ours. See ADR 0010. */
-  touch-action: none;
+  /* Swipe to scroll; hold then move to reorder. The drag hook prevents
+     touchmove only after the hold, before native panning takes ownership. */
+  touch-action: manipulation;
 }
 
 .bullet:active {
