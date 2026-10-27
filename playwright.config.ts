@@ -31,6 +31,14 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     {
+      name: "selection-menu-webkit",
+      testMatch: "node-multi-select.spec.ts",
+      grep: /selection menu keyboard|actions menu: Move|filtered.*mirror/,
+      // Keep the same desktop identity: Linux WebKit's default macOS UA makes
+      // Mod resolve to Meta while Playwright's ControlOrMeta sends Control.
+      use: { ...devices["Desktop Chrome"], browserName: "webkit" },
+    },
+    {
       name: "mobile-toolbar-webkit",
       testMatch: "mobile-actions-bar.spec.ts",
       grep: /mobile actions bar \(coarse pointer\)/,

@@ -41,7 +41,7 @@ const MIRROR_TREE: SeedNode[] = [
 const focused = (page: Page) => page.locator(".node-text:focus");
 
 for (const mirrored of [false, true]) {
-  test(`selection exits and deletion skip the whole ${mirrored ? "mirror" : "source"} subtree`, async ({
+  test(`menu navigation preserves the ${mirrored ? "mirror" : "source"} subtree selection and deletion skips it`, async ({
     page,
   }) => {
     const target = mirrored ? "M" : "A";
@@ -71,13 +71,14 @@ for (const mirrored of [false, true]) {
     await placeCaret(text(page, target), "end");
     await page.keyboard.press("Shift+ArrowDown");
     await page.keyboard.press("ArrowDown");
-    await expect(text(page, "B")).toBeFocused();
-    await expect(page.locator("[data-selected]")).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: /^Move/ })).toBeFocused();
+    await expect(page.locator(`li[data-node-id="${target}"]`)).toHaveAttribute(
+      "data-selected",
+      "top",
+    );
 
     // No row exists above this selection. Deletion must use the below fallback,
     // not a windowed child whose render path disappears with its mirror.
-    await placeCaret(text(page, target), "end");
-    await page.keyboard.press("Shift+ArrowDown");
     await page.keyboard.press("Backspace");
     await expect(text(page, target)).toHaveCount(0);
     await expect(text(page, "B")).toBeFocused();
@@ -579,8 +580,14 @@ test("selecting a mirror selects the INSTANCE, so delete removes only the mirror
     page.locator('li[data-node-id="a2"]').nth(0),
   ).not.toHaveAttribute("data-selected", /.*/);
 
-  // At the end of the view there is no following row. Stay at the bottom of
-  // this instance, never its source copy or the first windowed child.
+  // Menu arrows preserve the instance selection. Escape restores its caret;
+  // subsequent editor arrows stay in this instance, never its source copy.
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: /^Move/ })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(text(page, "M")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(text(page, "a1").nth(1)).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(text(page, "a2").nth(1)).toBeFocused();
   await placeCaret(text(page, "M"), "end");
