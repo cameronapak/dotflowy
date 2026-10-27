@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.29.13
+
+### Patch Changes
+
+- d94cefc: Swipe from a bullet dot to scroll, or hold before dragging to reorder. Touch reorders no longer request editor focus and open the keyboard.
+
 ## 1.29.12
 
 ### Patch Changes
