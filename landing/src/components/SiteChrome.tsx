@@ -153,6 +153,34 @@ export function Footer() {
         </nav>
       </div>
       <div className="mx-auto w-full max-w-2xl px-6 pb-6">
+        <a
+          href="https://alternativeto.net/software/dotflowy/about/?utm_source=badge&utm_medium=referral"
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex flex-col items-start gap-3 rounded-md text-sm text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-foreground sm:flex-row sm:items-center"
+        >
+          {/* Unmodified official SVGs, self-hosted per https://alternativeto.net/badges/?app=dotflowy. */}
+          <picture className="shrink-0">
+            <source
+              media="(prefers-color-scheme: dark)"
+              srcSet="/alternativeto-compact-dark.svg"
+            />
+            <img
+              src="/alternativeto-compact-light.svg"
+              alt="Dotflowy | AlternativeTo"
+              width={244}
+              height={83}
+              loading="lazy"
+              className="h-auto w-[183px]"
+            />
+          </picture>
+          <span className="underline underline-offset-4">
+            Review or follow Dotflowy
+            <span className="sr-only"> (opens in a new tab)</span>
+          </span>
+        </a>
+      </div>
+      <div className="mx-auto w-full max-w-2xl px-6 pb-6">
         <p className="mb-4 text-sm text-muted-foreground">
           Support:{" "}
           <a
