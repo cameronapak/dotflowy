@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.29.11
+
+### Patch Changes
+
+- 243a672: Keep the daily-note caret above the mobile toolbar when late prepend measurements or viewport resizing follow typing.
+
 ## 1.29.10
 
 ### Patch Changes
