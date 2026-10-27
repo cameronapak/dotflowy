@@ -157,7 +157,7 @@ export function Footer() {
           href="https://alternativeto.net/software/dotflowy/about/?utm_source=badge&utm_medium=referral"
           target="_blank"
           rel="noreferrer noopener"
-          className="inline-flex flex-col items-start gap-3 rounded-md text-sm text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-foreground sm:flex-row sm:items-center"
+          className="inline-flex flex-col items-start gap-3 rounded-md text-sm text-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-foreground sm:flex-row sm:items-center"
         >
           {/* Unmodified official SVGs, self-hosted per https://alternativeto.net/badges/?app=dotflowy. */}
           <picture className="shrink-0">
