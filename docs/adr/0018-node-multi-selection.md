@@ -21,6 +21,22 @@ ambiguous. The one allowed cross-level move is a **single-root** selection walki
 sibling boundary (climb to parent / dive to first child) — it's still exactly one subtree, so no
 operation is ever ambiguous; the rejection is specifically of **multi-root** ranges that span parents.
 
+**Filtered selection (2026-10-26, issue #245).** Contiguity means visible sibling
+order, not stored adjacency. Shift+arrow and Cmd+A skip roots excluded by the
+active query or hide-completed setting. Matches, dimmed context, and revealed
+descendants are selectable; a collapsed context node can lead to a revealed
+child. Selecting a root still includes its whole subtree, including descendants
+hidden by collapse or filtering. Filters never change stored collapse state.
+
+Anchor and focus are render keys; mutation roots remain instance node IDs.
+This keeps a mirror's visible sibling run separate from another instance's
+revealed children. Selection fill, caret exits, and undo use the same path.
+Reversing direction shrinks toward the anchor. If a view update prunes a selected
+root, the selection clears; scrolling it out of the virtual window does not.
+Batch operations receive only the selected roots. Indent still targets the first
+root's actual previous sibling, and outdent still lands after the real parent.
+Hidden siblings between selected roots remain in place.
+
 **Caret and selection are mutually exclusive.** While nodes are selected there is no text caret;
 while you have a caret you're editing one bullet. The transitions are the whole interaction:
 
@@ -42,13 +58,16 @@ while you have a caret you're editing one bullet. The transitions are the whole 
   **deliberately no per-level climb** — `Cmd+A` is the big-jump scope tool, `Shift+arrow` is the
   surgical sibling tool, and overlapping them (both doing sibling-level work) was the rejected
   design.
-- **While selected:** plain `↑/↓` drops the caret onto the visible row just _above the top_ / _below
-  the bottom_ of the selection (the existing visual neighbor walk — caret motion is visual even
-  though selection is sibling-scoped). `Tab`/`Shift+Tab` **indent/outdent the whole run** (see
-  Operations); the selection **persists** so you can keep nudging. A printable `[a-zA-Z]` key is a
-  **no-op; the selection persists** — it must **never** replace-on-type the way a text editor does,
+- **While selected:** the actions menu takes focus. Plain `↑/↓`, `Home`/`End`, and
+  typeahead navigate its actions; `Enter`/`Space` activates one. These keys must
+  not clear the selection or move the editor caret (issue #191). `Shift+↑/↓`
+  still extends the selection. `Tab`/`Shift+Tab` **indent/outdent the whole run** (see
+  Operations); the selection **persists** so you can keep nudging. A printable key
+  only searches menu labels; it must **never** replace-on-type the way a text editor does,
   or a stray keypress would delete whole subtrees. `Escape` clears → caret returns; a click clears →
-  normal edit.
+  normal edit. Tab remains an editor bulk shortcut rather than a menu exit;
+  Escape restores the caret before normal tab navigation resumes. IME composition
+  keys, including Safari's key-code 229, never run selection or menu commands.
 
 **Operations (this ADR's v1):** **Copy as Markdown** (`Cmd+C`, reuses the ADR 0017 serializer over
 the selected roots), **Delete** (`Backspace`/`Delete`, `removeManyNodes` over the selected roots
@@ -70,16 +89,21 @@ multi-selection drag among outline gaps remains outside this amendment.
 **The actions menu, and `runMany`.** When a selection exists, a menu **auto-appears anchored to the
 active (focus) edge — the newest node a `Shift+arrow` just added — and re-anchors to it on every
 extension**, so it tracks the node you're selecting instead of parking over the run's text.
-**Positioning is delegated to floating-ui** (`@floating-ui/react-dom` — the same engine Base UI uses):
+**Positioning is delegated to Base UI's floating-ui-backed menu**:
 its preferred side is the **outer edge** of the run (below the focus row when the run grows down,
 above when it grows up; below for a lone single node) so it stays off the selected text, while
 `flip()` + `shift()` keep it **fully on screen at any viewport edge** — flipping below the top node
 rather than clipping off-screen — and `autoUpdate` re-solves on scroll/resize. The focus row itself
 is kept on screen with a stock `el.scrollIntoView({ block: "nearest" })`, since selection extension
 never focuses a row (caret and selection are mutually exclusive, so nothing else scrolls it). It
-reuses `SlashMenuList`, which is now **presentational only** — the caller owns positioning (the slash
-menu fixes itself at the caret; this menu hands floating-ui the focus row as the reference), so
-neither reinvents collision geometry. `Escape` dismisses and clears. It lists core **Copy** +
+keeps the slash menu's appearance, but uses Base UI's `menu`/`menuitem` semantics,
+focus, roving navigation, typeahead, and activation. Typing suggestions keep their
+separate caret-preserving listbox. The selection listener handles only bulk
+shortcuts from the selection menu or the unfocused body; other controls own their
+keys. Handled bulk keys stop before menu navigation. Selection owns dismissal
+and caret restoration, including the selected-dot drag exception; the menu's
+automatic return focus is disabled so it cannot steal focus from a destination
+dialog or the restored caret. `Escape` dismisses and clears. It lists core **Copy** +
 **Move** + **Delete** plus every plugin command that opts in. A single-node
 `CommandSpec.run(nodeId, ctx)` **cannot** simply be looped over a set — `Move` opens a destination
 picker (looping fires N dialogs) and daily's "Send to Today" navigates (looping navigates N times).

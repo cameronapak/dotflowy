@@ -19,9 +19,9 @@ export interface MenuListItem {
 /**
  * Presentational only: renders the listbox + its options. **Positioning is the
  * caller's job** -- it passes the `style` (and `ref`, for libraries that attach
- * to the floating element). The slash menu fixes itself at the caret; the
- * selection actions menu (ADR 0018) hands this to floating-ui for collision-aware
- * placement. Keeping geometry out of here means neither caller reinvents it.
+ * to the floating element). The slash menu fixes itself at the caret. Selection
+ * actions use Base UI's focused menu instead (ADR 0018); typing suggestions
+ * leave focus in the editor.
  */
 export function SlashMenuList({
   items,

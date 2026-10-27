@@ -1,5 +1,23 @@
 # dotflowy
 
+## 1.29.12
+
+### Patch Changes
+
+- 26e2983: Navigate the node-selection actions menu with the keyboard without losing the selected nodes. Arrow keys, Home, End, typeahead, Enter, and Space work in the menu; Escape returns to editing.
+
+## 1.29.11
+
+### Patch Changes
+
+- 243a672: Keep the daily-note caret above the mobile toolbar when late prepend measurements or viewport resizing follow typing.
+
+## 1.29.10
+
+### Patch Changes
+
+- 7d032af: Keep filtered node selections on visible siblings, including mirror instances, so bulk actions do not include hidden sibling roots.
+
 ## 1.29.9
 
 ### Patch Changes

@@ -73,6 +73,14 @@ options.
    the destination title. No new keyboard shortcut: arrow keys already cross
    days, and the strip and Today button jump.
 
+   Input releases title alignment and reveals the caret above the mobile
+   toolbar. Its scroll offset reaches the virtualizer before late prepend
+   measurements can compensate, including a prepend committed by that offset
+   notification. A layout viewport resize also changes unmounted days' height
+   estimates. Without a navigation or reading hold, it captures the focused row
+   in the existing reading hold before updating those estimates. The next user
+   gesture releases the hold, so scrolling remains free.
+
 7. **Entry points are unchanged.** The Today button, `/today`, and Cmd+K "Go to
    Today" open the stream anchored on today and seed one entry line, as before.
    Date chips and other reference paths anchor the stream without seeding.
