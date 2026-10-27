@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.29.12
+
+### Patch Changes
+
+- 26e2983: Navigate the node-selection actions menu with the keyboard without losing the selected nodes. Arrow keys, Home, End, typeahead, Enter, and Space work in the menu; Escape returns to editing.
+
 ## 1.29.11
 
 ### Patch Changes
