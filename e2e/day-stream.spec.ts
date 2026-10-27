@@ -535,7 +535,8 @@ test.describe("day navigation on touch", () => {
           return editor.evaluate((el) => el === document.activeElement);
         })
         .toBe(true);
-      // WebKit can deliver the toolbar's visualViewport resize after input.
+      // WebKit can deliver both resize events after input. The toolbar must
+      // catch up, and shrinking unmounted days must preserve the focused row.
       // Keep Chromium's ordinary resize path; force the late delivery here.
       const releaseResize =
         browserName === "webkit"
@@ -543,7 +544,10 @@ test.describe("day navigation on touch", () => {
               const viewport = window.visualViewport!;
               const stop = (e: Event) => e.stopImmediatePropagation();
               viewport.addEventListener("resize", stop, true);
+              window.addEventListener("resize", stop, true);
               return () => {
+                window.removeEventListener("resize", stop, true);
+                window.dispatchEvent(new Event("resize"));
                 viewport.removeEventListener("resize", stop, true);
                 viewport.dispatchEvent(new Event("resize"));
               };
@@ -616,7 +620,9 @@ test.describe("day navigation on touch", () => {
       await page.clock.runFor(500);
       await releaseResize?.evaluate((release) => release());
       await releaseResize?.dispose();
+      await page.clock.runFor(32);
       await expect(editor).toHaveText("Standup appended");
+      await expect(editor).toBeFocused();
       await expect
         .poll(() =>
           page
@@ -630,6 +636,11 @@ test.describe("day navigation on touch", () => {
       await expect.poll(caretClear).toBe(true);
       // The raced settle did load the days above.
       await expect(section(page, PREV, "title")).toBeAttached();
+      const before = await page.evaluate(() => scrollY);
+      await page.evaluate(() => window.scrollBy(0, 100));
+      await expect
+        .poll(() => page.evaluate(() => scrollY))
+        .toBeGreaterThan(before + 90);
     });
   }
 });

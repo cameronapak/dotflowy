@@ -977,7 +977,30 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     return m;
   }, [items]);
   useLayoutEffect(() => {
+    let height = window.innerHeight;
     const measure = () => {
+      // Resizing changes estimates for unmounted days too. Preserve the
+      // focused row before those page heights change underneath its caret.
+      if (
+        stream &&
+        window.innerHeight !== height &&
+        !titleAnchorRef.current &&
+        !heldRef.current
+      ) {
+        const focused =
+          document.activeElement?.closest<HTMLElement>("li[data-index]");
+        const item =
+          focused?.parentElement === listRef.current
+            ? itemsRef.current[Number(focused.dataset.index)]
+            : undefined;
+        if (item && focused)
+          heldRef.current = {
+            key: item.key,
+            top: focused.getBoundingClientRect().top,
+            scrollY: window.scrollY,
+          };
+      }
+      height = window.innerHeight;
       const el = listRef.current;
       if (el) setScrollMargin(el.getBoundingClientRect().top + window.scrollY);
       const next = headerRef.current?.offsetHeight ?? 0;
@@ -1375,7 +1398,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   }, [stream, jumpToSection, rowNavigation]);
 
   // One correction owns measurements: a navigation title, or the reading row
-  // held by an idle prepend. Either releases before the next user gesture.
+  // held by a prepend or resize. Either releases before the next user gesture.
   useLayoutEffect(() => {
     const anchor = titleAnchorRef.current;
     const held = heldRef.current;
