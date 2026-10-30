@@ -81,3 +81,24 @@ failed revocation keeps this tab off but cannot claim to revoke other devices.
 Focus refresh remains the cross-device contract. Permission requests are
 serialized, and a later revoke masks an earlier in-flight approval. Calendar
 sync events do not stand in for the initial preference read.
+
+## October 30 amendment: one Plugins section
+
+Settings → Editor features becomes Settings → Plugins. Bible references, Daily
+notes, Embeds, and Focus sessions
+([ADR 0074](./0074-focus-sessions.md)) each render as one row: name,
+description, an "Off." line while off, and the account-wide switch. A plugin
+with options opens them in place in an accordion that opens one plugin at a time
+and starts closed. `/settings#daily`, `#embeds`, and `#focus` open one directly;
+Cmd+K's "Manage external embed permission" uses `#embeds`. Every option autosaves
+with the same rollback toast, and plugin settings share one row layout
+(`SettingsOptionRow`).
+
+- Focus sessions gains `editor-feature:focus`, enabled by default.
+- "Allow external embeds" moves under Embeds and stays switchable while Embeds
+  is off, so revocation is always reachable.
+- Week start stays available while Daily notes is off (ADR 0068); the other
+  Daily options stay disabled while it is off (ADR 0070).
+- The per-feature "When off" explanation panels are removed. The "Off." line
+  and the section caption carry the same promise: turning a plugin off never
+  deletes notes.

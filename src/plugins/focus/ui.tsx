@@ -68,6 +68,11 @@ function usePipOpen() {
   );
 }
 
+/** Close the floating window, if any, when Focus sessions is turned off. */
+export function closeFocusWindow() {
+  if (pipWindow && !pipWindow.closed) pipWindow.close();
+}
+
 async function popOut() {
   if (pipWindow && !pipWindow.closed) {
     pipWindow.focus();

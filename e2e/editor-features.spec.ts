@@ -48,10 +48,16 @@ test("Cmd+K plugin settings stay reachable when disabled and share Settings pref
   await expect(
     page.getByRole("switch", { name: "Embeds", exact: true }),
   ).not.toBeChecked();
-  await expect(
-    page.getByRole("switch", { name: "Allow external embeds", exact: true }),
-  ).not.toBeChecked();
-  await page.getByRole("button", { name: "Daily notes Details" }).click();
+  const external = page.getByRole("switch", {
+    name: "Allow external embeds",
+    exact: true,
+  });
+  // Plugin options start closed and open one plugin at a time.
+  await expect(external).toBeHidden();
+  await page.getByRole("button", { name: "Embeds options" }).click();
+  await expect(external).not.toBeChecked();
+  await page.getByRole("button", { name: "Daily notes options" }).click();
+  await expect(external).toBeHidden();
   await expect(
     page.getByRole("switch", { name: "Day stream", exact: true }),
   ).not.toBeChecked();
@@ -95,10 +101,10 @@ test("feature switches default on and save independently across reloads", async 
   await expect(bible).toBeEnabled();
   await expect(bible).not.toBeChecked();
   await expect(daily).toBeChecked();
-  await page.getByRole("button", { name: "Daily notes Details" }).click();
+  await page.getByRole("button", { name: "Daily notes options" }).click();
   await expect(
-    page.getByText("Quick-add saves to the top level instead of Today."),
-  ).toBeVisible();
+    page.getByRole("switch", { name: "Day stream", exact: true }),
+  ).toBeEnabled();
   await daily.click();
   await expect(daily).toBeEnabled();
   await page.reload();
@@ -156,7 +162,7 @@ test("Week start remains available while Daily is off and activates after migrat
   await page.goto("/settings");
   const daily = page.getByRole("switch", { name: "Daily notes" });
   await expect(daily).not.toBeChecked({ timeout: 15000 });
-  await page.getByRole("button", { name: "Daily notes Details" }).click();
+  await page.getByRole("button", { name: "Daily notes options" }).click();
   const sunday = page.getByRole("radio", { name: "Sunday" });
   const monday = page.getByRole("radio", { name: "Monday" });
   await expect(monday).toBeChecked();
@@ -527,12 +533,12 @@ test("malformed preferences keep switches unavailable until a successful retry",
   await page.goto("/settings");
   const daily = page.getByRole("switch", { name: "Daily notes" });
   await expect(
-    page.getByText("Couldn't load your feature settings.", { exact: false }),
+    page.getByText("Couldn't load your plugin settings.", { exact: false }),
   ).toBeVisible({ timeout: 15000 });
   await expect(daily).toBeDisabled();
   await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(
-    page.getByText("Couldn't load your feature settings.", { exact: true }),
+    page.getByText("Couldn't load your plugin settings.", { exact: true }),
   ).toBeVisible();
   await expect(daily).toBeDisabled();
   invalid = false;

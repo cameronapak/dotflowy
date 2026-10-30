@@ -50,4 +50,5 @@ export const editorFeaturePlugins = new Map<PluginDef, EditorFeature>([
   [routeBible, "bible"],
   [daily, "daily"],
   [embeds, "embeds"],
+  [focus, "focusSessions"],
 ]);

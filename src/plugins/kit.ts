@@ -19,6 +19,7 @@
 // decision, not a dumping ground.
 
 export { MenuSheetContent } from "@/components/menu-sheet";
+export * from "@/components/settings-option-row";
 export * from "@/components/ui/badge";
 export * from "@/components/ui/badge-variants";
 export * from "@/components/ui/button";

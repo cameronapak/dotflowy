@@ -54,8 +54,9 @@ The session is account-keyed browser-local state shared across tabs, with absolu
 deadlines and focus time excluding pauses and breaks. Pomodoro moves to a break
 at the focus deadline, then waits for a click before the next round. Done ends
 the whole session. Reflection appends one ordinary child under the true source
-through an atomic structural write. `focus:settings` lives in `account-prefs`;
-there is no Editor features switch. Document PiP opens only by a click in desktop
+through an atomic structural write. `focus:settings` lives in `account-prefs`,
+beside its `editor-feature:focus` switch; turning it off ends a running session.
+Document PiP opens only by a click in desktop
 Chrome and is unavailable in Safari and on phones.
 
 **Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace-on-the-checkbox demotion still read `completed`/`isTask` in `OutlineRow`; the bullet-vs-paragraph glyph reads `kind` there too (core's own field, ADR 0045); the `/` palette still runs `useSlashMenu` (only its command _list_ is registry-driven).
@@ -66,9 +67,13 @@ Add a new side-collection to `KV_COLLECTIONS` in `worker/index.ts`. The e2e kv m
 
 ## Optional editor features
 
-Settings → Editor features controls Bible references, Daily notes, and Embeds, all on
-by default. `src/data/editor-features.ts` stores `editor-feature:bible` and
-`editor-feature:daily`, plus `editor-feature:embeds`, in the per-user `account-prefs` namespace. Local
+Settings → Plugins controls Bible references, Daily notes, Embeds, and Focus
+sessions, all on by default. Each row's options open in a one-at-a-time
+accordion; `/settings#daily`, `#embeds`, and `#focus` open one directly. Plugin
+options use `SettingsOptionRow` from the kit so they share one layout.
+`src/data/editor-features.ts` stores `editor-feature:bible`,
+`editor-feature:daily`, `editor-feature:embeds`, and `editor-feature:focus` in
+the per-user `account-prefs` namespace. Local
 changes apply optimistically, failed saves roll back, and other tabs and devices
 refresh on focus. Optional controls wait for the initial preference read.
 

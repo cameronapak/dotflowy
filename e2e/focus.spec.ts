@@ -360,14 +360,15 @@ test("slash start, remembered custom length, cross-tab pause, reload, extension 
     page.getByRole("heading", { name: "Settings", exact: true }),
   ).toBeVisible();
   await page
+    .getByRole("button", { name: "Focus sessions options", exact: true })
+    .click();
+  // A length saves when its field is left; Enter leaves it.
+  await page
     .getByRole("spinbutton", { name: "Focus minutes", exact: true })
     .fill("3");
   await page
-    .getByRole("button", { name: "Save Pomodoro settings", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Save Pomodoro settings", exact: true }),
-  ).toBeEnabled();
+    .getByRole("spinbutton", { name: "Focus minutes", exact: true })
+    .press("Enter");
   await page.getByRole("switch", { name: "Sounds", exact: true }).click();
   await expect(
     page.getByRole("switch", { name: "Sounds", exact: true }),
@@ -408,7 +409,7 @@ test("slash start, remembered custom length, cross-tab pause, reload, extension 
   ).toBeVisible();
   await popup.close();
   await other.close();
-  await page.goto("/settings");
+  await page.goto("/settings#focus");
   await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(
     page.getByRole("spinbutton", { name: "Focus minutes", exact: true }),
@@ -416,4 +417,147 @@ test("slash start, remembered custom length, cross-tab pause, reload, extension 
   await expect(
     page.getByRole("switch", { name: "Sounds", exact: true }),
   ).not.toBeChecked();
+});
+
+test("turning Focus sessions off lets a running session go and hides its commands", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  await openSeededOutline(page, { anchorId: "draft" });
+  await picker(page);
+  await page
+    .getByRole("button", { name: "Start focus session", exact: true })
+    .click();
+  await expect(band(page)).toContainText("Finish the draft");
+  const action = async (label: string) => {
+    await page.keyboard.press("ControlOrMeta+k");
+    await page.getByPlaceholder(/Search nodes and actions/).fill(label);
+    await page.getByRole("option", { name: label }).click();
+  };
+  await action("Turn off Focus sessions");
+  await expect(band(page)).toHaveCount(0);
+  await expect(
+    page.getByRole("img", { name: "Active focus session" }),
+  ).toHaveCount(0);
+  await placeCaret(text(page, "draft"), "end");
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder(/Search nodes and actions/).fill("Focus session");
+  await expect(
+    page.getByRole("option", { name: /Focus session…/ }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("option", { name: "Turn on Focus sessions" }),
+  ).toBeVisible();
+  await page.getByRole("option", { name: "Turn on Focus sessions" }).click();
+  await placeCaret(text(page, "draft"), "end");
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder(/Search nodes and actions/).fill("Focus session");
+  await expect(
+    page.getByRole("option", { name: /Focus session…/ }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  // The session ended rather than hiding, so turning back on shows none.
+  await expect(band(page)).toHaveCount(0);
+});
+
+test("a session left in this browser ends when Focus sessions loads already off", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  await openSeededOutline(page, { anchorId: "draft" });
+  await picker(page);
+  await page
+    .getByRole("button", { name: "Start focus session", exact: true })
+    .click();
+  await expect(band(page)).toContainText("Finish the draft");
+  // Another device turns Focus off. This browser next loads Settings, where
+  // no editor (and so no Focus band) ever mounts.
+  const prefs = (url: URL) =>
+    url.pathname === "/api/kv" &&
+    url.searchParams.get("collection") === "account-prefs";
+  await page.route(prefs, (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({
+          json: [{ key: "editor-feature:focus", enabled: false }],
+        })
+      : route.fallback(),
+  );
+  await page.goto("/settings");
+  await expect(
+    page.getByRole("switch", { name: "Focus sessions", exact: true }),
+  ).not.toBeChecked({ timeout: 15000 });
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Object.keys(localStorage).filter((key) =>
+          key.startsWith("dotflowy:focus:"),
+        ),
+      ),
+    )
+    .toEqual([]);
+  // Turning Focus back on must not revive the old session.
+  await page.unroute(prefs);
+  await openSeededOutline(page, { anchorId: "draft" });
+  await expect(band(page)).toHaveCount(0);
+});
+
+test("Tab moves between Focus lengths while the previous one saves", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  await page.goto("/settings#focus");
+  const focus = page.getByRole("spinbutton", {
+    name: "Focus minutes",
+    exact: true,
+  });
+  const pause = page.getByRole("spinbutton", {
+    name: "Break minutes",
+    exact: true,
+  });
+  await expect(focus).toBeEnabled({ timeout: 15000 });
+  await focus.fill("30");
+  await page.keyboard.press("Tab");
+  await expect(pause).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(pause).toHaveValue("6");
+});
+
+test("a rejected Focus sessions off-save keeps the running session", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  await openSeededOutline(page, { anchorId: "draft" });
+  await picker(page);
+  await page
+    .getByRole("button", { name: "Start focus session", exact: true })
+    .click();
+  await expect(band(page)).toContainText("Finish the draft");
+  await page.route(
+    (url) =>
+      url.pathname === "/api/kv" &&
+      url.searchParams.get("collection") === "account-prefs",
+    async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      // Reject only after the account lookup has had time to resolve, so the
+      // session must wait for the save rather than win a race against it.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.fulfill({ status: 400, json: { error: "Rejected save" } });
+    },
+  );
+  await page.keyboard.press("ControlOrMeta+k");
+  await page
+    .getByPlaceholder(/Search nodes and actions/)
+    .fill("Turn off Focus sessions");
+  await page.getByRole("option", { name: "Turn off Focus sessions" }).click();
+  await expect(
+    page.getByText("Couldn't save this setting. Try again."),
+  ).toBeVisible();
+  await expect(band(page)).toContainText("Finish the draft");
+  expect(
+    await page.evaluate(() =>
+      Object.keys(localStorage).filter((key) =>
+        key.startsWith("dotflowy:focus:"),
+      ),
+    ),
+  ).toHaveLength(1);
 });

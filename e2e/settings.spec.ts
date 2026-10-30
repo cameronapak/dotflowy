@@ -190,12 +190,7 @@ test("free settings exposes its sections, connections nudge, and disclosed upgra
   await openSettings(page);
 
   await expect(page.getByText(/Connecting AI apps requires/i)).toBeVisible();
-  for (const name of [
-    "Connections",
-    "Editor features",
-    "Appearance",
-    "Experimental",
-  ]) {
+  for (const name of ["Connections", "Plugins", "Appearance", "Experimental"]) {
     await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
   }
   await expect(

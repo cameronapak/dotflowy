@@ -10,12 +10,13 @@
  * Kept as a plain `.ts` (no React import) so data-layer consumers like
  * structural.ts don't pull @tanstack/react-router into their module graph.
  */
-let navigateToSettings: (() => void) | null = null;
+let navigateToSettings: ((hash?: string) => void) | null = null;
 
 export function setSettingsNav(fn: typeof navigateToSettings) {
   navigateToSettings = fn;
 }
 
-export function openSettings() {
-  navigateToSettings?.();
+/** `hash` names a Settings anchor, such as a plugin whose options to open. */
+export function openSettings(hash?: string) {
+  navigateToSettings?.(hash);
 }

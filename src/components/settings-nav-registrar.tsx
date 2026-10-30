@@ -12,7 +12,7 @@ import { setSettingsNav } from "./settings-nav";
 export function SettingsNavRegistrar() {
   const navigate = useNavigate();
   useEffect(() => {
-    setSettingsNav(() => void navigate({ to: "/settings" }));
+    setSettingsNav((hash) => void navigate({ to: "/settings", hash }));
     return () => setSettingsNav(null);
   }, [navigate]);
   return null;

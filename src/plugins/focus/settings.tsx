@@ -6,104 +6,101 @@ import {
   setFocusSettings,
   useEditorFeatures,
 } from "../../data/editor-features";
-import { focusSettingsSchema } from "../../data/focus-settings";
-import { Button, Field, FieldGroup, FieldLabel, Input, Switch } from "../kit";
+import {
+  focusSettingsSchema,
+  type FocusSettings as Settings,
+} from "../../data/focus-settings";
+import { Input, SettingsOptionRow, SettingsSwitchTarget, Switch } from "../kit";
 import { unlockSounds } from "./store";
 
+const LENGTHS = [
+  ["focusMinutes", "Focus minutes", 240, "min"],
+  ["breakMinutes", "Break minutes", 240, "min"],
+  ["longBreakMinutes", "Long break minutes", 240, "min"],
+  ["rounds", "Rounds before a long break", 12, null],
+] as const;
+
+/** Focus sessions options in Settings (ADR 0074). Each value saves on its own
+ *  when the field is left, like every other plugin option; an invalid entry
+ *  restores the saved value instead of writing. */
 export function FocusSettings() {
   const prefs = useEditorFeatures();
   const [saving, setSaving] = useState(false);
+  const disabled = !prefs.ready || !prefs.focusSessions;
+  const save = (next: Settings, label: string) => {
+    setSaving(true);
+    void setFocusSettings(next)
+      .catch(() =>
+        toast.error(
+          `Couldn't save ${label}. Your previous setting was restored.`,
+        ),
+      )
+      .finally(() => setSaving(false));
+  };
   return (
-    <section
-      aria-labelledby="focus-settings-title"
-      className="flex flex-col gap-4"
-    >
-      <div>
-        <h2 id="focus-settings-title" className="font-medium">
-          Focus sessions
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Pomodoro lengths and sounds. These settings follow your account.
-        </p>
-      </div>
-      <form
-        key={JSON.stringify(prefs.focus)}
-        onSubmit={(event) => {
-          event.preventDefault();
-          const values = new FormData(event.currentTarget);
-          const decoded = Schema.decodeUnknownOption(focusSettingsSchema)({
-            focusMinutes: Number(values.get("focusMinutes")),
-            breakMinutes: Number(values.get("breakMinutes")),
-            longBreakMinutes: Number(values.get("longBreakMinutes")),
-            rounds: Number(values.get("rounds")),
-            sounds: prefs.focus.sounds,
-          });
-          if (Option.isNone(decoded)) return;
-          setSaving(true);
-          void setFocusSettings(decoded.value)
-            .catch(() =>
-              toast.error(
-                "Couldn't save focus settings. Your previous settings were restored.",
-              ),
-            )
-            .finally(() => setSaving(false));
-        }}
-        className="flex flex-col gap-4"
+    <>
+      {LENGTHS.map(([key, label, max, unit]) => (
+        <SettingsOptionRow key={key} title={label} htmlFor={`focus-${key}`}>
+          <Input
+            // Remount on a saved or restored value so the field shows it.
+            key={prefs.focus[key]}
+            id={`focus-${key}`}
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={max}
+            step={1}
+            className="w-20 text-right tabular-nums"
+            defaultValue={prefs.focus[key]}
+            // Not disabled while saving: disabling the field Tab just moved to
+            // would drop keyboard focus.
+            disabled={disabled}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            onBlur={(event) => {
+              const input = event.currentTarget;
+              const value = Number(input.value);
+              if (input.value === "" || value === prefs.focus[key]) {
+                input.value = String(prefs.focus[key]);
+                return;
+              }
+              const decoded = Schema.decodeUnknownOption(focusSettingsSchema)({
+                ...prefs.focus,
+                [key]: value,
+              });
+              if (Option.isNone(decoded)) {
+                input.value = String(prefs.focus[key]);
+                toast.error(`Use a whole number from 1 to ${max}.`);
+                return;
+              }
+              save(decoded.value, label.toLowerCase());
+            }}
+          />
+          <span
+            aria-hidden="true"
+            className="w-7 text-sm text-muted-foreground"
+          >
+            {unit}
+          </span>
+        </SettingsOptionRow>
+      ))}
+      <SettingsOptionRow
+        title="Sounds"
+        description="Play a cue when time is up, a break ends, or you finish."
       >
-        <FieldGroup className="grid grid-cols-2 gap-4">
-          {(
-            [
-              ["focusMinutes", "Focus minutes", 240],
-              ["breakMinutes", "Break minutes", 240],
-              ["longBreakMinutes", "Long break minutes", 240],
-              ["rounds", "Rounds before a long break", 12],
-            ] as const
-          ).map(([key, label, max]) => (
-            <Field key={key}>
-              <FieldLabel htmlFor={`focus-${key}`}>{label}</FieldLabel>
-              <Input
-                id={`focus-${key}`}
-                name={key}
-                type="number"
-                min={1}
-                max={max}
-                step={1}
-                required
-                defaultValue={prefs.focus[key]}
-                disabled={!prefs.ready || saving}
-              />
-            </Field>
-          ))}
-        </FieldGroup>
-        <Button
-          type="submit"
-          variant="outline"
-          size="sm"
-          className="self-start"
-          disabled={!prefs.ready || saving}
-        >
-          Save Pomodoro settings
-        </Button>
-      </form>
-      <Field orientation="horizontal">
-        <FieldLabel htmlFor="focus-sounds">Sounds</FieldLabel>
-        <Switch
-          id="focus-sounds"
-          checked={prefs.focus.sounds}
-          disabled={!prefs.ready || saving}
-          onCheckedChange={(sounds) => {
-            setSaving(true);
-            void setFocusSettings({ ...prefs.focus, sounds })
-              .catch(() =>
-                toast.error(
-                  "Couldn't save sounds. Your previous setting was restored.",
-                ),
-              )
-              .finally(() => setSaving(false));
-            if (sounds) unlockSounds();
-          }}
-        />
-      </Field>
-    </section>
+        <SettingsSwitchTarget>
+          <Switch
+            aria-label="Sounds"
+            checked={prefs.focus.sounds}
+            disabled={disabled || saving}
+            onCheckedChange={(sounds) => {
+              save({ ...prefs.focus, sounds }, "sounds");
+              if (sounds) unlockSounds();
+            }}
+          />
+        </SettingsSwitchTarget>
+      </SettingsOptionRow>
+    </>
   );
 }
