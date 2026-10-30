@@ -19,6 +19,7 @@ const KEYS = {
   bible: "editor-feature:bible",
   daily: "editor-feature:daily",
   embeds: "editor-feature:embeds",
+  focusSessions: "editor-feature:focus",
   externalEmbeds: "external-embeds",
   weekStart: "daily:week-start",
   dayStream: "daily:day-stream",
@@ -26,7 +27,7 @@ const KEYS = {
   emptyDays: "daily:empty-days",
   focus: "focus:settings",
 } as const;
-export type EditorFeature = "bible" | "daily" | "embeds";
+export type EditorFeature = "bible" | "daily" | "embeds" | "focusSessions";
 /** A Daily notes option that is a plain on/off switch (ADR 0070). */
 export type DailyToggle = "dayStream" | "weekStrip";
 export const EMPTY_DAYS_MODES = ["show", "fold", "skip"] as const;
@@ -38,6 +39,7 @@ const featureRowSchema = Schema.Struct({
     KEYS.bible,
     KEYS.daily,
     KEYS.embeds,
+    KEYS.focusSessions,
     KEYS.externalEmbeds,
   ]),
   enabled: Schema.Boolean,
@@ -71,6 +73,7 @@ const isPreferenceKey = Schema.is(
       KEYS.bible,
       KEYS.daily,
       KEYS.embeds,
+      KEYS.focusSessions,
       KEYS.externalEmbeds,
       KEYS.weekStart,
       KEYS.dayStream,
@@ -114,6 +117,7 @@ interface FeatureSnapshot {
   bible: boolean;
   daily: boolean;
   embeds: boolean;
+  focusSessions: boolean;
   externalEmbeds: boolean;
   externalEmbedsSaving: boolean;
   weekStart: WeekStart;
@@ -129,6 +133,7 @@ const INITIAL: FeatureSnapshot = {
   bible: true,
   daily: true,
   embeds: true,
+  focusSessions: true,
   externalEmbeds: false,
   externalEmbedsSaving: false,
   weekStart: DEFAULT_WEEK_START,
@@ -155,6 +160,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
   const bibleRow = rows.find((r) => r.key === KEYS.bible);
   const dailyRow = rows.find((r) => r.key === KEYS.daily);
   const embedsRow = rows.find((r) => r.key === KEYS.embeds);
+  const focusSessionsRow = rows.find((r) => r.key === KEYS.focusSessions);
   const externalEmbedsRow = rows.find((r) => r.key === KEYS.externalEmbeds);
   const weekStartRow = rows.find((r) => r.key === KEYS.weekStart);
   const dayStreamRow = rows.find((r) => r.key === KEYS.dayStream);
@@ -175,6 +181,10 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
   const bible = bibleRow?.key === KEYS.bible ? bibleRow.enabled : true;
   const daily = dailyRow?.key === KEYS.daily ? dailyRow.enabled : true;
   const embeds = embedsRow?.key === KEYS.embeds ? embedsRow.enabled : true;
+  const focusSessions =
+    focusSessionsRow?.key === KEYS.focusSessions
+      ? focusSessionsRow.enabled
+      : true;
   // External loading fails closed. A local revoke masks even stale/refetched
   // server truth, and readiness alone never implies consent.
   const externalEmbeds =
@@ -192,6 +202,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     snapshot.bible === bible &&
     snapshot.daily === daily &&
     snapshot.embeds === embeds &&
+    snapshot.focusSessions === focusSessions &&
     snapshot.externalEmbeds === externalEmbeds &&
     snapshot.externalEmbedsSaving === externalEmbedsSaving &&
     snapshot.weekStart === weekStart &&
@@ -208,6 +219,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     bible,
     daily,
     embeds,
+    focusSessions,
     externalEmbeds,
     externalEmbedsSaving,
     weekStart,
@@ -294,18 +306,39 @@ export async function retryEditorFeatures(): Promise<void> {
   rebuild(true, false);
 }
 
+const pendingFeatureSaves = new Set<Promise<void>>();
+
+/** Resolves once every feature switch save in flight has persisted or rolled
+ *  back. A listener reacting to an optimistic switch can wait on this before
+ *  doing something it cannot undo. */
+export async function featureSavesSettled(): Promise<void> {
+  while (pendingFeatureSaves.size > 0)
+    await Promise.allSettled(pendingFeatureSaves);
+}
+
 export async function setEditorFeature(
   feature: EditorFeature,
   enabled: boolean,
 ): Promise<void> {
   await loadEditorFeatures();
   const key = KEYS[feature];
-  const transaction = collection.has(key)
-    ? collection.update(key, (draft) => {
-        if ("enabled" in draft) draft.enabled = enabled;
-      })
-    : collection.insert({ key, enabled });
-  await transaction.isPersisted.promise;
+  // Registered before the optimistic write, whose listeners run synchronously.
+  let settle!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  pendingFeatureSaves.add(pending);
+  try {
+    const transaction = collection.has(key)
+      ? collection.update(key, (draft) => {
+          if ("enabled" in draft) draft.enabled = enabled;
+        })
+      : collection.insert({ key, enabled });
+    await transaction.isPersisted.promise;
+  } finally {
+    pendingFeatureSaves.delete(pending);
+    settle();
+  }
 }
 
 /** Persist one Daily notes on/off option (ADR 0070). Optimistic, like

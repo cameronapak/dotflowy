@@ -714,7 +714,8 @@ test("failed revocation stays locally off and Settings retries revocation, not a
     }
     await route.fallback();
   });
-  await page.goto("/settings");
+  // The anchor opens Embeds' options, as the Cmd+K permission action does.
+  await page.goto("/settings#embeds");
   const permission = page.getByRole("switch", {
     name: "Allow external embeds",
   });

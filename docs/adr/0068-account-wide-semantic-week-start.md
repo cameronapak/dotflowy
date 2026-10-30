@@ -39,7 +39,7 @@ whose account preference model now also carries calendar meaning.
 
 ## Preference and migration
 
-The setting lives inside Daily notes details under Editor features and remains
+The setting lives in Daily notes options under Settings → Plugins and remains
 available while Daily notes is off. Changing it is a server-authoritative
 operation in the per-user Durable Object, where the outline and `account-prefs`
 already share one SQLite database. The preference row and structural migration

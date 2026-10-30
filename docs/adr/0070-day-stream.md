@@ -87,7 +87,7 @@ options.
 
 ## Daily notes options
 
-Daily notes gains three options in Settings, Editor features, shown under its
+Daily notes gains three options in Settings, Plugins, shown under its
 switch and disabled while it is off:
 
 - **Day stream**: on (default) or off. Off restores the single-day page.

@@ -54,10 +54,15 @@ a session never dims the outline.
   open, the tab title also reads "Time is up - …". No system notifications.
 - **Spoilers.** Band and PiP text use the MCP projection (`[spoiler]`), not the
   breadcrumb's revealing one. A floating window can be screen-shared.
-- **Settings.** A "Focus sessions" section holds the Pomodoro lengths, rounds
-  before a long break, and Sounds, stored account-wide like ADR 0064's
-  preferences. There is no Editor features switch: nothing renders until a
-  session starts.
+- **Settings.** Focus sessions is a row under Settings → Plugins with an
+  account-wide switch (`editor-feature:focus`, on by default). Its options hold
+  the Pomodoro lengths, rounds before a long break, and Sounds, stored
+  account-wide like ADR 0064's preferences. Each value saves when its field is
+  left; an invalid entry restores the saved value. Turning the switch off hides
+  the band, marker, and commands, and lets a running session go with no
+  reflection, so a hidden clock never keeps cueing sounds. (Superseded: v1 had
+  no switch because nothing renders until a session starts; the October 30
+  Plugins redesign gave every plugin the same row.)
 - **Mobile** has no PiP window and no actions-bar entry in v1; the band and the
   marker carry the session.
 

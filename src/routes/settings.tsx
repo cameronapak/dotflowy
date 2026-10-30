@@ -1,6 +1,6 @@
 import { Key01Icon, SmartPhone01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
 import { Effect } from "effect";
 import {
   ArrowLeftIcon,
@@ -26,8 +26,18 @@ import { CliSetupDialog } from "../components/cli-setup-dialog";
 import { DeleteAccountDialog } from "../components/delete-account-dialog";
 import { McpConnectDialog } from "../components/mcp-connect-dialog";
 import { openOpmlImport } from "../components/opml-import-opener";
+import {
+  SettingsOptionRow,
+  SettingsSwitchTarget,
+} from "../components/settings-option-row";
 import { useTextSize, type TextSize } from "../components/text-size-provider";
 import { useTheme } from "../components/theme-provider";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "../components/ui/accordion";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import { localDateKey } from "../data/date-links";
@@ -170,86 +180,7 @@ function SettingRow({
   );
 }
 
-/** A radio-style segmented control (theme, text size). */
-/** The Daily notes options (ADR 0070): the Day stream, how it presents Empty
- *  days, and the week strip. Account-wide and optimistic; a failed save rolls
- *  back and says so. */
-function DailyNotesOptions() {
-  const preferences = useEditorFeatures();
-  const [saving, setSaving] = useState(false);
-  const disabled = !preferences.ready || !preferences.daily || saving;
-  const save = (run: () => Promise<void>, label: string) => {
-    setSaving(true);
-    void run()
-      .catch(() =>
-        toast.error(
-          `Couldn't save ${label}. Your previous setting was restored.`,
-        ),
-      )
-      .finally(() => setSaving(false));
-  };
-  const toggle = (option: DailyToggle, label: string) => (enabled: boolean) =>
-    save(() => setDailyToggle(option, enabled), label);
-  return (
-    <div className="mt-4 flex flex-col gap-4 border-t pt-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="font-medium">Day stream</p>
-          <p className="text-muted-foreground">
-            Scroll from one day to the next instead of opening one day at a
-            time.
-          </p>
-        </div>
-        <div className="flex size-11 items-center justify-center">
-          <Switch
-            aria-label="Day stream"
-            checked={preferences.dayStream}
-            disabled={disabled}
-            onCheckedChange={toggle("dayStream", "the day stream")}
-          />
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="font-medium">Empty days</p>
-          <p className="text-muted-foreground">
-            How the day stream shows days with nothing written.
-          </p>
-        </div>
-        <Segmented<EmptyDaysMode>
-          label="Empty days"
-          value={preferences.emptyDays}
-          disabled={disabled || !preferences.dayStream}
-          onChange={(mode) =>
-            save(() => setEmptyDaysMode(mode), "how empty days show")
-          }
-          options={[
-            { value: "show", label: "Show" },
-            { value: "fold", label: "Fold" },
-            { value: "skip", label: "Skip" },
-          ]}
-        />
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="font-medium">Week strip</p>
-          <p className="text-muted-foreground">
-            Show the week's days above a daily note.
-          </p>
-        </div>
-        <div className="flex size-11 items-center justify-center">
-          <Switch
-            aria-label="Week strip"
-            checked={preferences.weekStrip}
-            disabled={disabled}
-            onCheckedChange={toggle("weekStrip", "the week strip")}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
+/** A radio-style segmented control (theme, text size, plugin options). */
 function Segmented<T extends string>({
   value,
   onChange,
@@ -887,10 +818,115 @@ function DataSection() {
   );
 }
 
-function EditorFeaturesSection() {
+/** Daily notes options (ADR 0070). Week start stays available while Daily notes
+ *  is off (ADR 0068); the presentation options are disabled until it is on.
+ *  Account-wide and optimistic; a failed save rolls back and says so. */
+function DailyNotesOptions() {
   const preferences = useEditorFeatures();
-  const [saving, setSaving] = useState<EditorFeature | null>(null);
-  const [details, setDetails] = useState<EditorFeature | null>(null);
+  const [saving, setSaving] = useState(false);
+  const disabled = !preferences.ready || !preferences.daily || saving;
+  const save = (run: () => Promise<void>, label: string) => {
+    setSaving(true);
+    void run()
+      .catch(() =>
+        toast.error(
+          `Couldn't save ${label}. Your previous setting was restored.`,
+        ),
+      )
+      .finally(() => setSaving(false));
+  };
+  const toggle = (option: DailyToggle, label: string) => (enabled: boolean) =>
+    save(() => setDailyToggle(option, enabled), label);
+  return (
+    <>
+      <SettingsOptionRow
+        title="Week starts on"
+        description="Changes your Daily calendar and reorganizes its weeks."
+      >
+        <span aria-live="polite" className="contents">
+          {preferences.weekStartSaving ? (
+            <Loader2Icon
+              className="size-4 animate-spin text-muted-foreground"
+              aria-label="Reorganizing Daily calendar"
+            />
+          ) : null}
+        </span>
+        <Segmented
+          label="Week starts on"
+          value={preferences.weekStart}
+          disabled={!preferences.ready || preferences.weekStartSaving}
+          onChange={(weekStart) => {
+            void setWeekStart(weekStart)
+              .then(() =>
+                toast.success(
+                  `Weeks now start on ${weekStart === "sunday" ? "Sunday" : "Monday"}`,
+                ),
+              )
+              .catch(() =>
+                toast.error(
+                  "Couldn't change when weeks start. Nothing was moved.",
+                ),
+              );
+          }}
+          options={[
+            { value: "sunday", label: "Sunday" },
+            { value: "monday", label: "Monday" },
+          ]}
+        />
+      </SettingsOptionRow>
+      <SettingsOptionRow
+        title="Day stream"
+        description="Scroll from one day to the next instead of opening one day at a time."
+      >
+        <SettingsSwitchTarget>
+          <Switch
+            aria-label="Day stream"
+            checked={preferences.dayStream}
+            disabled={disabled}
+            onCheckedChange={toggle("dayStream", "the day stream")}
+          />
+        </SettingsSwitchTarget>
+      </SettingsOptionRow>
+      <SettingsOptionRow
+        title="Empty days"
+        description="How the day stream shows days with nothing written."
+      >
+        <Segmented<EmptyDaysMode>
+          label="Empty days"
+          value={preferences.emptyDays}
+          disabled={disabled || !preferences.dayStream}
+          onChange={(mode) =>
+            save(() => setEmptyDaysMode(mode), "how empty days show")
+          }
+          options={[
+            { value: "show", label: "Show" },
+            { value: "fold", label: "Fold" },
+            { value: "skip", label: "Skip" },
+          ]}
+        />
+      </SettingsOptionRow>
+      <SettingsOptionRow
+        title="Week strip"
+        description="Show the week's days above a daily note."
+      >
+        <SettingsSwitchTarget>
+          <Switch
+            aria-label="Week strip"
+            checked={preferences.weekStrip}
+            disabled={disabled}
+            onCheckedChange={toggle("weekStrip", "the week strip")}
+          />
+        </SettingsSwitchTarget>
+      </SettingsOptionRow>
+    </>
+  );
+}
+
+/** Embeds' one option: account-wide consent to contact providers (ADR 0064,
+ *  October 8 amendment). It stays switchable while Embeds is off so a
+ *  revocation is always reachable. */
+function ExternalEmbedsOption() {
+  const preferences = useEditorFeatures();
   const [revokeFailed, setRevokeFailed] = useState(false);
   const saveConsent = (enabled: boolean) => {
     setRevokeFailed(false);
@@ -903,201 +939,26 @@ function EditorFeaturesSection() {
       );
     });
   };
-  const features = [
-    {
-      id: "bible",
-      name: "Bible references",
-      description: "Turn Scripture references into interactive passage chips.",
-    },
-    {
-      id: "daily",
-      name: "Daily notes",
-      description: "A place for each day, with Today and calendar navigation.",
-    },
-    {
-      id: "embeds",
-      name: "Embeds",
-      description: "Show supported external resources as embed nodes.",
-    },
-  ] as const;
-
   return (
-    <Section
-      title="Editor features"
-      description="Choose the extras you want in your outline."
-    >
-      <RowGroup>
-        {features.map((feature) => (
-          <div key={feature.id}>
-            <SettingRow
-              title={feature.name}
-              description={
-                <>
-                  {feature.description}
-                  {!preferences[feature.id] && (
-                    <span className="mt-1 block text-xs">
-                      Off.{" "}
-                      {feature.id === "bible"
-                        ? "References stay as plain text."
-                        : feature.id === "daily"
-                          ? "Your existing notes stay in your outline."
-                          : "Embed nodes stay as usable links."}
-                    </span>
-                  )}
-                </>
-              }
-              action={
-                <div className="flex items-center gap-3">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`${feature.name} Details`}
-                    aria-expanded={details === feature.id}
-                    aria-controls={`${feature.id}-details`}
-                    onClick={() =>
-                      setDetails(details === feature.id ? null : feature.id)
-                    }
-                  >
-                    Details
-                  </Button>
-                  <div className="flex size-11 items-center justify-center">
-                    <Switch
-                      aria-label={feature.name}
-                      aria-describedby={`${feature.id}-details`}
-                      checked={preferences[feature.id]}
-                      disabled={!preferences.ready || saving !== null}
-                      onCheckedChange={(enabled) => {
-                        setSaving(feature.id);
-                        void Effect.runPromise(
-                          Effect.tryPromise(() =>
-                            setEditorFeature(feature.id, enabled),
-                          ).pipe(
-                            Effect.catch(() =>
-                              Effect.sync(() =>
-                                toast.error(
-                                  `Couldn't save ${feature.name.toLowerCase()}. Your previous setting was restored.`,
-                                ),
-                              ),
-                            ),
-                            Effect.ensuring(Effect.sync(() => setSaving(null))),
-                          ),
-                        );
-                      }}
-                    />
-                  </div>
-                </div>
-              }
-            />
-            <div
-              id={`${feature.id}-details`}
-              hidden={details !== feature.id}
-              className="border-t bg-muted/30 p-4 text-sm"
-            >
-              <p className="font-medium">
-                {feature.name} is {preferences[feature.id] ? "on" : "off"}.
-              </p>
-              <h3 className="mt-3 font-medium">When off</h3>
-              <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-muted-foreground">
-                {feature.id === "bible" ? (
-                  <>
-                    <li>Scripture references remain as the text you wrote.</li>
-                    <li>
-                      Passage chips and Bible-specific controls stop appearing.
-                    </li>
-                  </>
-                ) : feature.id === "daily" ? (
-                  <>
-                    <li>
-                      Today, calendar navigation, date chips, and daily commands
-                      stop appearing.
-                    </li>
-                    <li>Quick-add saves to the top level instead of Today.</li>
-                    <li>
-                      Existing notes remain accessible. Daily folders stay
-                      protected from deletion.
-                    </li>
-                    <li>Explicit CLI and MCP daily commands still work.</li>
-                  </>
-                ) : (
-                  <>
-                    <li>
-                      Embed nodes, their source URLs, and child notes remain.
-                    </li>
-                    <li>
-                      External previews stop appearing; links stay usable.
-                    </li>
-                  </>
-                )}
-              </ul>
-              <p className="mt-3 text-muted-foreground">
-                Turning this feature off never deletes your notes. Turn it back
-                on to use it with the same content.
-              </p>
-              {feature.id === "daily" ? (
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-                  <div>
-                    <p className="font-medium">Week starts on</p>
-                    <p className="text-muted-foreground">
-                      Changes your Daily calendar and reorganizes its weeks.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2" aria-live="polite">
-                    {preferences.weekStartSaving ? (
-                      <Loader2Icon
-                        className="size-4 animate-spin text-muted-foreground"
-                        aria-label="Reorganizing Daily calendar"
-                      />
-                    ) : null}
-                    <Segmented
-                      label="Week starts on"
-                      value={preferences.weekStart}
-                      disabled={
-                        !preferences.ready || preferences.weekStartSaving
-                      }
-                      onChange={(weekStart) => {
-                        void setWeekStart(weekStart)
-                          .then(() =>
-                            toast.success(
-                              `Weeks now start on ${weekStart === "sunday" ? "Sunday" : "Monday"}`,
-                            ),
-                          )
-                          .catch(() =>
-                            toast.error(
-                              "Couldn't change when weeks start. Nothing was moved.",
-                            ),
-                          );
-                      }}
-                      options={[
-                        { value: "sunday", label: "Sunday" },
-                        { value: "monday", label: "Monday" },
-                      ]}
-                    />
-                  </div>
-                </div>
-              ) : null}
-              {feature.id === "daily" ? <DailyNotesOptions /> : null}
-            </div>
-          </div>
-        ))}
-        <SettingRow
-          title="Allow external embeds"
-          description="Automatically load supported providers on all devices signed in to your account. This sends requests to those providers, which may use cookies or tracking."
-          action={
-            <div className="flex size-11 items-center justify-center">
-              <Switch
-                aria-label="Allow external embeds"
-                checked={preferences.externalEmbeds}
-                disabled={
-                  !preferences.ready || preferences.externalEmbedsSaving
-                }
-                onCheckedChange={saveConsent}
-              />
-            </div>
-          }
-        />
-      </RowGroup>
+    <>
+      <SettingsOptionRow
+        title="Allow external embeds"
+        description="Automatically load supported providers on all devices signed in to your account. This sends requests to those providers, which may use cookies or tracking."
+      >
+        <SettingsSwitchTarget>
+          <Switch
+            aria-label="Allow external embeds"
+            checked={preferences.externalEmbeds}
+            disabled={!preferences.ready || preferences.externalEmbedsSaving}
+            onCheckedChange={saveConsent}
+          />
+        </SettingsSwitchTarget>
+      </SettingsOptionRow>
       {revokeFailed && (
-        <div role="alert" className="text-sm text-muted-foreground">
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-2 py-2 pr-4 pl-8 text-sm text-muted-foreground"
+        >
           Account permission could not be revoked. Other devices may still load
           embeds.
           <Button
@@ -1110,15 +971,164 @@ function EditorFeaturesSection() {
           </Button>
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
-        Turning a feature off never deletes your notes. These settings follow
-        your account across devices.
-      </p>
+    </>
+  );
+}
+
+const PLUGINS: {
+  id: EditorFeature;
+  /** The `/settings#…` anchor that opens this plugin's options. */
+  anchor: string;
+  name: string;
+  description: string;
+  off: string;
+  Options?: () => ReactNode;
+}[] = [
+  {
+    id: "bible",
+    anchor: "bible",
+    name: "Bible references",
+    description: "Turn Scripture references into interactive passage chips.",
+    off: "References stay as plain text.",
+  },
+  {
+    id: "daily",
+    anchor: "daily",
+    name: "Daily notes",
+    description: "A place for each day, with Today and calendar navigation.",
+    off: "Your existing notes stay in your outline.",
+    Options: DailyNotesOptions,
+  },
+  {
+    id: "embeds",
+    anchor: "embeds",
+    name: "Embeds",
+    description: "Show supported external resources as embed nodes.",
+    off: "Embed nodes stay as usable links.",
+    Options: ExternalEmbedsOption,
+  },
+  {
+    id: "focusSessions",
+    anchor: "focus",
+    name: "Focus sessions",
+    description: "A timer for one node at a time, with Pomodoro breaks.",
+    off: "The timer and its commands stop appearing.",
+    Options: FocusSettings,
+  },
+];
+
+/** The plugin opened by `/settings#<anchor>`, if any. */
+function anchoredPlugin(anchor: string): string[] {
+  return PLUGINS.some((p) => p.Options && p.anchor === anchor) ? [anchor] : [];
+}
+
+/** Every optional plugin as one row: name, description, and an account-wide
+ *  switch. A plugin with options opens them in place; only one opens at a
+ *  time, and all start closed unless the URL names one. */
+function PluginsSection() {
+  const preferences = useEditorFeatures();
+  const [saving, setSaving] = useState<EditorFeature | null>(null);
+  // Follow the router's hash, so a link to `#embeds` opens Embeds even when
+  // Settings is already showing.
+  const hash = useLocation({ select: (location) => location.hash });
+  const [open, setOpen] = useState<string[]>(() => anchoredPlugin(hash));
+  const [openedHash, setOpenedHash] = useState(hash);
+  if (hash !== openedHash) {
+    setOpenedHash(hash);
+    setOpen(anchoredPlugin(hash));
+  }
+
+  const toggle = (feature: EditorFeature, name: string, enabled: boolean) => {
+    setSaving(feature);
+    void Effect.runPromise(
+      Effect.tryPromise(() => setEditorFeature(feature, enabled)).pipe(
+        Effect.catch(() =>
+          Effect.sync(() =>
+            toast.error(
+              `Couldn't save ${name.toLowerCase()}. Your previous setting was restored.`,
+            ),
+          ),
+        ),
+        Effect.ensuring(Effect.sync(() => setSaving(null))),
+      ),
+    );
+  };
+
+  return (
+    <Section
+      title="Plugins"
+      description="Turning one off never deletes your notes. These settings follow your account across devices."
+    >
+      <Accordion
+        value={open}
+        onValueChange={(value) => setOpen(value.map(String))}
+        className="overflow-hidden rounded-xl ring-1 ring-foreground/10"
+      >
+        {PLUGINS.map(({ id, anchor, name, description, off, Options }) => {
+          const enabled = preferences[id];
+          const summary = (
+            <span className="flex min-w-0 flex-col">
+              <span className="text-sm font-medium text-foreground">
+                {name}
+              </span>
+              <span className="mt-0.5 text-sm font-normal text-muted-foreground">
+                {description}
+                {!enabled && (
+                  <span className="mt-1 block text-xs">Off. {off}</span>
+                )}
+              </span>
+            </span>
+          );
+          const header = (
+            <div className="flex items-center gap-1 bg-card pr-4 [&>h3]:min-w-0 [&>h3]:flex-1">
+              {Options ? (
+                <AccordionTrigger
+                  aria-label={`${name} options`}
+                  className="items-center gap-3 rounded-none border-0 py-3 pl-4 hover:no-underline focus-visible:ring-inset"
+                >
+                  {summary}
+                </AccordionTrigger>
+              ) : (
+                <div className="flex min-w-0 flex-1 items-center justify-between gap-3 py-3 pl-4">
+                  {summary}
+                  {/* Keeps switches aligned with rows that have a chevron. */}
+                  <span aria-hidden="true" className="size-4 shrink-0" />
+                </div>
+              )}
+              <SettingsSwitchTarget>
+                <Switch
+                  aria-label={name}
+                  checked={enabled}
+                  disabled={!preferences.ready || saving !== null}
+                  onCheckedChange={(next) => toggle(id, name, next)}
+                />
+              </SettingsSwitchTarget>
+            </div>
+          );
+          return (
+            <AccordionItem
+              key={id}
+              value={anchor}
+              id={anchor}
+              className="scroll-mt-20"
+            >
+              {header}
+              {Options && (
+                <AccordionContent className="pb-0">
+                  <div className="divide-y divide-border border-t bg-muted/30">
+                    <Options />
+                  </div>
+                </AccordionContent>
+              )}
+            </AccordionItem>
+          );
+        })}
+      </Accordion>
       {!preferences.ready && (
         <p role="status" className="text-sm text-muted-foreground">
           {preferences.error ? (
             <>
-              Couldn't load your feature settings.{" "}
+              Couldn't load your plugin settings.{" "}
               <Button
                 variant="ghost"
                 size="sm"
@@ -1127,7 +1137,7 @@ function EditorFeaturesSection() {
                     Effect.tryPromise(() => retryEditorFeatures()).pipe(
                       Effect.catch(() =>
                         Effect.sync(() =>
-                          toast.error("Couldn't load your feature settings."),
+                          toast.error("Couldn't load your plugin settings."),
                         ),
                       ),
                     ),
@@ -1138,7 +1148,7 @@ function EditorFeaturesSection() {
               </Button>
             </>
           ) : (
-            "Loading your feature settings…"
+            "Loading your plugin settings…"
           )}
         </p>
       )}
@@ -1218,8 +1228,7 @@ function SettingsPage() {
 
       <div className="mx-auto flex max-w-2xl flex-col gap-10 px-4 py-8 sm:px-6">
         <ConnectionsSection plan={plan} />
-        <EditorFeaturesSection />
-        <FocusSettings />
+        <PluginsSection />
         <AppearanceSection />
         <ExperimentalSection />
         <details className="border-t pt-4">

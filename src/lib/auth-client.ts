@@ -22,6 +22,7 @@ export const {
   signIn,
   signUp,
   useSession,
+  getSession,
   requestPasswordReset,
   resetPassword,
   subscription,

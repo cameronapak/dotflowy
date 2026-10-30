@@ -527,7 +527,7 @@ export default definePlugin({
         "consent",
         "privacy",
       ],
-      run: openSettings,
+      run: () => openSettings("embeds"),
     },
   ],
   commands: [
