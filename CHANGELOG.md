@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.30.0
+
+### Minor Changes
+
+- 951cad7: Settings now groups Bible references, Daily notes, Embeds, and Focus sessions under one Plugins section. Each plugin's options open in place, one at a time, and every option saves on its own. Focus sessions can now be turned off.
+
 ## 1.29.13
 
 ### Patch Changes
