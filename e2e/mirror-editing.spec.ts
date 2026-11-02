@@ -109,6 +109,7 @@ for (const mirrored of [false, true]) {
       })
       .toEqual(mirrored ? ["A", "B", "child", "deep"] : ["B"]);
     await page.reload();
+    await text(page, "B").waitFor({ state: "visible" });
     await expect(text(page, "B")).toBeVisible();
     await expect(text(page, target)).toHaveCount(0);
   });
