@@ -40,6 +40,25 @@ the visual viewport positions the bar:
   viewport changes without a second CSS animation; pinch zoom updates are ignored. When the visible band
   reaches the layout viewport's bottom, the frame adds `env(safe-area-inset-bottom)`.
 
+**Keep wrapped typing visible.** While mounted for editing, `MobileActionsBar` reveals
+the collapsed outline caret after focus, input, composition end, and viewport resize,
+using a coalesced animation frame after decoration. This covers both list rows and the
+zoomed title, including text taller than the visible band. Scroll the window by the
+minimum distance needed to keep the caret between the header and toolbar, with up to
+8px of breathing room, reduced when a landscape keyboard leaves barely one line.
+Start after the toolbar mounts and observe its frame size to reconcile late viewport
+commits. Measure bounds from the rendered frame, not raw `visualViewport.offsetTop`:
+after rotation, Safari can report that offset in a different coordinate space from
+client rects. Reserve trailing body space for the keyboard and toolbar on coarse
+pointers, including wide landscape layouts, and release unanchored sticky chrome
+while editing there too. Follow document and focused-input size changes after an edit
+so late virtual-row measurements cannot leave the caret obscured. Pointer, touch,
+wheel, or keyboard gestures release that hold; ordinary viewport panning and selection
+changes do not request reveals. The bar's editing lifecycle owns the visibility
+signals, including the iframe fallback. Skip pinch zoom and leave Quick-add's separate
+scrolling unchanged. A Day stream title anchor retains ownership until editing
+releases it; focusing its offscreen last child alone must not reveal that child.
+
 **Why pure `visualViewport`, not `env(keyboard-inset-*)`.** The `env(keyboard-inset-*)` CSS environment
 variables are Chromium-only; iOS Safari (the primary target) needs the JS `visualViewport` path regardless.
 One system that covers both beats two half-systems, so the bar tracks the keyboard entirely in JS.
