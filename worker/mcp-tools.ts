@@ -401,6 +401,8 @@ const claimDailyScaffold = (
     // caller reuses it (finding 6): nothing between here and the caller's plan
     // mutates nodes (only kv claims), so a second `loadIndex` would rebuild the
     // identical tree.
+    // Keep this read after claims: another caller can materialize the winning
+    // day and append content while a claim response is still pending.
     const index = yield* loadIndex(store);
     if (index.byId.has(dayId))
       return { containerId, dayId, keyByNodeId, weekStart, index };
@@ -1154,6 +1156,8 @@ export const tools: ReadonlyArray<ToolDef> = [
           );
         }
         const index = yield* loadIndex(store);
+        // Migration can adopt an existing node while its snapshot is pending.
+        // Read protection mappings afterward so the new claim is visible.
         const scaffold = yield* loadDailyReverseMap(store);
         yield* guardScaffoldUpdate(index, scaffold, input.nodeId, changes);
         const timestamp = yield* Clock.currentTimeMillis;
@@ -1175,6 +1179,8 @@ export const tools: ReadonlyArray<ToolDef> = [
     handle: (input: typeof DeleteNodeInput.Type, store) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
+        // Migration can adopt an existing node while its snapshot is pending.
+        // Read protection mappings afterward so the new claim is visible.
         const scaffold = yield* loadDailyReverseMap(store);
         const timestamp = yield* Clock.currentTimeMillis;
         const plan = yield* unwrap(

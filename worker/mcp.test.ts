@@ -991,6 +991,114 @@ test("timeZone steers the omitted-date default and is validated even when date w
   expect(invalid.kv.size).toBe(0);
 });
 
+test("daily capture sees a day materialized while its claim response is pending", async () => {
+  const fake = makeStore();
+  const claimStarted = Promise.withResolvers<void>();
+  const releaseClaim = Promise.withResolvers<void>();
+  const store: OutlineStore = {
+    ...fake.store,
+    getOrCreateKv: async (collection, key, value) => {
+      const claimed = await fake.store.getOrCreateKv(collection, key, value);
+      if (key === "2026-07-03") {
+        claimStarted.resolve();
+        await releaseClaim.promise;
+      }
+      return claimed;
+    },
+  };
+  const capture = callTool(store, "add_to_today", {
+    date: "2026-07-03",
+    text: "second capture",
+  });
+  await claimStarted.promise;
+  // Another client materializes the same winning IDs before this response
+  // arrives. Preserve its title and task state, as well as its first entry.
+  const containerId = fake.kv.get("container")!.nodeId;
+  const dayId = fake.kv.get("2026-07-03")!.nodeId;
+  const day = createNode({
+    id: dayId,
+    parentId: containerId,
+    text: "My day",
+    isTask: true,
+  });
+  fake.nodes.set(containerId, createNode({ id: containerId, text: "Daily" }));
+  fake.nodes.set(dayId, day);
+  fake.nodes.set(
+    "first",
+    createNode({
+      id: "first",
+      parentId: dayId,
+      text: "first capture",
+    }),
+  );
+  releaseClaim.resolve();
+  const result = await capture;
+  expect(result.result?.isError).toBeUndefined();
+  expect(fake.nodes.get(dayId)).toEqual(day);
+  const second = [...fake.nodes.values()].find(
+    (node) => node.text === "second capture",
+  );
+  expect(second).toMatchObject({ parentId: dayId, prevSiblingId: "first" });
+  expect(
+    [...fake.nodes.values()].filter(
+      (node) => node.parentId === dayId && node.prevSiblingId === null,
+    ),
+  ).toHaveLength(1);
+});
+
+test.each([
+  ["update_node", { nodeId: "year", isTask: true }],
+  ["delete_node", { nodeId: "year" }],
+] satisfies Array<[string, RpcParams]>)(
+  "%s protects a scaffold adopted while its node response is pending",
+  async (name, args) => {
+    const seed = [
+      createNode({ id: "container", text: "Daily" }),
+      createNode({ id: "year", parentId: "container", text: "2026" }),
+      createNode({
+        id: "day",
+        parentId: "container",
+        prevSiblingId: "year",
+        text: "Friday, July 3, 2026",
+      }),
+    ];
+    const fake = makeStore(seed, [
+      { key: "container", nodeId: "container" },
+      { key: "2026-07-03", nodeId: "day" },
+    ]);
+    const nodesStarted = Promise.withResolvers<void>();
+    const releaseNodes = Promise.withResolvers<void>();
+    const operation = callTool(
+      {
+        ...fake.store,
+        getNodes: async () => {
+          const snapshot = await fake.store.getNodes();
+          nodesStarted.resolve();
+          await releaseNodes.promise;
+          return snapshot;
+        },
+      },
+      name,
+      args,
+    );
+    await nodesStarted.promise;
+    // Let any concurrent map read finish while the node response is held.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Browser migration adopts a same-label existing child for this year.
+    // Its claim protects the node before the later structural migration.
+    await fake.store.getOrCreateKv("daily-index", "2026", {
+      key: "2026",
+      nodeId: "year",
+    });
+    releaseNodes.resolve();
+    const result = await operation;
+    expect([...fake.nodes.values()]).toEqual(seed);
+    expect(result.result?.isError).toBe(true);
+    expect(toolText(result)).toContain("protected");
+    expect(fake.batches).toHaveLength(0);
+  },
+);
+
 test("the daily container and calendar scaffold are protected; a day stays content (#271)", async () => {
   const fake = makeStore(fixture());
   await callTool(fake.store, "add_to_today", {
