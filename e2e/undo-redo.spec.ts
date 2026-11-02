@@ -576,6 +576,7 @@ test("unrelated editable owners keep separate typing runs and caret locations", 
     .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
     .toBe(8);
   await page.reload();
+  await a.waitFor({ state: "visible" });
   await expect(a).toHaveText("Alphax");
   await expect(b).toHaveText("Secondyz");
 });
@@ -655,6 +656,7 @@ test("source and mirror render paths separate typing and restore their own selec
     )
     .toEqual([2, 2]);
   await page.reload();
+  await source.waitFor({ state: "visible" });
   await expect(source).toHaveText("SQxyz");
   await expect(mirror).toHaveText("SQxyz");
 });
@@ -787,6 +789,7 @@ test("one quick-add typing run includes the first character and can be redone", 
   await page.keyboard.press("Enter");
   await expect(draft).toHaveCount(0);
   await page.reload();
+  await page.locator('li[data-node-id="alpha"]').waitFor({ state: "visible" });
   await expect(
     page.locator(".outline-row .node-text").filter({ hasText: /^a capture$/ }),
   ).toHaveCount(1);
