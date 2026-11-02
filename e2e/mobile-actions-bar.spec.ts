@@ -64,6 +64,168 @@ test.describe("mobile actions bar (coarse pointer)", () => {
 
   test.beforeEach(async ({ page }) => mockKeyboardViewport(page));
 
+  test("wrapped typing keeps the caret above the keyboard and toolbar", async ({
+    page,
+  }) => {
+    await seedOutline(
+      page,
+      Array.from({ length: 30 }, (_, i) => ({
+        id: `row-${i}`,
+        parentId: null,
+        prevSiblingId: i ? `row-${i - 1}` : null,
+        text: `Writing line ${i}`,
+      })),
+    );
+    await page.goto("/");
+    const input = text(page, "row-10");
+    await placeCaret(input, "end");
+    await expect(bar(page)).toBeVisible();
+    // Start just above the toolbar. The layout viewport stays tall: native
+    // scrolling alone does not know that these next lines are obscured.
+    await input.evaluate((el) => {
+      const bottom =
+        document.querySelector("[data-mobile-bar]")!.getBoundingClientRect()
+          .top - 12;
+      window.scrollBy(0, el.getBoundingClientRect().bottom - bottom);
+    });
+    const before = await page.evaluate(() => window.scrollY);
+    for (let i = 0; i < 4; i++) {
+      await page.keyboard.insertText(
+        " More words that wrap onto the next line.",
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const rect = getSelection()!.getRangeAt(0).getBoundingClientRect();
+            const toolbar = document
+              .querySelector("[data-mobile-bar]")!
+              .getBoundingClientRect();
+            return rect.bottom - toolbar.top;
+          }),
+        )
+        .toBeLessThan(0);
+    }
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
+    await expect(input).toBeFocused();
+    await expect(input).toContainText("Writing line 10 More words");
+
+    // A zoomed title shares the same editing contract, even when the node is
+    // taller than the keyboard-visible band. Revealing its whole box cannot
+    // keep the last line visible.
+    await page.goto("/row-10");
+    const title = page.locator('h2 .node-text[contenteditable="true"]');
+    await placeCaret(title, "end");
+    await page.keyboard.insertText(
+      " A longer thought that keeps wrapping.".repeat(30),
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const caret = getSelection()!.getRangeAt(0).getBoundingClientRect();
+          const toolbar = document
+            .querySelector("[data-mobile-bar]")!
+            .getBoundingClientRect();
+          return caret.bottom < toolbar.top && caret.top > 0;
+        }),
+      )
+      .toBe(true);
+    await expect(title).toBeFocused();
+
+    // The last row must remain reachable after its virtual height grows, even
+    // in landscape where the keyboard takes more than half the layout height.
+    await page.goto("/");
+    await page.locator(".outline-list").waitFor();
+    for (const viewport of [
+      { width: 1024, height: 768, visible: 368 },
+      { width: 844, height: 390, visible: 180 },
+      { width: 874, height: 338, visible: 90 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.evaluate((height) => {
+        Object.defineProperty(visualViewport!, "height", {
+          configurable: true,
+          value: height,
+        });
+        visualViewport!.dispatchEvent(new Event("resize"));
+        window.scrollTo(0, document.documentElement.scrollHeight);
+      }, viewport.visible);
+      const last = text(page, "row-29");
+      await placeCaret(last, "end");
+      await expect(bar(page)).toBeVisible();
+      await page.keyboard.insertText(
+        " More typing wraps at the bottom of this outline.".repeat(8),
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const caret = getSelection()!.getRangeAt(0).getBoundingClientRect();
+            const toolbar = document
+              .querySelector("[data-mobile-bar]")
+              ?.getBoundingClientRect();
+            const header = document
+              .querySelector(".outline-chrome")!
+              .getBoundingClientRect();
+            return (
+              !!toolbar &&
+              caret.bottom < toolbar.top &&
+              caret.top > Math.max(0, header.bottom)
+            );
+          }),
+        )
+        .toBe(true);
+      await expect(last).toBeFocused();
+    }
+  });
+
+  test("opening the keyboard reveals the caret after the toolbar mounts", async ({
+    page,
+  }) => {
+    await seedOutline(
+      page,
+      Array.from({ length: 40 }, (_, i) => ({
+        id: `row-${i}`,
+        parentId: null,
+        prevSiblingId: i ? `row-${i - 1}` : null,
+        text: `Writing line ${i}`,
+      })),
+    );
+    await page.goto("/");
+    await page.evaluate(() => {
+      Object.defineProperty(visualViewport!, "height", {
+        configurable: true,
+        value: innerHeight,
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    const input = text(page, "row-20");
+    await placeCaret(input, 5);
+    await expect(bar(page)).toHaveCount(0);
+    await input.evaluate(() => {
+      window.scrollBy(
+        0,
+        getSelection()!.getRangeAt(0).getBoundingClientRect().bottom - 525,
+      );
+      Object.defineProperty(visualViewport!, "height", {
+        configurable: true,
+        value: 537,
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    await expect(bar(page)).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const caret = getSelection()!.getRangeAt(0).getBoundingClientRect();
+          const toolbar = document
+            .querySelector("[data-mobile-bar]")!
+            .getBoundingClientRect();
+          return caret.bottom < toolbar.top && caret.top > 0;
+        }),
+      )
+      .toBe(true);
+    await expect(input).toBeFocused();
+  });
+
   test("keyboard dismissal hides actions even when the input retains DOM focus", async ({
     page,
   }) => {
@@ -293,6 +455,19 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await input.tap();
     await expect(input).toBeFocused();
     await expect(toolbar).toBeVisible();
+    await placeCaret(input, "end");
+    await page.keyboard.insertText(" A long embedded thought.".repeat(40));
+    await expect
+      .poll(() =>
+        input.evaluate(() => {
+          const caret = getSelection()!.getRangeAt(0).getBoundingClientRect();
+          const toolbar = document
+            .querySelector("[data-mobile-bar]")!
+            .getBoundingClientRect();
+          return caret.bottom < toolbar.top && caret.top > 0;
+        }),
+      )
+      .toBe(true);
     // SAFETY: .node-text selects the outline's HTML contenteditable span.
     await input.evaluate((el) => (el as HTMLElement).blur());
     await expect(toolbar).toHaveCount(0);

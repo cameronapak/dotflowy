@@ -6,12 +6,20 @@ import {
   SquareSlash,
   Undo2,
 } from "lucide-react";
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
+import { caretPosition } from "./caret-menu-utils";
 import { useHistoryState } from "./history-restore";
 import {
   FORMAT_BUTTONS,
@@ -270,6 +278,8 @@ export function MobileActionsBar({
   const coarse = useCoarsePointer();
   const editing = useOutlineEditing(coarse, findFocusedId);
   const { height, offsetTop } = useKeyboardViewport();
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const reconcileCaret = useRef<(() => void) | null>(null);
   const history = useHistoryState();
   // Format mode (ADR 0069): a text selection inside one bullet swaps the node
   // actions for the formatting set. Never both — every node action targets the
@@ -295,6 +305,133 @@ export function MobileActionsBar({
     };
   }, []);
 
+  // Run only once the toolbar exists: keyboard opening can otherwise reveal
+  // against an empty frame and leave the caret underneath the newly mounted bar.
+  useEffect(() => {
+    const bar = barRef.current;
+    const frame = bar?.parentElement;
+    if (!editing || !bar || !frame) return;
+    const viewport = window.top === window ? window.visualViewport : null;
+    let raf = 0;
+    let following = false;
+    let observed: HTMLElement | null = null;
+    const reveal = () => {
+      raf = 0;
+      if ((viewport?.scale ?? 1) > 1) return;
+      // Today can focus an offscreen last child while deliberately showing the
+      // day's title. The stream hands ownership to the caret on the first edit.
+      if (document.querySelector(".outline-chrome[data-title-anchored]"))
+        return;
+      const el = document.activeElement;
+      const selection = window.getSelection();
+      if (
+        !(el instanceof HTMLElement && el.isContentEditable) ||
+        findFocusedId() === null ||
+        !selection?.isCollapsed ||
+        !selection.rangeCount ||
+        !el.contains(selection.anchorNode)
+      ) {
+        following = false;
+        return;
+      }
+      if (el !== observed) {
+        if (observed) observer.unobserve(observed);
+        observed = el;
+        observer.observe(el);
+      }
+      const frameRect = frame.getBoundingClientRect();
+      // Scrolling can pan Safari's visual viewport before the fixed frame's
+      // React commit. Wait for that commit rather than chase stale geometry.
+      if (
+        viewport &&
+        (Math.abs(parseFloat(frame.style.top) - viewport.offsetTop) > 1 ||
+          Math.abs(frameRect.height - viewport.height) > 1)
+      )
+        return;
+      // Safari can report offsetTop in layout coordinates while client rects
+      // are relative to the visible band. Keep both bounds in rendered coords.
+      let bottom = Math.min(frameRect.bottom, bar.getBoundingClientRect().top);
+      let top = Math.max(
+        frameRect.top,
+        document.querySelector(".outline-chrome")?.getBoundingClientRect()
+          .bottom ?? 0,
+      );
+      const { y } = caretPosition(el);
+      const caretHeight =
+        selection.getRangeAt(0).getBoundingClientRect().height ||
+        parseFloat(getComputedStyle(el).lineHeight) ||
+        24;
+      // A landscape Safari keyboard can leave barely one line above the bar.
+      // Reduce breathing room before giving up on revealing that line.
+      const gap = Math.min(8, Math.max(0, (bottom - top - caretHeight) / 2));
+      top += gap;
+      bottom -= gap;
+      // The last row needs real scroll range, not just a scroll request. Keep
+      // the reservation for this editing session so Safari cannot clamp it away.
+      document.body.style.setProperty(
+        "--outline-keyboard-space",
+        `${Math.max(0, window.innerHeight - bottom)}px`,
+      );
+      if (bottom - top < caretHeight) return;
+      const delta =
+        y > bottom
+          ? y - bottom
+          : y - caretHeight < top
+            ? y - caretHeight - top
+            : 0;
+      if (Math.abs(delta) >= 1)
+        window.scrollBy({ top: delta, behavior: "instant" });
+    };
+    const schedule = () => {
+      following = true;
+      if (!raf) raf = requestAnimationFrame(reveal);
+    };
+    const cancel = () => {
+      following = false;
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+    };
+    // Follow late decoration and virtual-list measurements after an edit, not
+    // just the first scroll. A reading/selection gesture releases that hold.
+    const observer = new ResizeObserver((entries) => {
+      if (following || entries.some((entry) => entry.target === frame))
+        schedule();
+    });
+    reconcileCaret.current = () => {
+      if (following) schedule();
+    };
+    observer.observe(frame);
+    observer.observe(document.body);
+    schedule();
+    document.addEventListener("input", schedule);
+    document.addEventListener("compositionend", schedule);
+    document.addEventListener("focusin", schedule);
+    document.addEventListener("pointerdown", cancel);
+    document.addEventListener("keydown", cancel);
+    document.addEventListener("touchstart", cancel, { passive: true });
+    document.addEventListener("wheel", cancel, { passive: true });
+    window.addEventListener("resize", schedule);
+    viewport?.addEventListener("resize", schedule);
+    return () => {
+      cancel();
+      reconcileCaret.current = null;
+      observer.disconnect();
+      document.body.style.removeProperty("--outline-keyboard-space");
+      document.removeEventListener("input", schedule);
+      document.removeEventListener("compositionend", schedule);
+      document.removeEventListener("focusin", schedule);
+      document.removeEventListener("pointerdown", cancel);
+      document.removeEventListener("keydown", cancel);
+      document.removeEventListener("touchstart", cancel);
+      document.removeEventListener("wheel", cancel);
+      window.removeEventListener("resize", schedule);
+      viewport?.removeEventListener("resize", schedule);
+    };
+  }, [editing, findFocusedId]);
+  useLayoutEffect(() => {
+    reconcileCaret.current?.();
+  }, [height, offsetTop]);
+
   // Presence gate: a mouse user never mounts the bar. Visibility gate: no bar
   // without a focused bullet, so every action has a valid target by construction.
   if (!coarse || !editing) return null;
@@ -318,6 +455,7 @@ export function MobileActionsBar({
       }}
     >
       <div
+        ref={barRef}
         role="toolbar"
         aria-label={formatActive ? "Format selection" : "Editing actions"}
         data-mobile-bar

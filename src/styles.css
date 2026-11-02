@@ -149,23 +149,27 @@
   top: env(safe-area-inset-top);
 }
 
-/* Quick-add's draft stays above suggestions, including while the keyboard pans. */
-@media (width < 768px) {
+@media (width < 768px), (pointer: coarse) {
   /* A short outline may fill only the layout viewport, leaving no scroll range
-     to lift its caret above suggestions. Keep this space for the editing session,
-     not just while a menu exists: removing it mid-edit clamps Safari's scroll. */
+     to lift its caret above suggestions or the keyboard toolbar. Landscape needs
+     the keyboard reservation even when the layout is wider than 768px. Keep it
+     for the editing session: removing it mid-edit clamps Safari's scroll. */
   body:has(.node-text:focus) {
-    padding-bottom: 50vh;
+    padding-bottom: max(50vh, var(--outline-keyboard-space, 0px));
   }
 
   /* Keep chrome's positioning stable as a typed trigger opens/closes a menu.
      A day jump can focus an offscreen entry while still showing its title and
-     navigation. Editing releases that title anchor before opening a menu. */
+     navigation. Editing releases that title anchor before opening a menu.
+     Landscape touch keyboards also need the header's space for the caret. */
   body:has(.node-text:focus) .outline-chrome:not([data-title-anchored]) {
     position: relative;
     top: 0;
   }
+}
 
+/* Quick-add's draft stays above suggestions, including while the keyboard pans. */
+@media (width < 768px) {
   .quick-add-popup:has([data-typing-menu-open]) {
     top: calc(var(--capture-viewport-top) + 1rem);
     bottom: auto;
