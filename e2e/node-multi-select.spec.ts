@@ -89,7 +89,7 @@ test("filtered selection skips hidden siblings, reverses direction, and deletes 
   await expect
     .poll(() => orderedTexts(page))
     .toEqual(["alpha #go", "charlie #go", "delta #go"]);
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "a" });
   await expect
     .poll(() => orderedTexts(page))
     .toEqual(["alpha #go", "hidden bravo", "charlie #go", "delta #go"]);
