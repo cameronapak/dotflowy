@@ -1166,16 +1166,19 @@ function handleApiRequest(
       // stamped with it, so the editor can mark agent edits apart from the user's.
       // SAFETY: optional read of Better Auth's MCP session token; a missing clientId falls to null.
       const clientId = (token as { clientId?: string }).clientId ?? null;
-      const origin = yield* Effect.promise(() =>
-        resolveMcpOrigin(env, clientId),
-      );
       // MCP (agent access) is a paid capability (#152/#170). Resolve the plan
       // from the token's `userId` — the Better Auth id the subscription table is
       // keyed on (never the resolved DO id, which collapses the owner to
       // 'default'). A free token gets a clean in-protocol error on tool calls
       // (handleMcp), not a 500. An operator comps themselves with a manual
       // subscription row (getPlan treats it as paid).
-      const mcpPlan = yield* Effect.promise(() => getPlan(token.userId, env));
+      const [origin, mcpPlan] = yield* Effect.all(
+        [
+          Effect.promise(() => resolveMcpOrigin(env, clientId)),
+          Effect.promise(() => getPlan(token.userId, env)),
+        ],
+        { concurrency: "unbounded" },
+      );
       const classicStub = env.USER_OUTLINE.get(
         env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
       );

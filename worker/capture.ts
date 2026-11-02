@@ -166,15 +166,20 @@ export const handleCaptureRequest = Effect.fn("Capture.request")(
             ),
           );
         const attemptId = input.attemptId.toLowerCase();
-        const fingerprint = yield* Effect.promise(() =>
-          captureDigest(
-            JSON.stringify([input.date, input.text, input.title ?? null]),
-          ),
+        const [fingerprint, plan] = yield* Effect.all(
+          [
+            Effect.promise(() =>
+              captureDigest(
+                JSON.stringify([input.date, input.text, input.title ?? null]),
+              ),
+            ),
+            Effect.promise(() => getPlan(key.userId, env)),
+          ],
+          { concurrency: "unbounded" },
         );
         const stub = env.USER_OUTLINE.get(
           env.USER_OUTLINE.idFromName(resolveUserId(key.userId, env)),
         );
-        const plan = yield* Effect.promise(() => getPlan(key.userId, env));
         const result = yield* Effect.promise<CaptureResult>(() =>
           stub.captureDaily(
             {

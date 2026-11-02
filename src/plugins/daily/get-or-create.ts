@@ -496,11 +496,9 @@ export async function getOrCreateDayResult(
     // With nothing in flight, the genuinely-durable fast path runs untouched.
     const joined = inFlightDays.get(key);
     if (joined) return joined;
-    // Freshest cross-device mappings before placement OR the migration plan
-    // (finding 4): a cold load hasn't fetched the index yet, and remote-created
-    // days' MAPPINGS aren't broadcast -- either leaves sorted insertion / the
-    // migration working against a stale reverse map.
-    await refreshDailyIndex();
+    // Canonicalization uses the server's index, not this replica. Refresh once
+    // afterward so placement and legacy migration see its updated mappings
+    // along with days created on other devices.
     await ensureWeekStartCanonical();
     await refreshDailyIndex();
     // Container + this day: independent per-key atomic claims, run concurrently
@@ -612,7 +610,6 @@ export async function getOrCreateScaffold(
   const run = async (): Promise<GetOrCreateResult> => {
     const joined = inFlightScaffolds.get(key);
     if (joined) return joined;
-    await refreshDailyIndex();
     await ensureWeekStartCanonical();
     await refreshDailyIndex();
 

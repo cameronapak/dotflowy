@@ -113,7 +113,20 @@ async function openSwitcherAndType(page: Page, text: string) {
 test("Today creates the Daily container + today's note and zooms in", async ({
   page,
 }) => {
-  await load(page);
+  await Promise.all([
+    page.waitForResponse((response) =>
+      response.url().endsWith("/api/kv?collection=daily-index"),
+    ),
+    load(page),
+  ]);
+  let indexReads = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "GET" &&
+      request.url().endsWith("/api/kv?collection=daily-index")
+    )
+      indexReads++;
+  });
 
   await expect(todayButton(page)).toBeVisible();
   await todayButton(page).click();
@@ -123,6 +136,8 @@ test("Today creates the Daily container + today's note and zooms in", async ({
   await expect(page).not.toHaveURL(/\/$/);
   const year = String(new Date().getFullYear());
   await expect(page.locator("h2.zoomed-title .node-text")).toContainText(year);
+  // Canonicalization uses server state; only its resulting index needs a refresh.
+  expect(indexReads).toBe(1);
 
   // Home: the protected "Daily" container holds today's note, badged "Today".
   await goHome(page);

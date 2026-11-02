@@ -27,12 +27,17 @@ test("navigation waits for the lazy editor before checking saved content", async
   const bootstrap = new Promise<void>((resolve) => {
     release = resolve;
   });
+  let markEntered!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    markEntered = resolve;
+  });
   let held = false;
   // Install after the initial mount; hold only this test's next lazy bootstrap.
   await page.route(
     (url) => url.pathname === "/src/components/OutlineEditor.tsx",
     async (route) => {
       held = true;
+      markEntered();
       await bootstrap;
       held = false;
       await route.fallback();
@@ -44,7 +49,8 @@ test("navigation waits for the lazy editor before checking saved content", async
     ready = true;
   });
   try {
-    await expect.poll(() => held).toBe(true);
+    // Request arrival uses the test deadline, not the content assertion budget.
+    await entered;
     // An ordinary 5s assertion cannot stand in for editor readiness. The
     // request must actually remain held, not merely be naturally slow.
     await expect(
