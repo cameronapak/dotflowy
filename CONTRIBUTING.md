@@ -256,6 +256,15 @@ browser.
   `Meta+`.
 - Wait on state (`expect(...)` retries, `expect.poll`), never on a fixed
   `waitForTimeout`.
+- A full `goto` or `reload` completes before the lazy editor and initial sync.
+  For a seeded outline, use `openSeededOutline` for navigation, or explicitly wait
+  for a surviving editor/title anchor after `reload`, **then** assert saved
+  content, identity and absence. Use the existing test budget for mounting,
+  not an interaction assertion's five seconds. Do not reseed on reload, widen
+  budgets, or replace persistence assertions with readiness alone. Deliberately
+  held loading/redirect tests keep their own state gates.
+  `e2e/bootstrap-readiness.spec.ts` holds one lazy bootstrap to check this
+  contract; run it with `bun run test:e2e:app e2e/bootstrap-readiness.spec.ts`.
 - **CI's `quality` gate requires all checks and the full browser regression.**
   Nonbrowser checks and the real-Worker suite run once, alongside eight isolated CI
   runners that each run one app shard with one worker, zero retries, and retained

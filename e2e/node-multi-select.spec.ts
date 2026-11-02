@@ -109,7 +109,7 @@ test("filtered select-all deletes only visible roots and preserves their hidden 
   await page.keyboard.press(`${MOD}+a`);
   await page.keyboard.press("Delete");
   await expect(page.locator(".outline-row .node-text")).toHaveCount(0);
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "b" });
   await expect.poll(() => orderedTexts(page)).toEqual(["hidden bravo"]);
 });
 
@@ -139,7 +139,7 @@ test("filtered depth selection reaches matches inside collapsed context without 
   await expect(li(page, "c")).toHaveAttribute("data-selected", "single");
   await page.keyboard.press("Escape");
   await expect(text(page, "c")).toBeFocused();
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "p" });
   await expect.poll(() => orderedTexts(page)).toEqual(["context"]);
 });
 
@@ -245,7 +245,7 @@ test("filtered indent moves only selected siblings and keeps reverse selection t
   await expect(li(page, "c")).toHaveAttribute("data-selected", "bottom");
   await page.keyboard.press("Shift+ArrowDown");
   await expect(li(page, "c")).toHaveAttribute("data-selected", "single");
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "p" });
   await expect
     .poll(() => orderedTexts(page))
     .toEqual([
@@ -306,7 +306,7 @@ test("a focus-retained row cannot leave an invisible selection after blur", asyn
   await expect(li(page, "a")).toHaveCount(0);
   await expect(page.locator("li[data-selected]")).toHaveCount(0);
   await page.keyboard.press("Delete");
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "a" });
   await expect
     .poll(() => orderedTexts(page))
     .toEqual(["no longer matching", "bravo #go"]);
