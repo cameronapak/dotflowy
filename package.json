@@ -96,7 +96,7 @@
     "date-fns": "^4.4.0",
     "effect": "4.0.0",
     "fuse.js": "^7.5.0",
-    "grab-bcv": "^0.1.7",
+    "grab-bcv": "^0.1.8",
     "lucide-react": "^1.46.0",
     "lunorash": "1.0.0-alpha.259",
     "motion": "^13.3.0",
