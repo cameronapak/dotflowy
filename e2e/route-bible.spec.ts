@@ -215,18 +215,18 @@ test("the passage editor rewrites a chip through parsed input", async ({
   await expect(
     page
       .getByRole("combobox", { name: "Chapter", exact: true })
-      .locator("option"),
+      .getByRole("option"),
   ).toHaveCount(16);
   // Romans 8 ends at verse 39; the start selector also offers All verses.
   await expect(
     page
       .getByRole("combobox", { name: "Start verse", exact: true })
-      .locator("option"),
+      .getByRole("option"),
   ).toHaveCount(40);
   await expect(
     page
       .getByRole("combobox", { name: "End verse", exact: true })
-      .locator("option")
+      .getByRole("option")
       .last(),
   ).toHaveAttribute("value", "39");
   await page.getByRole("button", { name: "Done" }).click();
