@@ -13,6 +13,16 @@ test.each([
   ["John 3:16", "https://route.bible/jhn.3.16?src=dotflowy"],
   ["1 John 2:1", "https://route.bible/1jn.2.1?src=dotflowy"],
   ["Genesis 1", "https://route.bible/gen.1?src=dotflowy"],
+  ["Jhon 3:16", "https://route.bible/jhn.3.16?src=dotflowy"],
+  ["II Kngs 25:30", "https://route.bible/2ki.25.30?src=dotflowy"],
+  ["REV.22.21", "https://route.bible/rev.22.21?src=dotflowy"],
+  ["REV.22.22", null],
+  ["REV.23.1", null],
+  ["1 Jhon 6:1", null],
+  ["I Kigs 23:1", null],
+  ["John 3:0", null],
+  ["John 3:18-16", null],
+  ["John 3:16,18", null], // chips represent one contiguous passage
   // grab-bcv is the strict parser behind the liberal regex.
   ["Hello 3", null], // not a book
   ["Revelation 99:99", null], // out of range
@@ -28,6 +38,14 @@ test("normalizeBibleRef rewrites the label, suggestBibleRefs completes partial i
     url: "https://route.bible/rom.8.28?src=dotflowy",
   });
   expect(suggestBibleRefs("rom 8").map((s) => s.label)).toContain("Romans 8");
+  expect(suggestBibleRefs("II Kngs 1:", 1)).toEqual([
+    {
+      label: "2 Kings 1:1",
+      insertText: "2 Kings 1:1",
+      canonical: "2KI.1.1",
+      kind: "verse",
+    },
+  ]);
 });
 
 test.each<[Parameters<typeof formatStructuredBibleRef>[0], string]>([

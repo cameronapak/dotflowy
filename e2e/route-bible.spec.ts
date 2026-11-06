@@ -200,10 +200,35 @@ test("the passage editor rewrites a chip through parsed input", async ({
   ]);
 
   await chip(page, "n").click({ button: "right" });
-  await page.getByRole("combobox", { name: "Passage" }).fill("rom 8:28");
+  const input = page.getByRole("combobox", { name: "Passage" });
+  await input.fill("1 Jhon 6:1");
+  await expect(page.getByRole("button", { name: "Done" })).toBeDisabled();
+  await expect(text(page, "n")).toContainText("Read John 3:16 today");
+  await input.fill("Romasn 8:28");
   await expect(page.locator("[data-bible-passage-suggestions]")).toContainText(
     "Romans 8:28",
   );
+  await page.getByText("Open selector", { exact: true }).click();
+  await expect(
+    page.getByRole("combobox", { name: "Book", exact: true }),
+  ).toHaveValue("ROM");
+  await expect(
+    page
+      .getByRole("combobox", { name: "Chapter", exact: true })
+      .locator("option"),
+  ).toHaveCount(16);
+  // Romans 8 ends at verse 39; the start selector also offers All verses.
+  await expect(
+    page
+      .getByRole("combobox", { name: "Start verse", exact: true })
+      .locator("option"),
+  ).toHaveCount(40);
+  await expect(
+    page
+      .getByRole("combobox", { name: "End verse", exact: true })
+      .locator("option")
+      .last(),
+  ).toHaveAttribute("value", "39");
   await page.getByRole("button", { name: "Done" }).click();
 
   await expect(text(page, "n")).toContainText("Read Romans 8:28 today");
