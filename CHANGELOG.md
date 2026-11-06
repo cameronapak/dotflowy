@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.30.2
+
+### Patch Changes
+
+- e37c101: Bible references recognize more book-name typos while preserving numbered books and chapter and verse bounds.
+
 ## 1.30.1
 
 ### Patch Changes
