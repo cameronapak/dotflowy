@@ -1,5 +1,11 @@
 # A query grammar for the view filter, with plugin-registered operators
 
+**Mobile entry-point amendment ([ADR 0076](./0076-mobile-navigation-dock.md)).**
+Below 768px, Filter this view lives in the View menu. The toolbar's Search
+magnifier opens the command center. Desktop retains the separate filter
+magnifier and command-center button described below. Filter semantics and
+keyboard shortcuts are unchanged.
+
 Filtering by tag exists (`?q=#a #b`, click-driven, AND-only) but nothing else is filterable — no node kind, no completion state, no text — even though every axis is already derivable from `node.text` plus existing fields. We decided to grow `?q=` into a real query grammar rather than build a search feature, and to split the grammar between a core parse engine and plugin-registered operators. Research base: [docs/research/workflowy-search-operators.md](../research/workflowy-search-operators.md).
 
 ## The decision, in nine parts

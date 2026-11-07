@@ -149,6 +149,112 @@
   top: env(safe-area-inset-top);
 }
 
+/* ADR 0076: navigation below, actions above. Package selectors stay scoped. */
+.mobile-navigation {
+  --lg-foreground: var(--foreground);
+  --lg-tab-accent: var(--foreground);
+  --lg-ring: var(--foreground);
+  --lg-dark: initial;
+  --lg-contrast-small: 0.314;
+  --lg-brightness-small: 1.511;
+  --lg-saturate-small: 2;
+  --dock-tab-width: clamp(100px, calc((100vw - 64px) / 2), 132px);
+  position: fixed;
+  z-index: 20;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  left: calc(16px + env(safe-area-inset-left));
+  right: calc(16px + env(safe-area-inset-right));
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.dark .mobile-navigation {
+  --lg-dark: opacity(1);
+  --lg-contrast-small: 0.68;
+  --lg-brightness-small: 0.98;
+  --lg-saturate-small: 1.6;
+}
+
+.mobile-navigation[hidden] {
+  display: none;
+}
+
+.mobile-navigation > * {
+  pointer-events: auto;
+}
+
+.mobile-navigation .lg-tab-bar {
+  --lg-tab-width: var(--dock-tab-width);
+}
+
+.mobile-navigation .lg-tab-bar[data-icons] :is(.lg-tab-face, .lg-tab-copy) {
+  font-size: 0.75rem;
+}
+
+.mobile-navigation-solid {
+  display: flex;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 36px;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.mobile-navigation-solid a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: var(--dock-tab-width);
+  min-height: 54px;
+  border-radius: 30px;
+  font-size: 0.75rem;
+}
+
+.mobile-navigation-solid svg {
+  width: 28px;
+  height: 28px;
+}
+
+.mobile-navigation-solid a[aria-current="page"] {
+  background: var(--accent);
+  font-weight: 600;
+  outline: 1px solid var(--foreground);
+  outline-offset: -2px;
+}
+
+.mobile-navigation-solid a:focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: -2px;
+}
+
+@media (width < 768px) {
+  body:has(.mobile-navigation) {
+    padding-bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+
+  body:has(.outline-header) [data-quick-add-fab] {
+    display: none;
+  }
+
+  .outline-header [data-slot="button"] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .mobile-quick-add-glyph {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+}
+
 @media (width < 768px), (pointer: coarse) {
   /* A short outline may fill only the layout viewport, leaving no scroll range
      to lift its caret above suggestions or the keyboard toolbar. Landscape needs

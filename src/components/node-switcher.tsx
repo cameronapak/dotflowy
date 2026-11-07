@@ -1,3 +1,5 @@
+import { Search01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import {
@@ -544,19 +546,17 @@ function SwitcherDialog({
   );
 }
 
-/** The header ⌘ button -- opens the Cmd+K command center (ADR 0034). The
- *  magnifier now summons the filter (ADR 0047 §6), so the switcher gets its own
- *  glyph beside it as the touch (and desktop) entry point. */
-export function CommandCenterButton() {
+/** Opens the command center. Narrow screens use Search; desktop retains ⌘
+ * beside the separate view-filter magnifier (ADRs 0034, 0076). */
+export function CommandCenterButton({ mobile = false }: { mobile?: boolean }) {
   return (
     <Button
       variant="ghost"
       size="icon-sm"
       onClick={() => openNodeSwitcher()}
-      aria-label="Command center"
+      aria-label={mobile ? "Search" : "Command center"}
     >
-      <CommandIcon />
-      <span className="sr-only">Command center</span>
+      {mobile ? <HugeiconsIcon icon={Search01Icon} /> : <CommandIcon />}
     </Button>
   );
 }

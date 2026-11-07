@@ -7,6 +7,7 @@
 // token + decorator), B (delegated interaction), I (input/paste); later slices
 // add commands, keymap, slots, transforms, menus, and side-collections.
 
+import type { useNavigate } from "@tanstack/react-router";
 import type { Effect } from "effect";
 import type { ComponentType, ReactNode } from "react";
 
@@ -499,6 +500,20 @@ export interface HeaderSlotSpec {
   /** Render the header control. `getCtx` is the same stable PluginContext
    *  factory used everywhere; call it inside handlers (onClick), not at render. */
   render(getCtx: () => PluginContext): ReactNode;
+  /** Project a destination into the narrow-screen dock instead of the header.
+   * Navigation stays on existing routes; the plugin owns route/section identity. */
+  mobileTab?: {
+    label: string;
+    href: string;
+    icon: ReactNode;
+    isActive(rootId: string | null, sectionKey?: string): boolean;
+    /** Optional same-tab behavior, such as scrolling an already-open stream.
+     * Modified clicks still follow href. */
+    onSelect?(
+      getCtx: () => PluginContext,
+      navigate: ReturnType<typeof useNavigate>,
+    ): void;
+  };
 }
 
 // --- Protected nodes --------------------------------------------------------

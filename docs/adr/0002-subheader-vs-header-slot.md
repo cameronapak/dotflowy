@@ -15,3 +15,8 @@ non-null slots in one flex row.
 consumer, and the first that follows you across every view. It renders as its own full-width row at
 the top of the subheader, above view-specific content such as the Daily week strip and the filter bar.
 View-specific slots keep sharing the row below it.
+
+**Mobile navigation ([ADR 0076](./0076-mobile-navigation-dock.md)).** A header
+slot can declare `mobileTab` to project an existing destination into the
+narrow-screen dock instead. Other header actions stay in the toolbar; contextual
+state stays in the subheader.
