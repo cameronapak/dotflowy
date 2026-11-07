@@ -47,6 +47,9 @@
   //   "ADMIN_USER_IDS": "<owner user.id>",
   "vars": {
     "ADMIN_EMAILS": "cameronandrewpak@gmail.com",
+    // Optional owner-only feedback: leave BOTH unset until separately approved
+    // setup. Pin a Better Auth user.id, never an email; the client ID is public.
+    // AMP_FEEDBACK_USER_ID and AMP_FEEDBACK_CLIENT_ID: docs/feedback-widget.md.
     // Open-signup switch (#293). UNSET on purpose — signup stays invite-only on
     // deploy. Flipping self-serve signup on is a deliberate runbook step: set
     // this to the literal "true" (only that value opens it; fail-closed) once

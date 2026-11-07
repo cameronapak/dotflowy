@@ -13,6 +13,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 
+import { AmpFeedback } from "../components/amp-feedback";
 import { AppleShortcutDialog } from "../components/apple-shortcut-dialog";
 import { AuthScreen } from "../components/auth-screen";
 import { ChangelogDialog } from "../components/changelog-dialog";
@@ -216,7 +217,12 @@ function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
     hardReset();
     return null;
   }
-  return <>{children}</>;
+  return (
+    <>
+      <AmpFeedback userId={session.user.id} />
+      {children}
+    </>
+  );
 }
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
