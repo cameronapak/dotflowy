@@ -480,6 +480,10 @@ test("a selected run can be dragged by a descendant into a missing day in order"
     },
   );
   await clientNavigate(page, "/the-day");
+  // These descendants also exist in Home; wait for the zoom before selecting.
+  await expect(
+    page.getByRole("textbox", { name: "Title", exact: true }),
+  ).toHaveAttribute("data-history-node-id", "the-day");
 
   const firstText = page.locator(
     'li[data-node-id="first"] > .outline-row .node-text',
