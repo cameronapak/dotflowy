@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.30.3
+
+### Patch Changes
+
+- 36487a4: Remove the retired alternate sync engine and its migration tooling while preserving retained storage, backups, account erasure, and cutover restore guards.
+
 ## 1.30.2
 
 ### Patch Changes
