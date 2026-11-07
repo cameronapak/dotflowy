@@ -48,6 +48,16 @@ mode state without rebuilding tokens. Scribble uses these seams plus an
 existing header slot for its active-only off-switch. No arbitrary CSS seam.
 See [ADR 0071](./adr/0071-plugin-global-actions-and-editor-font.md).
 
+**Mobile destinations (ADR 0076).** `HeaderSlotSpec.mobileTab` projects a header
+destination into the dock below 768px. The plugin supplies `label`, `icon`,
+`href`, and `isActive(rootId, sectionKey)`; core renders SPA links and owns the
+glass/opaque presentation. The predicate reads identity without creating nodes.
+Optional `onSelect(getCtx, navigate)` handles same-tab activation; modified clicks
+still follow the href. Daily shares its header action for in-stream Today scrolling
+and uses `/today` for new tabs; disabling Daily removes the tab.
+Header slots without a mobile tab, such as Scribble's off-switch, stay in the
+toolbar. See [ADR 0076](./adr/0076-mobile-navigation-dock.md).
+
 **Focus sessions (ADR 0074).** `focus` uses C, F (full-width subheader and
 row/title after-text), and global actions. Its picker and PiP card use the kit.
 The session is account-keyed browser-local state shared across tabs, with absolute

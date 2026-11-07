@@ -35,3 +35,9 @@ There is no backfill or new profile field. Do not enable
 `overrideUserInfoOnSignIn`: in Better Auth 1.6.33 it also overwrites the local
 email, including after a different-email explicit link. Signup and linking
 eligibility remain unchanged; the name update on linking is accepted.
+
+**Mobile navigation amendment ([ADR 0076](./0076-mobile-navigation-dock.md)).**
+Below 768px, the command-center trigger becomes a Search magnifier, Quick-add
+gets a trailing toolbar button, and Filter this view moves into the View menu.
+Home and Today are labelled dock destinations. Desktop keeps the controls
+described above.

@@ -31,13 +31,13 @@ The overlay is rendered in the shared shadcn `Dialog` frame (the same one the Cm
 ## Reach
 
 - **Desktop:** the bare **`q`** hotkey (Todoist parity) + a Cmd+K action. `q` fires only when you're not typing (no modifier, focus not in a contentEditable/input, no dialog open), so it can't misfire mid-edit. It **superseded `Opt+Cmd+N`** (Workflowy parity): that chord is swallowed by browsers and macOS — including the in-app browser — so it never reliably fired, while single-key capture is the established web-app idiom (Todoist/Linear/Gmail) and needs no chord the browser can claim. **No new desktop header button** — Cmd+K already has one and quick-add is a Cmd+K action, so the header stays exactly as it is.
-- **Mobile:** a floating capture button (FAB), shown when not editing (there's no hotkey on mobile, and the mobile actions bar only appears while already editing). Full rapid-fire parity, keyboard-anchored like the mobile actions bar (ADR 0030).
+- **Mobile:** below 768px, a trailing Quick-add button in the outline header replaces the floating capture button ([ADR 0076](./0076-mobile-navigation-dock.md)). The FAB remains on wider touch screens and pages without that header, shown when not editing. Full rapid-fire parity, keyboard-anchored like the mobile actions bar (ADR 0030).
 
 ## Non-goals (v1) and deferred
 
 - **In-app only.** A web SPA can't do OS-global capture the way Workflowy's Electron app does (`Opt+Cmd+N` fires app-unfocused there). The stated pain is in-app anyway. True from-anywhere capture (desktop shell / browser extension) is a separate, much larger effort.
 - **No clipboard magic** (auto-insert clipboard text, HTML→Markdown, page-title grab on open). Pasting a URL still unfurls its title via the links plugin; you just paste manually.
-- **The mobile bottom tab bar** (Workflowy-style, to de-clutter the mobile header) is an information-architecture effort of its own — its own ADR, its own grill. Explicitly not coupled to quick-add.
+- **The mobile bottom tab bar** is separate navigation, now specified in [ADR 0076](./0076-mobile-navigation-dock.md). Quick-add remains an action, not a tab.
 
 ## Amendment (2026-07): Enter commits & closes, Cmd+Enter is the burst key, an off-page toast, inline before-text slots
 

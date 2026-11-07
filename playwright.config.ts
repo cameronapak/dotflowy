@@ -50,6 +50,11 @@ export default defineConfig({
       grep: /day navigation on touch/,
       use: { ...devices["iPhone 13"] },
     },
+    {
+      name: "mobile-navigation-webkit",
+      testMatch: "mobile-navigation.spec.ts",
+      use: { ...devices["iPhone 13"] },
+    },
   ],
   // Always boot our own Vite server, NEVER adopt one already on the port.
   // `dev`/`dev:web` serve :3000, so the only thing that ever answers on this
