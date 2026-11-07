@@ -25,6 +25,17 @@ a session never dims the outline.
   subheader and as a draining pie marker in the `after-text` slot of the node's
   row and zoomed title. The marker is a filled pie because a thin ring reads as
   a loading spinner at row size.
+- **The band stands out without a hue.** While a session runs, the band is a
+  solid `primary` fill with `primary-foreground` text and a 4px progress line,
+  so it contrasts with the page in both themes (about 17:1 light, 14:1 dark)
+  while Dotflowy stays black, white, and gray. In dark mode `primary` is
+  near-white, so the band reads as a bright bar, like a primary button. Time
+  is up fills the line across the band; the label goes full strength and Done
+  becomes the filled button. Focused controls on the fill draw a 2px offset
+  outline in the text color. The reflection field and the PiP card keep the
+  page surface. The title keeps at least 18rem, so crowded controls wrap below
+  it instead of truncating it, and it uses `dir="auto"` with a `title`
+  tooltip. Timers past an hour read `h:mm:ss`.
 - **Wandering off.** When the node is not visible in the current view, the band
   reads "You set out to …" with Return. Return, the band title, the PiP window's
   "Back to focus", and the Cmd+K "Return to focus session" action zoom into the
@@ -95,6 +106,12 @@ ordinary nodes.
   row (ADR 0031 retired plugin CSS), and the wash sits close to the
   multi-selection tint. Rejected for the slot marker.
 - **Dim everything else.** Duplicates Spotlight. Rejected.
+- **A 30% muted wash for the band.** The v1 band. It measured 1.01:1 against
+  the page, so a running session blended in. Replaced by the primary fill.
+- **An orange tag-palette band, or an inset timer card with a ring.** Both
+  stood out, but they introduce a chromatic accent into a grayscale product.
+  Orange stays the one free hue if Time is up ever needs color; blue, purple,
+  red, and green already carry meaning. Rejected for now.
 - **Zoom in on start.** Jarring without an explicit request. Only Return zooms.
 - **Auto-open the PiP window on tab leave.** Not possible for a silent page; see
   above.

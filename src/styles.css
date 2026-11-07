@@ -344,6 +344,15 @@
   box-shadow: 0 0 0 2px var(--background);
 }
 
+/* The package's scroll-edge band reaches 24px below the toolbar to fade content
+   that scrolls under it. An open subheader sits right there and is opaque, so
+   stop the band at the toolbar instead of washing over the subheader. */
+.outline-chrome:has([data-subheader-open]) .mobile-glass-header::before {
+  bottom: 0;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
 /* An inset line, not a border: glass and opaque stay the same height, so the
    switch after first paint never shifts the page. */
 .mobile-glass-header[data-opaque] {

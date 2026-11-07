@@ -116,6 +116,7 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
       }}
       className="overflow-hidden bg-background"
       aria-hidden={!open}
+      data-subheader-open={open ? "" : undefined}
     >
       {/* bg-background under the translucent tint: the band is sticky, so a
           see-through background lets scrolled bullets bleed into the filter
