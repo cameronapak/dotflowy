@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.32.0
+
+### Minor Changes
+
+- aba7154: On phones, the header is now a Liquid Glass toolbar. Zoomed pages show Back to the parent page, with a menu of every ancestor beside it. Search, the new More menu, and Quick add sit on the right. More holds the view options and the account and help items.
+
 ## 1.31.0
 
 ### Minor Changes
