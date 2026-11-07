@@ -93,53 +93,56 @@ export default function MobileGlassHeader({
 
   return (
     <Opaque value={opaque}>
-      <Toolbar
-        edge={opaque ? "none" : "uniform"}
-        aria-label="Outline toolbar"
-        className="outline-header mobile-glass-header"
-        data-opaque={opaque ? "" : undefined}
-      >
-        <div className="mobile-glass-header-leading">{leading}</div>
-        <div className="mobile-glass-header-trailing">
-          <SpotlightIndicator />
-          <Group label="Actions">
-            {getCtx &&
-              slots
-                .filter((slot) => !slot.mobileTab)
-                .map((slot) => (
-                  <Fragment key={slot.id}>{slot.render(getCtx)}</Fragment>
-                ))}
+      {/* A real <header>: spotlight finds the sticky chrome through it. */}
+      <header className="outline-header">
+        <Toolbar
+          edge={opaque ? "none" : "uniform"}
+          aria-label="Outline toolbar"
+          className="mobile-glass-header"
+          data-opaque={opaque ? "" : undefined}
+        >
+          <div className="mobile-glass-header-leading">{leading}</div>
+          <div className="mobile-glass-header-trailing">
+            <SpotlightIndicator />
+            <Group label="Actions">
+              {getCtx &&
+                slots
+                  .filter((slot) => !slot.mobileTab)
+                  .map((slot) => (
+                    <Fragment key={slot.id}>{slot.render(getCtx)}</Fragment>
+                  ))}
+              <Btn
+                icon={icon(Search01Icon)}
+                aria-label="Search"
+                onClick={() => openNodeSwitcher()}
+              />
+              <HeaderMoreMenu
+                trigger={
+                  <Btn
+                    icon={
+                      <span className="glass-header-badge-host">
+                        {icon(MoreHorizontalIcon)}
+                        {unseen > 0 && (
+                          <span data-changelog-dot="" aria-hidden="true" />
+                        )}
+                      </span>
+                    }
+                    aria-label={
+                      unseen > 0 ? "More (new releases available)" : "More"
+                    }
+                  />
+                }
+              />
+            </Group>
             <Btn
-              icon={icon(Search01Icon)}
-              aria-label="Search"
-              onClick={() => openNodeSwitcher()}
+              variant="filled"
+              icon={icon(PlusSignIcon)}
+              aria-label="Quick add"
+              onClick={openQuickAdd}
             />
-            <HeaderMoreMenu
-              trigger={
-                <Btn
-                  icon={
-                    <span className="glass-header-badge-host">
-                      {icon(MoreHorizontalIcon)}
-                      {unseen > 0 && (
-                        <span data-changelog-dot="" aria-hidden="true" />
-                      )}
-                    </span>
-                  }
-                  aria-label={
-                    unseen > 0 ? "More (new releases available)" : "More"
-                  }
-                />
-              }
-            />
-          </Group>
-          <Btn
-            variant="filled"
-            icon={icon(PlusSignIcon)}
-            aria-label="Quick add"
-            onClick={openQuickAdd}
-          />
-        </div>
-      </Toolbar>
+          </div>
+        </Toolbar>
+      </header>
     </Opaque>
   );
 }

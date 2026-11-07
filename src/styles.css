@@ -344,9 +344,11 @@
   box-shadow: 0 0 0 2px var(--background);
 }
 
+/* An inset line, not a border: glass and opaque stay the same height, so the
+   switch after first paint never shifts the page. */
 .mobile-glass-header[data-opaque] {
   background: var(--background);
-  border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 -1px var(--border);
 }
 
 .glass-header-solid-group {
