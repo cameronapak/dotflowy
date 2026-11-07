@@ -1,5 +1,13 @@
 # dotflowy
 
+## 1.31.0
+
+### Minor Changes
+
+- 4a85b86: Mobile puts Home and Today in a glass navigation dock, with Search and Quick-add
+  in the top toolbar. Filter this view moves into View options. Accessibility
+  preferences use an opaque dock; desktop navigation stays unchanged.
+
 ## 1.30.3
 
 ### Patch Changes
