@@ -1,5 +1,3 @@
-import { Search01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
 import {
@@ -546,17 +544,18 @@ function SwitcherDialog({
   );
 }
 
-/** Opens the command center. Narrow screens use Search; desktop retains ⌘
- * beside the separate view-filter magnifier (ADRs 0034, 0076). */
-export function CommandCenterButton({ mobile = false }: { mobile?: boolean }) {
+/** Opens the command center from the desktop header, beside the separate
+ * view-filter magnifier. Narrow screens use the glass toolbar's Search
+ * (ADRs 0034, 0076). */
+export function CommandCenterButton() {
   return (
     <Button
       variant="ghost"
       size="icon-sm"
       onClick={() => openNodeSwitcher()}
-      aria-label={mobile ? "Search" : "Command center"}
+      aria-label="Command center"
     >
-      {mobile ? <HugeiconsIcon icon={Search01Icon} /> : <CommandIcon />}
+      <CommandIcon />
     </Button>
   );
 }

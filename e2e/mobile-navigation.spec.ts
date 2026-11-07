@@ -55,7 +55,8 @@ test("mobile destinations, search, capture, and filter use existing app behavior
     }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "View options", exact: true }).tap();
+  // View options and Account and help share the narrow-screen More menu.
+  await page.getByRole("button", { name: "More", exact: true }).tap();
   await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
     "data-expanded",
   );
@@ -66,6 +67,9 @@ test("mobile destinations, search, capture, and filter use existing app behavior
         .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
     )
     .toBe(844);
+  await expect(
+    page.getByRole("menuitem", { name: "Sign out", exact: true }),
+  ).toBeAttached();
   await page
     .getByRole("menuitem", { name: "Filter this view", exact: true })
     .tap();
@@ -107,6 +111,10 @@ test("dock respects keyboard geometry, accessibility preferences, feature settin
   }
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(page.locator(".mobile-navigation .lg-glass")).toHaveCount(0);
+  await expect(page.locator(".mobile-glass-header .lg-glass")).toHaveCount(0);
+  await expect(
+    page.locator(".mobile-glass-header .glass-header-solid-group"),
+  ).toHaveCount(1);
   await page.goto("/alpha");
   await expect(nav.locator("[aria-current=page]")).toHaveCount(0);
   const home = nav.getByRole("link", { name: "Home", exact: true });

@@ -230,6 +230,168 @@
   outline-offset: -2px;
 }
 
+/* ADR 0076: the narrow-screen glass toolbar. Theme values only, as the dock
+   does; the package draws its own glass, lens and scroll edge. */
+.mobile-glass-header {
+  --lg-foreground: var(--foreground);
+  --lg-ring: var(--foreground);
+  --lg-fill: var(--primary);
+  --lg-dark: initial;
+  --lg-glass-tinted: #f7f7f9f5;
+  --lg-glass-active: #ffffff57;
+  /* The package's light values, so an OS dark preference cannot override
+     Dotflowy's light theme. */
+  --lg-contrast: 0.307;
+  --lg-brightness: 1.554;
+  --lg-saturate: 2.081;
+  --lg-contrast-small: 0.314;
+  --lg-brightness-small: 1.511;
+  --lg-saturate-small: 2;
+  --lg-drop-strength: 1;
+  --lg-fill-shade: 11%;
+  --lg-fill-alpha: 100%;
+  gap: 8px;
+  min-height: 60px;
+  padding: 8px max(12px, env(safe-area-inset-right)) 8px
+    max(12px, env(safe-area-inset-left));
+  color: var(--foreground);
+}
+
+.dark .mobile-glass-header {
+  --lg-dark: opacity(1);
+  --lg-glass-tinted: #1e1e20f2;
+  --lg-glass-active: #ffffff4d;
+  --lg-contrast: 0.66;
+  --lg-brightness: 0.83;
+  --lg-saturate: 1.7;
+  --lg-contrast-small: 0.68;
+  --lg-brightness-small: 0.98;
+  --lg-saturate-small: 1.6;
+  --lg-drop-strength: 1.6;
+  --lg-fill-shade: 0%;
+  --lg-fill-alpha: 95%;
+}
+
+.mobile-glass-header-leading,
+.glass-breadcrumb {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+}
+
+.mobile-glass-header-trailing {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-glass-header :is(.lg-toolbar-group, .glass-header-solid-group) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mobile-glass-header .lg-toolbar-group > .lg-button[data-icon="only"] {
+  width: 44px;
+  flex: none;
+}
+
+.mobile-glass-header .lg-button[data-variant="filled"] {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  color: var(--primary-foreground);
+}
+
+.mobile-glass-header .lg-button > :is(svg, .glass-header-badge-host) {
+  width: 22px;
+  height: 22px;
+}
+
+.mobile-glass-header .glass-crumb {
+  min-width: 0;
+  gap: 4px;
+  padding-right: 12px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.glass-crumb-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.glass-header-badge-host {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.glass-header-badge-host > svg {
+  width: 100%;
+  height: 100%;
+}
+
+.glass-header-badge-host [data-changelog-dot] {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 2px var(--background);
+}
+
+/* An inset line, not a border: glass and opaque stay the same height, so the
+   switch after first paint never shifts the page. */
+.mobile-glass-header[data-opaque] {
+  background: var(--background);
+  box-shadow: inset 0 -1px var(--border);
+}
+
+.glass-header-solid-group {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--background);
+}
+
+.glass-header-solid-button {
+  display: inline-flex;
+  min-width: 44px;
+  height: 44px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 22px;
+  color: var(--foreground);
+}
+
+.glass-header-solid-button.glass-crumb {
+  flex: 0 1 auto;
+}
+
+.glass-header-solid-button > :is(svg, .glass-header-badge-host) {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+
+.glass-header-solid-button[data-variant="filled"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.glass-header-solid-button:focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: -2px;
+}
+
 @media (width < 768px) {
   body:has(.mobile-navigation) {
     padding-bottom: calc(100px + env(safe-area-inset-bottom));
@@ -242,16 +404,6 @@
   .outline-header [data-slot="button"] {
     min-width: 44px;
     min-height: 44px;
-  }
-
-  .mobile-quick-add-glyph {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--primary);
-    color: var(--primary-foreground);
   }
 }
 
@@ -1419,24 +1571,6 @@ body.dragging-active * {
 
 .breadcrumb .crumb-collapsed {
   flex: 0 0 auto;
-}
-
-/* Mobile compact form (Home > … > direct parent). Home and the "…" stay fixed;
-   the single parent crumb flex-shrinks to fill the leftover width and ellipsizes,
-   so Home is ALWAYS visible and the row never needs to scroll. */
-.breadcrumb[data-compact] .crumb {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-.breadcrumb[data-compact] .crumb-collapsed {
-  flex: 0 0 auto;
-}
-
-.breadcrumb[data-compact] .crumb-link {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: none;
 }
 
 /* The "…" control: a small pill that reads as the collapsed middle. */

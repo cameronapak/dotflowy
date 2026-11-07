@@ -484,7 +484,7 @@ test.describe("narrow-screen drawers", () => {
     page,
   }) => {
     await load(page);
-    await page.getByRole("button", { name: "View options" }).tap();
+    await page.getByRole("button", { name: "More", exact: true }).tap();
     await expect(drawer(page)).toBeVisible();
     await page.setViewportSize({ width: 900, height: 844 });
     await expect(drawer(page)).toHaveCount(0);
@@ -497,7 +497,7 @@ test.describe("narrow-screen drawers", () => {
     await expect(menu).toBeHidden();
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(
-      page.getByRole("button", { name: "View options" }),
+      page.getByRole("button", { name: "More", exact: true }),
     ).toHaveAttribute("aria-expanded", "false");
     await expect(drawer(page)).toHaveCount(0);
   });
@@ -520,7 +520,7 @@ test.describe("narrow-screen drawers", () => {
     page,
   }) => {
     await load(page);
-    await page.getByRole("button", { name: "View options" }).tap();
+    await page.getByRole("button", { name: "More", exact: true }).tap();
     await expect(drawer(page)).toBeVisible();
     await settleSheet(page);
     const completed = page.getByRole("menuitemcheckbox", {
@@ -689,7 +689,7 @@ test.describe("narrow-screen drawers", () => {
     page,
   }) => {
     await load(page);
-    await page.getByRole("button", { name: /Account and help/ }).tap();
+    await page.getByRole("button", { name: /^More/ }).tap();
     await settleSheet(page);
     await page.getByRole("menuitem", { name: /What's new/ }).tap();
     await expect(drawer(page)).toBeHidden();
@@ -781,7 +781,7 @@ test.describe("narrow-screen drawers", () => {
       requestAnimationFrame(sample);
       return positions;
     });
-    const trigger = page.getByRole("button", { name: /Account and help/ });
+    const trigger = page.getByRole("button", { name: /^More/ });
     await trigger.tap();
     await settleSheet(page);
     expect((await entry.jsonValue()).some((top) => top > 80 && top < 560)).toBe(
@@ -789,7 +789,7 @@ test.describe("narrow-screen drawers", () => {
     );
     await entry.dispose();
     const body = sheetDialog(page);
-    const heading = body.getByRole("heading", { name: "Account and help" });
+    const heading = body.getByRole("heading", { name: "More" });
     const headingY = (await heading.boundingBox())!.y;
     const box = (await body.boundingBox())!;
     await expect(body).not.toHaveCSS("mask-image", "none");
@@ -879,14 +879,14 @@ test.describe("narrow-screen drawers", () => {
   }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await load(page);
-    await page.getByRole("button", { name: "View options" }).tap();
+    await page.getByRole("button", { name: "More", exact: true }).tap();
     await settleSheet(page);
     await page.getByRole("menuitemcheckbox", { name: "Show completed" }).tap();
     await expect(drawer(page)).toBeVisible();
     await settleSheet(page);
     await page.keyboard.press("Escape");
     await expect(drawer(page)).toBeHidden();
-    await page.getByRole("button", { name: "View options" }).tap();
+    await page.getByRole("button", { name: "More", exact: true }).tap();
     await swipeSheet(page);
     await expect(drawer(page)).toBeHidden();
   });
@@ -958,7 +958,7 @@ test("keyboard opening App focuses its first item and supports immediate arrows"
       () => innerWidth - document.documentElement.clientWidth,
     ),
   ).toBeGreaterThan(0);
-  const trigger = page.getByRole("button", { name: /Account and help/ });
+  const trigger = page.getByRole("button", { name: /^More/ });
   await trigger.focus();
   await page.keyboard.press("Enter");
   const items = drawer(page).locator('button[role^="menuitem"]:not(:disabled)');

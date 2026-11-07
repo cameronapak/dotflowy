@@ -37,7 +37,9 @@ email, including after a different-email explicit link. Signup and linking
 eligibility remain unchanged; the name update on linking is accepted.
 
 **Mobile navigation amendment ([ADR 0076](./0076-mobile-navigation-dock.md)).**
-Below 768px, the command-center trigger becomes a Search magnifier, Quick-add
-gets a trailing toolbar button, and Filter this view moves into the View menu.
-Home and Today are labelled dock destinations. Desktop keeps the controls
-described above.
+Below 768px, the View and App menus share one **More** menu in a glass toolbar,
+View items first, then an Account and help section. The unread dot moves to the
+More trigger. Search opens the command center, Quick-add is the trailing
+prominent action, and Filter this view is the View section's first row. Home
+and Today are labelled dock destinations. Desktop keeps the two menus and the
+controls described above.

@@ -129,8 +129,12 @@ _Avoid_: focus mode (Spotlight is the dimming view mode), timer, pomodoro (one w
 
 **View menu**:
 The header menu for the outline view you are looking at: actions scoped to the current zoom root, and display modes such as Show completed and Spotlight mode.
-_Avoid_: More menu, overflow menu, options menu
+_Avoid_: overflow menu, options menu
 
 **App menu**:
 The header menu, opened from your avatar, for Dotflowy itself and your account: Settings, What's new, help links, legal pages, and Sign out. Nothing in it changes the outline view.
-_Avoid_: More menu, account menu, profile menu
+_Avoid_: account menu, profile menu
+
+**More menu**:
+On narrow screens, the one toolbar menu that holds the View menu's items, then the App menu's. Desktop has no More menu; it shows the View menu and App menu separately.
+_Avoid_: overflow menu, kebab menu

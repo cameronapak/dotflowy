@@ -1,5 +1,3 @@
-import { PlusSignIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Fragment, lazy, Suspense, type ReactNode } from "react";
 
 import type { PluginContext } from "../plugins/types";
@@ -9,18 +7,17 @@ import { usePluginChrome } from "../plugins/registry";
 import { HeaderAppMenu, HeaderViewMenu } from "./header-more-menu";
 import { CommandCenterButton } from "./node-switcher";
 import { FilterButton } from "./query-filter";
-import { openQuickAdd } from "./quick-add-opener";
 import { SpotlightIndicator } from "./spotlight-indicator";
-import { Button } from "./ui/button";
 
 const MobileNavigation = lazy(() => import("./MobileNavigation"));
+const MobileGlassHeader = lazy(() => import("./MobileGlassHeader"));
 
 /**
  * App header row: breadcrumb trail on the left (passed as children, since it's
  * owned by OutlineEditor's zoom logic), action cluster on the right (search +
  * plugin header slots, with page actions and display toggles in
- * the View and App menus). At Home the mobile breadcrumb is omitted; the dock
- * owns navigation. Desktop keeps its existing Home button (ADR 0076).
+ * the View and App menus). Below 768px the glass toolbar and the dock replace
+ * this row (ADR 0076); desktop keeps it.
  *
  * Horizontal padding matches the outline content's `p-6` so the row aligns
  * with the bullets below it.
@@ -41,42 +38,36 @@ export function Header({
   const { headerSlots } = usePluginChrome();
   return (
     <>
-      <header className="outline-header border-b bg-background">
-        {/* Border spans the full viewport; inner row is centered to match the
-          720px outline content below. */}
-        <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 px-6 py-3 max-sm:px-4">
-          <div className="min-w-0 flex-1">{children}</div>
-          {/* Narrow screens put destinations in the dock and actions here.
-            Desktop retains the existing header controls (ADR 0076). */}
-          <div className="flex shrink-0 items-center gap-1">
-            <SpotlightIndicator />
-            {getCtx &&
-              headerSlots
-                .filter((s) => !mobile || !s.mobileTab)
-                .map((s) => <Fragment key={s.id}>{s.render(getCtx)}</Fragment>)}
-            {!mobile && <FilterButton />}
-            <CommandCenterButton mobile={mobile} />
-            <HeaderViewMenu />
-            <HeaderAppMenu />
-            {mobile && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Quick add"
-                onClick={openQuickAdd}
-              >
-                <span className="mobile-quick-add-glyph">
-                  <HugeiconsIcon icon={PlusSignIcon} />
-                </span>
-              </Button>
-            )}
-          </div>
-        </div>
-      </header>
-      {mobile && getCtx && (
-        <Suspense fallback={null}>
-          <MobileNavigation slots={headerSlots} getCtx={getCtx} />
+      {mobile ? (
+        // One boundary for the toolbar and the dock, so they reveal together
+        // instead of React throttling a second reveal on a timer.
+        <Suspense fallback={<div className="h-15" />}>
+          <MobileGlassHeader
+            leading={children}
+            slots={headerSlots}
+            getCtx={getCtx}
+          />
+          {getCtx && <MobileNavigation slots={headerSlots} getCtx={getCtx} />}
         </Suspense>
+      ) : (
+        <header className="outline-header border-b bg-background">
+          {/* Border spans the full viewport; inner row is centered to match the
+            720px outline content below. */}
+          <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 px-6 py-3">
+            <div className="min-w-0 flex-1">{children}</div>
+            <div className="flex shrink-0 items-center gap-1">
+              <SpotlightIndicator />
+              {getCtx &&
+                headerSlots.map((s) => (
+                  <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
+                ))}
+              <FilterButton />
+              <CommandCenterButton />
+              <HeaderViewMenu />
+              <HeaderAppMenu />
+            </div>
+          </div>
+        </header>
       )}
     </>
   );

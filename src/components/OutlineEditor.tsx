@@ -26,6 +26,7 @@ import {
   Fragment,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -34,6 +35,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ComponentProps,
+  type ReactElement,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -179,6 +182,7 @@ import { signalJoinRefusal } from "./join-refusal";
 import { openInlineTargetAtCaret } from "./link-keymap";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
+import { MobileBreadcrumb } from "./mobile-breadcrumb";
 import { MobileActionsBar, type MobileBarActions } from "./MobileActionsBar";
 import { openMoveDialog } from "./move-dialog-opener";
 import { NodeBody } from "./node-body";
@@ -3717,51 +3721,51 @@ function BreadcrumbTrail({
   rootId: string | null;
   onNavigate: (toRootId: string | null, pivot: string) => void;
 }) {
-  // Two collapse shapes:
-  //  - Mobile: a fixed, always-fits form -- Home > … > direct parent. Everything
-  //    between Home and the immediate parent folds into the "…" menu, so the two
-  //    anchors that matter (root + parent) are always visible and the row never
-  //    needs to scroll.
-  //  - Desktop: has room, so keep more context -- the first ancestor + the last
-  //    two, folding only the deep middle (collapse fires at 5+ ancestors).
   const isMobile = useIsMobile();
-  let lead: Node[];
-  let hidden: Node[];
-  let tail: Node[];
-  if (isMobile) {
-    // Drop the focused node itself -- it's the page title right below -- so the
-    // trail ends at the direct parent: Home > … > parent.
-    const ancestors = trail.slice(0, -1);
-    lead = [];
-    hidden = ancestors.slice(0, -1); // [] until there are 2+ ancestors
-    tail = ancestors.slice(-1); // the direct parent (empty only at the top level)
-  } else {
-    // Only collapse when at least two crumbs would be hidden — folding a single
-    // crumb into a "…" saves no space.
-    const collapse = trail.length > LEADING + TRAILING + 1;
-    lead = collapse ? trail.slice(0, LEADING) : trail;
-    hidden = collapse ? trail.slice(LEADING, trail.length - TRAILING) : [];
-    tail = collapse ? trail.slice(trail.length - TRAILING) : [];
-  }
+  const renderGlassBreadcrumb = useContext(MobileBreadcrumb);
+  // Only collapse when at least two crumbs would be hidden — folding a single
+  // crumb into a "…" saves no space.
+  const collapse = trail.length > LEADING + TRAILING + 1;
+  const lead = collapse ? trail.slice(0, LEADING) : trail;
+  const hidden = collapse ? trail.slice(LEADING, trail.length - TRAILING) : [];
+  const tail = collapse ? trail.slice(trail.length - TRAILING) : [];
 
-  // Safety net for the desktop trail: if a narrowed window still overflows, the
-  // row scrolls horizontally (rather than squishing crumbs) and lands on the
-  // deepest crumb. The mobile compact form never needs this -- it flex-shrinks
-  // the single parent crumb to fit (see .breadcrumb[data-compact] in styles.css).
+  // Safety net: if a narrowed window still overflows, the row scrolls
+  // horizontally (rather than squishing crumbs) and lands on the deepest crumb.
   const navRef = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const el = navRef.current;
     if (el) el.scrollLeft = el.scrollWidth;
   }, [rootId, trail.length]);
 
-  if (isMobile && rootId === null) return null;
+  // Narrow screens (ADR 0076): nothing at Home, where the dock owns navigation;
+  // otherwise Back to the direct parent plus a menu of every other ancestor.
+  // The focused node itself is the page title right below, so it is dropped.
+  if (isMobile) {
+    if (rootId === null || !renderGlassBreadcrumb) return null;
+    const ancestors = trail.slice(0, -1);
+    return renderGlassBreadcrumb({
+      ancestors: ancestors.map((node) => ({
+        id: node.id,
+        label: crumbLabel(node),
+      })),
+      onNavigate: (id) => onNavigate(id, rootId),
+      renderMenu: (trigger) => (
+        <CollapsedCrumbs
+          hidden={ancestors.slice(0, -1)}
+          rootId={rootId}
+          onNavigate={onNavigate}
+          trigger={trigger}
+        />
+      ),
+    });
+  }
 
   return (
     <nav
       ref={navRef}
       className="breadcrumb scroll-fade-x"
       aria-label="Breadcrumb"
-      data-compact={isMobile ? "" : undefined}
     >
       {/* Zooming out: the current root is the pivot (title -> list item). */}
       <Button
@@ -3865,17 +3869,20 @@ function CollapsedCrumbs({
   hidden,
   rootId,
   onNavigate,
+  trigger,
 }: {
   hidden: Node[];
   rootId: string;
   onNavigate: (toRootId: string | null, pivot: string) => void;
+  /** Narrow screens: the glass toolbar's trigger. Without a Home crumb beside
+   *  it, the menu lists Home first (ADR 0076). */
+  trigger?: ReactElement<ComponentProps<"button">>;
 }) {
-  return (
-    <span className="crumb crumb-collapsed">
-      <ChevronRight className="sep" size={13} strokeWidth={2} />
-      <DropdownMenu title="Breadcrumbs">
-        <DropdownMenuTrigger
-          render={
+  const menu = (
+    <DropdownMenu title="Breadcrumbs">
+      <DropdownMenuTrigger
+        render={
+          trigger ?? (
             <button
               type="button"
               className="crumb-ellipsis"
@@ -3883,28 +3890,41 @@ function CollapsedCrumbs({
             >
               <MoreHorizontal size={14} strokeWidth={2} />
             </button>
-          }
-        />
-        {/* Explicit width overrides the shared content's `w-(--anchor-width)`,
+          )
+        }
+      />
+      {/* Explicit width overrides the shared content's `w-(--anchor-width)`,
             which would otherwise pin the panel to the tiny "…" trigger's width.
             Near-full-viewport on mobile, capped at 22rem on desktop; each label
             ellipsis-truncates within it. */}
-        <DropdownMenuContent
-          align="start"
-          className="w-[min(22rem,calc(100vw-1.5rem))]"
-        >
-          {hidden.map((ancestor) => (
-            <DropdownMenuItem
-              key={ancestor.id}
-              onClick={() => onNavigate(ancestor.id, rootId)}
-            >
-              <span className="min-w-0 flex-1 truncate">
-                {crumbLabel(ancestor)}
-              </span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <DropdownMenuContent
+        align="start"
+        className="w-[min(22rem,calc(100vw-1.5rem))]"
+      >
+        {trigger && (
+          <DropdownMenuItem onClick={() => onNavigate(null, rootId)}>
+            <HomeIcon />
+            Home
+          </DropdownMenuItem>
+        )}
+        {hidden.map((ancestor) => (
+          <DropdownMenuItem
+            key={ancestor.id}
+            onClick={() => onNavigate(ancestor.id, rootId)}
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {crumbLabel(ancestor)}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+  if (trigger) return menu;
+  return (
+    <span className="crumb crumb-collapsed">
+      <ChevronRight className="sep" size={13} strokeWidth={2} />
+      {menu}
     </span>
   );
 }
