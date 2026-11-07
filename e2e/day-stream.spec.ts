@@ -456,7 +456,9 @@ test.describe("day navigation on touch", () => {
       await expect
         .poll(async () => {
           await page.clock.runFor(1);
-          return editor.evaluate((el) => el === document.activeElement);
+          // evaluateAll never waits for the row. A waiting evaluate would stop
+          // this poll from ticking the paused clock the open may still need.
+          return editor.evaluateAll(([el]) => el === document.activeElement);
         })
         .toBe(true);
       const caretBottom = await editor.evaluate(
@@ -544,7 +546,9 @@ test.describe("day navigation on touch", () => {
       await expect
         .poll(async () => {
           await page.clock.runFor(1);
-          return editor.evaluate((el) => el === document.activeElement);
+          // evaluateAll never waits for the row. A waiting evaluate would stop
+          // this poll from ticking the paused clock the open may still need.
+          return editor.evaluateAll(([el]) => el === document.activeElement);
         })
         .toBe(true);
       // WebKit can deliver both resize events after input. The toolbar must
