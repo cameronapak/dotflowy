@@ -39,12 +39,15 @@ export function Header({
   return (
     <>
       {mobile ? (
+        // One boundary for the toolbar and the dock, so they reveal together
+        // instead of React throttling a second reveal on a timer.
         <Suspense fallback={<div className="h-15" />}>
           <MobileGlassHeader
             leading={children}
             slots={headerSlots}
             getCtx={getCtx}
           />
+          {getCtx && <MobileNavigation slots={headerSlots} getCtx={getCtx} />}
         </Suspense>
       ) : (
         <header className="outline-header border-b bg-background">
@@ -65,11 +68,6 @@ export function Header({
             </div>
           </div>
         </header>
-      )}
-      {mobile && getCtx && (
-        <Suspense fallback={null}>
-          <MobileNavigation slots={headerSlots} getCtx={getCtx} />
-        </Suspense>
       )}
     </>
   );

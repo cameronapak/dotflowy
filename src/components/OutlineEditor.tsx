@@ -24,10 +24,9 @@ import {
 } from "lucide-react";
 import {
   Fragment,
-  lazy,
   memo,
-  Suspense,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -183,6 +182,7 @@ import { signalJoinRefusal } from "./join-refusal";
 import { openInlineTargetAtCaret } from "./link-keymap";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
+import { MobileBreadcrumb } from "./mobile-breadcrumb";
 import { MobileActionsBar, type MobileBarActions } from "./MobileActionsBar";
 import { openMoveDialog } from "./move-dialog-opener";
 import { NodeBody } from "./node-body";
@@ -3701,10 +3701,6 @@ function ZoomedTitle({
   );
 }
 
-const GlassBreadcrumb = lazy(() =>
-  import("./MobileGlassHeader").then((m) => ({ default: m.GlassBreadcrumb })),
-);
-
 /**
  * The breadcrumb trail above a zoomed node. Mirrors Workflowy: when the trail
  * is deep, the middle ancestors collapse into a single "…" control that reveals
@@ -3726,6 +3722,7 @@ function BreadcrumbTrail({
   onNavigate: (toRootId: string | null, pivot: string) => void;
 }) {
   const isMobile = useIsMobile();
+  const renderGlassBreadcrumb = useContext(MobileBreadcrumb);
   // Only collapse when at least two crumbs would be hidden — folding a single
   // crumb into a "…" saves no space.
   const collapse = trail.length > LEADING + TRAILING + 1;
@@ -3745,27 +3742,23 @@ function BreadcrumbTrail({
   // otherwise Back to the direct parent plus a menu of every other ancestor.
   // The focused node itself is the page title right below, so it is dropped.
   if (isMobile) {
-    if (rootId === null) return null;
+    if (rootId === null || !renderGlassBreadcrumb) return null;
     const ancestors = trail.slice(0, -1);
-    return (
-      <Suspense fallback={null}>
-        <GlassBreadcrumb
-          ancestors={ancestors.map((node) => ({
-            id: node.id,
-            label: crumbLabel(node),
-          }))}
-          onNavigate={(id) => onNavigate(id, rootId)}
-          renderMenu={(trigger) => (
-            <CollapsedCrumbs
-              hidden={ancestors.slice(0, -1)}
-              rootId={rootId}
-              onNavigate={onNavigate}
-              trigger={trigger}
-            />
-          )}
+    return renderGlassBreadcrumb({
+      ancestors: ancestors.map((node) => ({
+        id: node.id,
+        label: crumbLabel(node),
+      })),
+      onNavigate: (id) => onNavigate(id, rootId),
+      renderMenu: (trigger) => (
+        <CollapsedCrumbs
+          hidden={ancestors.slice(0, -1)}
+          rootId={rootId}
+          onNavigate={onNavigate}
+          trigger={trigger}
         />
-      </Suspense>
-    );
+      ),
+    });
   }
 
   return (

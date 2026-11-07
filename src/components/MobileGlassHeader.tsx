@@ -17,7 +17,6 @@ import {
   Fragment,
   useContext,
   type ComponentProps,
-  type ReactElement,
   type ReactNode,
 } from "react";
 
@@ -26,6 +25,10 @@ import type { HeaderSlotSpec, PluginContext } from "../plugins/types";
 import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { useOpaqueChrome } from "../hooks/use-opaque-chrome";
 import { HeaderMoreMenu } from "./header-more-menu";
+import {
+  MobileBreadcrumb,
+  type MobileBreadcrumbProps,
+} from "./mobile-breadcrumb";
 import { openNodeSwitcher } from "./node-switcher-opener";
 import { openQuickAdd } from "./quick-add-opener";
 import { SpotlightIndicator } from "./spotlight-indicator";
@@ -101,7 +104,11 @@ export default function MobileGlassHeader({
           className="mobile-glass-header"
           data-opaque={opaque ? "" : undefined}
         >
-          <div className="mobile-glass-header-leading">{leading}</div>
+          <div className="mobile-glass-header-leading">
+            <MobileBreadcrumb value={renderGlassBreadcrumb}>
+              {leading}
+            </MobileBreadcrumb>
+          </div>
           <div className="mobile-glass-header-trailing">
             <SpotlightIndicator />
             <Group label="Actions">
@@ -153,15 +160,11 @@ export default function MobileGlassHeader({
  * included. `ancestors` excludes Home and ends at the direct parent;
  * `renderMenu` wraps the existing breadcrumb menu around a trigger.
  */
-export function GlassBreadcrumb({
+function GlassBreadcrumb({
   ancestors,
   onNavigate,
   renderMenu,
-}: {
-  ancestors: { id: string; label: string }[];
-  onNavigate: (id: string | null) => void;
-  renderMenu: (trigger: ReactElement<ComponentProps<"button">>) => ReactNode;
-}) {
+}: MobileBreadcrumbProps) {
   const parent = ancestors.at(-1);
   return (
     <nav aria-label="Breadcrumb" className="glass-breadcrumb">
@@ -186,3 +189,7 @@ export function GlassBreadcrumb({
     </nav>
   );
 }
+
+const renderGlassBreadcrumb = (props: MobileBreadcrumbProps) => (
+  <GlassBreadcrumb {...props} />
+);
