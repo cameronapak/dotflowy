@@ -1,3 +1,5 @@
+import type { ComponentProps, ReactElement } from "react";
+
 import { Avatar } from "@base-ui/react/avatar";
 import {
   ArrowShrinkIcon,
@@ -172,7 +174,7 @@ export function setViewCollapsed(collapsed: boolean) {
 }
 
 /** Current-view actions and display toggles, separate from account/help (ADR 0072). */
-export function HeaderViewMenu() {
+function ViewMenuItems() {
   const mobile = useIsMobile();
   const { globalActions } = usePluginChrome();
   const { showCompleted, setShowCompleted } = useShowCompleted();
@@ -181,6 +183,100 @@ export function HeaderViewMenu() {
   const rootId = useParams({ strict: false }).nodeId ?? null;
   const current = rootId ? index.byId.get(rootId) : null;
 
+  return (
+    <>
+      <div
+        role="presentation"
+        className="px-1.5 py-1 text-xs font-medium text-muted-foreground"
+      >
+        This view
+      </div>
+      {mobile && (
+        <DropdownMenuItem onClick={openFilterInput}>
+          <HugeiconsIcon icon={Search01Icon} />
+          Filter this view
+        </DropdownMenuItem>
+      )}
+      {current && (
+        <DropdownMenuCheckboxItem
+          checked={current.bookmarkedAt != null}
+          onCheckedChange={(checked) => toggleBookmark(current.id, checked)}
+        >
+          <HugeiconsIcon icon={Bookmark01Icon} />
+          Bookmark this page
+        </DropdownMenuCheckboxItem>
+      )}
+
+      <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
+        <HugeiconsIcon icon={ArrowShrinkIcon} />
+        Collapse all
+      </DropdownMenuItem>
+
+      <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
+        <HugeiconsIcon icon={ArrowExpandIcon} />
+        Expand all
+      </DropdownMenuItem>
+
+      <DropdownMenuItem onClick={() => void copyOutlineAsMarkdown()}>
+        <HugeiconsIcon icon={Copy01Icon} />
+        Copy as Markdown
+      </DropdownMenuItem>
+
+      <DropdownMenuSeparator />
+
+      <div
+        role="presentation"
+        className="px-1.5 py-1 text-xs font-medium text-muted-foreground"
+      >
+        Display
+      </div>
+      <DropdownMenuCheckboxItem
+        checked={showCompleted}
+        onCheckedChange={setShowCompleted}
+      >
+        <HugeiconsIcon icon={CheckmarkCircle01Icon} />
+        Show completed
+      </DropdownMenuCheckboxItem>
+
+      <DropdownMenuCheckboxItem
+        checked={spotlight}
+        onCheckedChange={setSpotlightEnabled}
+      >
+        <HugeiconsIcon icon={FocusIcon} />
+        Spotlight mode
+      </DropdownMenuCheckboxItem>
+
+      {globalActions
+        .filter(
+          (action) => action.menuLabel && (action.available?.(rootId) ?? true),
+        )
+        .map((action) =>
+          action.checked === undefined ? (
+            <DropdownMenuItem
+              key={action.id}
+              disabled={action.disabled}
+              onClick={() => action.run(rootId)}
+            >
+              <action.icon />
+              {action.menuLabel}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuCheckboxItem
+              key={action.id}
+              checked={action.checked}
+              disabled={action.disabled}
+              onCheckedChange={() => action.run(rootId)}
+            >
+              <action.icon />
+              {action.menuLabel}
+            </DropdownMenuCheckboxItem>
+          ),
+        )}
+    </>
+  );
+}
+
+export function HeaderViewMenu() {
   return (
     <DropdownMenu title="View options">
       <DropdownMenuTrigger
@@ -192,103 +288,117 @@ export function HeaderViewMenu() {
         }
       />
       <DropdownMenuContent align="end" className="min-w-52">
-        <div
-          role="presentation"
-          className="px-1.5 py-1 text-xs font-medium text-muted-foreground"
-        >
-          This view
-        </div>
-        {mobile && (
-          <DropdownMenuItem onClick={openFilterInput}>
-            <HugeiconsIcon icon={Search01Icon} />
-            Filter this view
-          </DropdownMenuItem>
-        )}
-        {current && (
-          <DropdownMenuCheckboxItem
-            checked={current.bookmarkedAt != null}
-            onCheckedChange={(checked) => toggleBookmark(current.id, checked)}
-          >
-            <HugeiconsIcon icon={Bookmark01Icon} />
-            Bookmark this page
-          </DropdownMenuCheckboxItem>
-        )}
-
-        <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
-          <HugeiconsIcon icon={ArrowShrinkIcon} />
-          Collapse all
-        </DropdownMenuItem>
-
-        <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
-          <HugeiconsIcon icon={ArrowExpandIcon} />
-          Expand all
-        </DropdownMenuItem>
-
-        <DropdownMenuItem onClick={() => void copyOutlineAsMarkdown()}>
-          <HugeiconsIcon icon={Copy01Icon} />
-          Copy as Markdown
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator />
-
-        <div
-          role="presentation"
-          className="px-1.5 py-1 text-xs font-medium text-muted-foreground"
-        >
-          Display
-        </div>
-        <DropdownMenuCheckboxItem
-          checked={showCompleted}
-          onCheckedChange={setShowCompleted}
-        >
-          <HugeiconsIcon icon={CheckmarkCircle01Icon} />
-          Show completed
-        </DropdownMenuCheckboxItem>
-
-        <DropdownMenuCheckboxItem
-          checked={spotlight}
-          onCheckedChange={setSpotlightEnabled}
-        >
-          <HugeiconsIcon icon={FocusIcon} />
-          Spotlight mode
-        </DropdownMenuCheckboxItem>
-
-        {globalActions
-          .filter(
-            (action) =>
-              action.menuLabel && (action.available?.(rootId) ?? true),
-          )
-          .map((action) =>
-            action.checked === undefined ? (
-              <DropdownMenuItem
-                key={action.id}
-                disabled={action.disabled}
-                onClick={() => action.run(rootId)}
-              >
-                <action.icon />
-                {action.menuLabel}
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuCheckboxItem
-                key={action.id}
-                checked={action.checked}
-                disabled={action.disabled}
-                onCheckedChange={() => action.run(rootId)}
-              >
-                <action.icon />
-                {action.menuLabel}
-              </DropdownMenuCheckboxItem>
-            ),
-          )}
+        <ViewMenuItems />
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
+/** The signed-in person's photo, email initial, or a user glyph (ADR 0072). */
+function AccountAvatar() {
+  const { data: session } = useSession();
+  return (
+    <Avatar.Root
+      aria-hidden="true"
+      className="inline-flex size-6 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-medium text-muted-foreground"
+    >
+      <Avatar.Fallback className="flex size-full items-center justify-center">
+        {session?.user.email?.charAt(0).toUpperCase() || (
+          <HugeiconsIcon icon={UserIcon} />
+        )}
+      </Avatar.Fallback>
+      <Avatar.Image
+        src={session?.user.image ?? undefined}
+        alt=""
+        referrerPolicy="no-referrer"
+        keepMounted
+        className="absolute size-6 rounded-full object-cover data-error:invisible data-loading:invisible"
+      />
+    </Avatar.Root>
+  );
+}
+
+function AppMenuItems() {
+  const navigate = useNavigate();
+  const unseen = useUnseenReleaseCount();
+  return (
+    <>
+      <DropdownMenuItem onClick={() => void navigate({ to: "/settings" })}>
+        <HugeiconsIcon icon={Settings01Icon} />
+        Settings
+      </DropdownMenuItem>
+
+      {/* The permanent home for the changelog (ADR 0046). While releases
+        are unread, it's emphasized -- bolder text + a solid count pill --
+        so the eye lands here once the trigger's dot draws the menu open. */}
+      <DropdownMenuItem
+        onClick={() => openChangelog()}
+        data-unseen={unseen > 0 ? "" : undefined}
+        className={unseen > 0 ? "font-medium" : undefined}
+      >
+        <HugeiconsIcon icon={SparklesIcon} />
+        What's new
+        {unseen > 0 && (
+          // `text-primary-foreground!` is deliberate: the DropdownMenuItem's
+          // `focus:**:text-accent-foreground` recolors EVERY descendant on
+          // hover, which would flip this number to near-white on the near-
+          // white pill (an unreadable white circle). The bang shields it so
+          // the chip stays legible at rest and on hover, both themes.
+          <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground! tabular-nums">
+            {unseen}
+          </span>
+        )}
+      </DropdownMenuItem>
+
+      <DropdownMenuItem onClick={() => openFeedbackReport()}>
+        <HugeiconsIcon icon={BubbleChatNotificationIcon} />
+        Report a bug
+      </DropdownMenuItem>
+
+      <DropdownMenuItem
+        onClick={() =>
+          window.open(
+            "https://git.new/dotflowy",
+            "_blank",
+            "noopener,noreferrer",
+          )
+        }
+      >
+        <GitHubIcon />
+        GitHub
+      </DropdownMenuItem>
+
+      {/* Legal pages (#285/#286): read-only links, so they live with the
+        other link items (What's new, GitHub) rather than /settings. */}
+      <DropdownMenuItem
+        onClick={() => window.open("/terms", "_blank", "noopener,noreferrer")}
+      >
+        <HugeiconsIcon icon={File01Icon} />
+        Terms
+      </DropdownMenuItem>
+
+      <DropdownMenuItem
+        onClick={() => window.open("/privacy", "_blank", "noopener,noreferrer")}
+      >
+        <HugeiconsIcon icon={ShieldCheckIcon} />
+        Privacy Policy
+      </DropdownMenuItem>
+
+      <DropdownMenuSeparator />
+
+      <DropdownMenuItem
+        variant="destructive"
+        onClick={() => signOutAndReload()}
+      >
+        <HugeiconsIcon icon={Logout01Icon} />
+        Sign out
+      </DropdownMenuItem>
+    </>
+  );
+}
+
 /** Account, help, and the unread-release signal live on the avatar (ADR 0072). */
 export function HeaderAppMenu() {
-  const navigate = useNavigate();
-  const { data: session } = useSession();
   const unseen = useUnseenReleaseCount();
 
   return (
@@ -306,23 +416,7 @@ export function HeaderAppMenu() {
             }
             className="relative rounded-full"
           >
-            <Avatar.Root
-              aria-hidden="true"
-              className="inline-flex size-6 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-medium text-muted-foreground"
-            >
-              <Avatar.Fallback className="flex size-full items-center justify-center">
-                {session?.user.email?.charAt(0).toUpperCase() || (
-                  <HugeiconsIcon icon={UserIcon} />
-                )}
-              </Avatar.Fallback>
-              <Avatar.Image
-                src={session?.user.image ?? undefined}
-                alt=""
-                referrerPolicy="no-referrer"
-                keepMounted
-                className="absolute size-6 rounded-full object-cover data-error:invisible data-loading:invisible"
-              />
-            </Avatar.Root>
+            <AccountAvatar />
             {unseen > 0 && (
               <span
                 data-changelog-dot=""
@@ -334,78 +428,35 @@ export function HeaderAppMenu() {
         }
       />
       <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuItem onClick={() => void navigate({ to: "/settings" })}>
-          <HugeiconsIcon icon={Settings01Icon} />
-          Settings
-        </DropdownMenuItem>
+        <AppMenuItems />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
-        {/* The permanent home for the changelog (ADR 0046). While releases
-            are unread, it's emphasized -- bolder text + a solid count pill --
-            so the eye lands here once the trigger's dot draws the menu open. */}
-        <DropdownMenuItem
-          onClick={() => openChangelog()}
-          data-unseen={unseen > 0 ? "" : undefined}
-          className={unseen > 0 ? "font-medium" : undefined}
-        >
-          <HugeiconsIcon icon={SparklesIcon} />
-          What's new
-          {unseen > 0 && (
-            // `text-primary-foreground!` is deliberate: the DropdownMenuItem's
-            // `focus:**:text-accent-foreground` recolors EVERY descendant on
-            // hover, which would flip this number to near-white on the near-
-            // white pill (an unreadable white circle). The bang shields it so
-            // the chip stays legible at rest and on hover, both themes.
-            <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground! tabular-nums">
-              {unseen}
-            </span>
-          )}
-        </DropdownMenuItem>
-
-        <DropdownMenuItem onClick={() => openFeedbackReport()}>
-          <HugeiconsIcon icon={BubbleChatNotificationIcon} />
-          Report a bug
-        </DropdownMenuItem>
-
-        <DropdownMenuItem
-          onClick={() =>
-            window.open(
-              "https://git.new/dotflowy",
-              "_blank",
-              "noopener,noreferrer",
-            )
-          }
-        >
-          <GitHubIcon />
-          GitHub
-        </DropdownMenuItem>
-
-        {/* Legal pages (#285/#286): read-only links, so they live with the
-            other link items (What's new, GitHub) rather than /settings. */}
-        <DropdownMenuItem
-          onClick={() => window.open("/terms", "_blank", "noopener,noreferrer")}
-        >
-          <HugeiconsIcon icon={File01Icon} />
-          Terms
-        </DropdownMenuItem>
-
-        <DropdownMenuItem
-          onClick={() =>
-            window.open("/privacy", "_blank", "noopener,noreferrer")
-          }
-        >
-          <HugeiconsIcon icon={ShieldCheckIcon} />
-          Privacy Policy
-        </DropdownMenuItem>
-
+/**
+ * Narrow screens: View options and Account and help share one More menu, as in
+ * iOS toolbars, so the parent page name keeps its room (ADR 0076). Desktop
+ * keeps the two separate menus (ADR 0072).
+ */
+export function HeaderMoreMenu({
+  trigger,
+}: {
+  trigger: ReactElement<ComponentProps<"button">>;
+}) {
+  return (
+    <DropdownMenu title="More">
+      <DropdownMenuTrigger render={trigger} />
+      <DropdownMenuContent align="end" className="min-w-52">
+        <ViewMenuItems />
         <DropdownMenuSeparator />
-
-        <DropdownMenuItem
-          variant="destructive"
-          onClick={() => signOutAndReload()}
+        <div
+          role="presentation"
+          className="px-1.5 py-1 text-xs font-medium text-muted-foreground"
         >
-          <HugeiconsIcon icon={Logout01Icon} />
-          Sign out
-        </DropdownMenuItem>
+          Account and help
+        </div>
+        <AppMenuItems />
       </DropdownMenuContent>
     </DropdownMenu>
   );

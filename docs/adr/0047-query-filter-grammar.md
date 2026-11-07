@@ -1,7 +1,8 @@
 # A query grammar for the view filter, with plugin-registered operators
 
 **Mobile entry-point amendment ([ADR 0076](./0076-mobile-navigation-dock.md)).**
-Below 768px, Filter this view lives in the View menu. The toolbar's Search
+Below 768px, Filter this view is the first row of the toolbar's More menu
+(its View section). The toolbar's Search
 magnifier opens the command center. Desktop retains the separate filter
 magnifier and command-center button described below. Filter semantics and
 keyboard shortcuts are unchanged.

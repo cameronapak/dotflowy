@@ -210,7 +210,7 @@ test("a hidden mobile breadcrumb preserves collapse state and focuses the visibl
   await page.goto("/ideas");
   await expect(text(page, "idea-one")).toBeVisible({ timeout: 15_000 });
 
-  await page.getByRole("button", { name: "Show hidden breadcrumbs" }).click();
+  await page.getByRole("button", { name: "Show breadcrumbs" }).click();
   await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
     "data-expanded",
   );

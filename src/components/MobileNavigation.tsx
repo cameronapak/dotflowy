@@ -18,6 +18,8 @@ import { createPortal } from "react-dom";
 
 import type { HeaderSlotSpec, PluginContext } from "../plugins/types";
 
+import { useOpaqueChrome } from "../hooks/use-opaque-chrome";
+
 const NavigationContext = createContext<{
   slots: HeaderSlotSpec[];
   getCtx: () => PluginContext;
@@ -64,33 +66,8 @@ export default function MobileNavigation({
 }) {
   const rootId = useParams({ strict: false }).nodeId ?? null;
   const { day } = useSearch({ strict: false });
-  const [opaque, setOpaque] = useState(true);
+  const opaque = useOpaqueChrome();
   const [keyboard, setKeyboard] = useState(false);
-
-  useEffect(() => {
-    const preferences = [
-      "(prefers-reduced-motion: reduce)",
-      "(prefers-reduced-transparency: reduce)",
-      "(prefers-contrast: more)",
-      "(forced-colors: active)",
-    ].map((query) => window.matchMedia(query));
-    const update = () =>
-      setOpaque(
-        preferences.some((preference) => preference.matches) ||
-          !(
-            CSS.supports("backdrop-filter", "blur(1px)") ||
-            CSS.supports("-webkit-backdrop-filter", "blur(1px)")
-          ),
-      );
-    update();
-    preferences.forEach((preference) =>
-      preference.addEventListener("change", update),
-    );
-    return () =>
-      preferences.forEach((preference) =>
-        preference.removeEventListener("change", update),
-      );
-  }, []);
 
   useEffect(() => {
     const viewport = window.visualViewport;

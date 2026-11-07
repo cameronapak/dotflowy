@@ -71,10 +71,10 @@ test("View bookmarks the current page on desktop and removes it in the narrow sh
     .locator("h2.zoomed-title .node-text")
     .waitFor({ state: "visible" });
   await page.setViewportSize({ width: 390, height: 844 });
-  await view.click();
-  await expect(
-    page.getByRole("dialog", { name: "View options" }),
-  ).toBeVisible();
+  // Narrow screens put View options in the More menu (ADR 0076).
+  const more = page.getByRole("button", { name: "More", exact: true });
+  await more.click();
+  await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
   await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
     "data-expanded",
   );
@@ -90,10 +90,8 @@ test("View bookmarks the current page on desktop and removes it in the narrow sh
 
   await page.goto("/");
   await text(page, "alpha").waitFor({ state: "visible" });
-  await view.click();
-  await expect(
-    page.getByRole("dialog", { name: "View options" }),
-  ).toBeVisible();
+  await more.click();
+  await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
   await expect(bookmark).toHaveCount(0);
 });
 
