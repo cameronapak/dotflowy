@@ -70,7 +70,10 @@ with the mobile chunks, not desktop's initial editor graph. Scope palette
 overrides to each surface and follow Dotflowy's theme, not the OS appearance:
 the package reads `prefers-color-scheme`, so the header pins both its light and
 dark values. Use the package's own glass, selection lens and scroll-edge band
-without an additional background or selected fill. Quick-add's fill is
+without an additional background or selected fill. The one exception: while
+the subheader is open, the band stops at the toolbar's bottom edge, because its
+24px fade would otherwise wash over the opaque subheader, such as the focus
+band. Quick-add's fill is
 `--primary`. Menus stay Dotflowy's React Aria sheets, not the package's Menu.
 Do not mark the editable outline `data-liquidglass-backdrop`: cloning an editor
 and continuously refreshing that copy is inappropriate for this surface.

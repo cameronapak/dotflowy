@@ -122,9 +122,17 @@ async function popOut() {
 function display(text: string | undefined) {
   return flattenInline(redactSpoilers(text || "Untitled"));
 }
+// Sessions run up to 24 hours and overtime is unbounded, so an hour or more
+// reads as h:mm:ss rather than "134:34".
 function timer(ms: number) {
   const seconds = Math.ceil(Math.abs(ms) / 1000);
-  return `${ms < 0 ? "+" : ""}${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hours = Math.floor(seconds / 3600);
+  const clock =
+    hours > 0
+      ? `${hours}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}`
+      : `${Math.floor(seconds / 60)}:${pad(seconds % 60)}`;
+  return `${ms < 0 ? "+" : ""}${clock}`;
 }
 
 function Reflection({
@@ -275,13 +283,43 @@ function FocusSurface({
   const breaking = session.phase === "break" || session.phase === "ready";
   const progress = Math.max(0, Math.min(1, ms / session.duration));
   const task = node?.isTask && node.kind === null;
+  // The running band is a solid primary fill, so it stands out against the
+  // page in both themes without adding a hue (ADR 0074). The floating card and
+  // the reflection field keep the page surface.
+  const fill = !card && session.phase !== "reflect";
+  // A ring tinted like the resting border reads as no change on the fill, so
+  // focus draws an offset outline in the text color instead.
+  const fillFocus =
+    "focus-visible:ring-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-primary-foreground";
+  const ghost = fill
+    ? cn(
+        fillFocus,
+        "text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground dark:hover:bg-primary-foreground/15",
+      )
+    : undefined;
+  const outline = fill
+    ? cn(
+        fillFocus,
+        "border-primary-foreground/40 bg-transparent text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground dark:border-primary-foreground/40 dark:bg-transparent dark:hover:bg-primary-foreground/15",
+      )
+    : undefined;
+  const primary = fill
+    ? cn(
+        fillFocus,
+        "bg-primary-foreground text-primary hover:bg-primary-foreground/85",
+      )
+    : undefined;
   const controls =
     session.phase === "reflect" ? (
       <Reflection key={session.id} session={session} card={card} />
     ) : (
       <>
         {(up || breaking) && (
-          <Button size="sm" onClick={() => endSession(true)}>
+          <Button
+            size="sm"
+            className={primary}
+            onClick={() => endSession(true)}
+          >
             {task && (
               <HugeiconsIcon
                 icon={CheckmarkCircle01Icon}
@@ -295,6 +333,7 @@ function FocusSurface({
           <Button
             size="sm"
             variant="outline"
+            className={outline}
             onClick={() =>
               updateSession((current) =>
                 current
@@ -312,7 +351,12 @@ function FocusSurface({
           </Button>
         )}
         {up && (
-          <Button size="sm" variant="ghost" onClick={() => endSession(false)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className={ghost}
+            onClick={() => endSession(false)}
+          >
             Let go
           </Button>
         )}
@@ -320,6 +364,7 @@ function FocusSurface({
           <Button
             size="sm"
             variant="outline"
+            className={outline}
             onClick={() =>
               updateSession((current) =>
                 current ? nextRound(current, Date.now()) : null,
@@ -334,6 +379,7 @@ function FocusSurface({
             <Button
               size="icon-sm"
               variant="ghost"
+              className={ghost}
               aria-label={
                 session.pausedAt === null
                   ? "Pause focus session"
@@ -353,7 +399,7 @@ function FocusSurface({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                className="max-sm:hidden"
+                className={cn("max-sm:hidden", ghost)}
                 aria-label="Pop out focus session"
                 title="Pop out (Chrome desktop)"
                 aria-pressed={pipOpen}
@@ -370,6 +416,7 @@ function FocusSurface({
           <Button
             size="icon-sm"
             variant="ghost"
+            className={ghost}
             aria-label="End focus session"
             onClick={() => endSession(false)}
           >
@@ -385,7 +432,12 @@ function FocusSurface({
       data-focus-phase={session.phase}
       className={cn(
         "relative text-sm",
-        card ? "flex min-h-dvh flex-col p-3" : "w-full bg-muted/30",
+        card
+          ? "flex min-h-dvh flex-col p-3"
+          : cn(
+              "w-full transition-colors duration-200 motion-reduce:transition-none",
+              fill ? "bg-primary text-primary-foreground" : "bg-muted/30",
+            ),
       )}
     >
       <div
@@ -407,12 +459,15 @@ function FocusSurface({
             <div
               className={cn(
                 "flex min-w-0 flex-1 items-center gap-2",
-                !card && "max-sm:basis-full",
+                // A floor for the title: crowded controls wrap to a second
+                // line instead of squeezing what you set out to do away.
+                !card && "basis-72 max-sm:basis-full",
               )}
             >
               {task && (
                 <Checkbox
                   aria-label="Complete focused task"
+                  className={cn(fill && "border-primary-foreground/60")}
                   checked={node.completed}
                   onCheckedChange={(checked) => {
                     if (checked) endSession(true);
@@ -420,7 +475,9 @@ function FocusSurface({
                 />
               )}
               {!card && (
-                <span className="shrink-0 text-muted-foreground">
+                <span
+                  className={cn("shrink-0 font-medium", !up && "opacity-75")}
+                >
                   {breaking
                     ? "Break"
                     : away
@@ -431,9 +488,12 @@ function FocusSurface({
                 </span>
               )}
               <button
+                // dir="auto" truncates a right-to-left title at its end.
+                dir="auto"
+                title={display(node?.text)}
                 className={cn(
-                  "min-w-0 text-left hover:underline",
-                  card ? "line-clamp-2 font-medium" : "truncate",
+                  "min-w-0 text-start font-medium hover:underline",
+                  card ? "line-clamp-2" : "truncate",
                 )}
                 onClick={returnToFocus}
               >
@@ -442,7 +502,7 @@ function FocusSurface({
             </div>
             {session.pomodoro && (
               <span
-                aria-label={`Round ${session.round}; ${session.settings.rounds} rounds before a long break`}
+                aria-label={`Round ${session.round}; ${session.settings.rounds} ${session.settings.rounds === 1 ? "round" : "rounds"} before a long break`}
                 className="flex shrink-0 gap-1"
               >
                 {Array.from({ length: session.settings.rounds }, (_, i) => (
@@ -451,20 +511,32 @@ function FocusSurface({
                     className={cn(
                       "size-1.5 rounded-full",
                       i < ((session.round - 1) % session.settings.rounds) + 1
-                        ? "bg-foreground"
-                        : "bg-foreground/20",
+                        ? card
+                          ? "bg-foreground"
+                          : "bg-primary-foreground"
+                        : card
+                          ? "bg-foreground/20"
+                          : "bg-primary-foreground/25",
                     )}
                   />
                 ))}
               </span>
             )}
             <span
-              className={cn("shrink-0 tabular-nums", card && "text-xl")}
+              className={cn(
+                "shrink-0 tabular-nums",
+                card ? "text-xl" : "font-medium",
+              )}
               aria-label="Focus time remaining"
             >
               {session.phase === "ready" ? "Ready when you are" : timer(ms)}
               {session.pausedAt !== null && (
-                <span className="ml-2 text-xs text-muted-foreground">
+                <span
+                  className={cn(
+                    "ml-2 text-xs",
+                    card ? "text-muted-foreground" : "opacity-75",
+                  )}
+                >
                   Paused
                 </span>
               )}
@@ -481,7 +553,12 @@ function FocusSurface({
               </div>
             )}
             {!card && away && (
-              <Button variant="outline" size="sm" onClick={returnToFocus}>
+              <Button
+                variant="outline"
+                size="sm"
+                className={outline}
+                onClick={returnToFocus}
+              >
                 Return
               </Button>
             )}
@@ -505,14 +582,18 @@ function FocusSurface({
           {controls}
         </div>
       </div>
-      {!card && session.phase !== "reflect" && (
-        <div
-          className={cn(
-            "absolute bottom-0 left-0 h-0.5",
-            breaking ? "bg-muted-foreground" : "bg-foreground",
-          )}
-          style={{ width: `${progress * 100}%` }}
-        />
+      {fill && (
+        <>
+          <div className="absolute bottom-0 left-0 h-1 w-full bg-primary-foreground/20" />
+          <div
+            className={cn(
+              "absolute bottom-0 left-0 h-1",
+              breaking ? "bg-primary-foreground/50" : "bg-primary-foreground",
+            )}
+            // Overtime fills the bar: time is up without adding a hue.
+            style={{ width: `${(up ? 1 : progress) * 100}%` }}
+          />
+        </>
       )}
     </section>
   );
@@ -572,7 +653,7 @@ export function FocusMarker({ node }: { node: Node }) {
       role="img"
       aria-label="Active focus session"
       title={timer(remaining(session, now))}
-      className="inline-flex size-4 align-middle text-muted-foreground"
+      className="inline-flex size-4 align-middle text-foreground"
     >
       <svg viewBox="0 0 16 16" className="size-4" aria-hidden="true">
         <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" />

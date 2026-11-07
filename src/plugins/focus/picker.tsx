@@ -121,7 +121,8 @@ function FocusPicker({ id, ctx }: { id: string; ctx: PluginContext }) {
             <p className="text-sm text-muted-foreground">
               {prefs.focus.focusMinutes} min focus, {prefs.focus.breakMinutes}{" "}
               min break. {prefs.focus.longBreakMinutes} min break after{" "}
-              {prefs.focus.rounds} rounds.
+              {prefs.focus.rounds}{" "}
+              {prefs.focus.rounds === 1 ? "round" : "rounds"}.
             </p>
           )}
           {current && current.phase !== "reflect" && (
