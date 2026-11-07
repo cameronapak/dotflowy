@@ -113,6 +113,7 @@ beforeAll(async () => {
     target: "es2022",
   });
   mf = new Miniflare({
+    unsafeInspectDurableObjects: true,
     workers: [
       {
         config: {
@@ -204,17 +205,186 @@ beforeAll(async () => {
   for (const migration of [
     "0003_create_auth.sql",
     "0004_create_oauth.sql",
+    "0005_create_waitlist.sql",
     "0006_create_stripe.sql",
+    "0007_create_invites.sql",
     "0014_capture_keys.sql",
   ]) {
     const sql = await readFile(`migrations/${migration}`, "utf8");
-    await db.exec(sql.replace(/^--.*$/gm, "").replaceAll("\n", " "));
+    await db.exec(sql.replace(/--[^\n]*/g, "").replaceAll("\n", " "));
   }
 }, 60_000);
 
 afterAll(async () => {
   await mf?.dispose();
   if (directory) await rm(directory, { recursive: true, force: true });
+});
+
+test("retained shards stay inert until authenticated account erasure, without affecting a neighbor", async () => {
+  const email = `${randomUUID()}@capture.test`;
+  const password = "disposable-test-password-1";
+  const signup = await mf.dispatchFetch(
+    "http://fixture/api/auth/sign-up/email",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://fixture" },
+      body: JSON.stringify({ name: "Deletion test", email, password }),
+    },
+  );
+  expect(signup.status, await signup.clone().text()).toBe(200);
+  const db = await mf.getD1Database("DB");
+  const user = await db
+    .prepare('SELECT id FROM "user" WHERE email=?')
+    .bind(email)
+    .first<{ id: string }>();
+  expect(user).not.toBeNull();
+  const userId = user!.id;
+  await db
+    .prepare('UPDATE "user" SET emailVerified=1 WHERE id=?')
+    .bind(userId)
+    .run();
+  const signin = await mf.dispatchFetch(
+    "http://fixture/api/auth/sign-in/email",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://fixture" },
+      body: JSON.stringify({ email, password }),
+    },
+  );
+  expect(signin.status).toBe(200);
+  const cookie = signin.headers
+    .getSetCookie()
+    .map((value) => value.split(";")[0])
+    .join("; ");
+  const neighbor = await account();
+  await fixture("capture", {
+    userId,
+    attemptId: randomUUID(),
+    date: "2026-11-07",
+    text: "erase only this outline",
+  });
+  await fixture("capture", {
+    userId: neighbor.userId,
+    attemptId: randomUUID(),
+    date: "2026-11-07",
+    text: "keep this outline",
+  });
+  const shard = await mf.unsafeGetDurableObjectStorage(
+    "capture-test",
+    "ShardDO",
+    { name: userId },
+  );
+  const neighborShard = await mf.unsafeGetDurableObjectStorage(
+    "capture-test",
+    "ShardDO",
+    { name: neighbor.userId },
+  );
+  for (const storage of [shard, neighborShard]) {
+    await storage.exec("CREATE TABLE retained_test (value TEXT)");
+    await storage.exec("INSERT INTO retained_test VALUES ('retain me')");
+  }
+  const namespace = await mf.getDurableObjectNamespace("SHARD");
+  expect(
+    (await namespace.get(namespace.idFromName(userId)).fetch("http://fixture/"))
+      .status,
+  ).toBe(404);
+  await mf.unsafeEvictDurableObject("capture-test", "ShardDO", {
+    name: userId,
+  });
+  expect(await shard.exec("SELECT value FROM retained_test")).toEqual([
+    { value: "retain me" },
+  ]);
+
+  const refused = await mf.dispatchFetch(
+    "http://fixture/api/auth/delete-user",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://fixture",
+        cookie,
+      },
+      body: JSON.stringify({ password: "wrong password" }),
+    },
+  );
+  expect(refused.status).not.toBe(200);
+  expect(await shard.exec("SELECT value FROM retained_test")).toEqual([
+    { value: "retain me" },
+  ]);
+  const deleted = await mf.dispatchFetch(
+    "http://fixture/api/auth/delete-user",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://fixture",
+        cookie,
+      },
+      body: JSON.stringify({ password }),
+    },
+  );
+  expect(deleted.status, await deleted.clone().text()).toBe(200);
+  expect(
+    await db.prepare('SELECT id FROM "user" WHERE id=?').bind(userId).first(),
+  ).toBeNull();
+  expect(
+    await shard.exec(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='retained_test'",
+    ),
+  ).toEqual([]);
+  const classic = await mf.unsafeGetDurableObjectStorage(
+    "capture-test",
+    "UserOutlineDO",
+    { name: userId },
+  );
+  expect(
+    await classic.exec(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('nodes','kv','changelog')",
+    ),
+  ).toEqual([]);
+  expect(await neighborShard.exec("SELECT value FROM retained_test")).toEqual([
+    { value: "retain me" },
+  ]);
+  expect(
+    (
+      await fixture<Inspection>("inspect", { userId: neighbor.userId })
+    ).snapshot.nodes.some((node) => node.text === "keep this outline"),
+  ).toBe(true);
+});
+
+test("persisted cutover receipts still prevent replacing a recovered outline", async () => {
+  for (const marker of ["preserve_classic_receipt", "lunora_retired"]) {
+    const { userId } = await account();
+    await fixture("capture", {
+      userId,
+      attemptId: randomUUID(),
+      date: "2026-11-07",
+      text: "recovered content",
+    });
+    const before = (await fixture<Inspection>("inspect", { userId })).snapshot;
+    const storage = await mf.unsafeGetDurableObjectStorage(
+      "capture-test",
+      "UserOutlineDO",
+      { name: userId },
+    );
+    await storage.exec(
+      "INSERT INTO meta (key,value) VALUES (?,?)",
+      marker,
+      "completed-cutover",
+    );
+    const response = await mf.dispatchFetch(
+      "http://fixture/fixture/restore-snapshot",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId }),
+      },
+    );
+    expect(response.status).toBe(500);
+    expect(
+      (await fixture<Inspection>("inspect", { userId })).snapshot.nodes,
+    ).toEqual(before.nodes);
+  }
 });
 
 test("free-account HTTP capture honors explicit date and has decisive idempotency", async () => {

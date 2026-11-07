@@ -42,13 +42,12 @@ import {
   setText,
 } from "../../data/mutations";
 import { isNodesLimitError } from "../../data/nodes-client-effect";
-import { buildTreeIndex, childrenOf } from "../../data/outline-plans";
 import {
   runStructural,
   runStructuralSliced,
   runStructuralTracked,
 } from "../../data/structural";
-import { createId } from "../../data/tree";
+import { buildTreeIndex, childrenOf, createId } from "../../data/tree";
 import {
   CONTAINER_KEY,
   DAILY_CONTAINER_TEXT,

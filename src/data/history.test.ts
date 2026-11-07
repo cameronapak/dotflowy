@@ -110,10 +110,9 @@ test("undo and redo move one entry between the stacks; capture and drop manage r
   expect(undo(idx)).toBeNull();
 });
 
-// An empty index only ever reaches capture() when the caller read a starved
-// node source -- `nodesCollection` is ready-and-empty while the Lunora flag is
-// ON (ADR 0058). Storing that snapshot makes the next Cmd+Z classify every live
-// node as a delete, so capture refuses it and the matching drop no-ops.
+// Storing a starved node source as an empty snapshot makes the next Cmd+Z
+// classify every live node as a delete, so capture refuses it and the matching
+// drop no-ops.
 test("a refused empty capture pushes nothing and leaves both stacks intact", () => {
   const idxA = buildTreeIndex([createNode({ id: "a" })]);
 

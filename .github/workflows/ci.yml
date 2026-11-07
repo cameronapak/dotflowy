@@ -72,8 +72,6 @@ jobs:
         run: |
           git fetch --no-tags origin "$GITHUB_BASE_REF"
           bun run check:changeset
-      - name: Real Worker regression
-        run: bun run test:e2e:retirement --workers=1 --retries=0 --max-failures=1
       - name: Install Worker browser
         run: |
           # Use the same mirror workaround as the app shards below.

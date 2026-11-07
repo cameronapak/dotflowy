@@ -20,7 +20,7 @@ Keep this file brief. Put task-specific guidance behind a pointer.
 - **Send all transactional email through `worker/email.ts`.** Park sends on `ctx.waitUntil`.
 - **Decode request bodies against Effect Schema.**
 - **The app is a pure static SPA.** Code that touches `nodesCollection` stays off the server and render pass.
-- **Classic is the only browser and MCP backend.** Retain Lunora's internal retirement exports, bindings, shards, and backups through observation. User-facing copy must not name Lunora.
+- **Classic is the only browser and MCP backend.** Retained storage, applied migration history, and backups need separate approval for destructive cleanup ([ADR 0075](./docs/adr/0075-finalize-backend-retirement.md)).
 - **Documentation Freshness.** If `AGENTS.md` or `README.md` becomes false about a path, command, or tool, correct it in the same change. Ask first before changing policy, philosophy, or positioning.
 - **Run the app before calling an observable change done.** Drive it in `bun run cf:dev` or an e2e spec.
 
@@ -37,7 +37,7 @@ New feature or design: `ls docs/adr/` and read the ADRs that match the surface. 
 | Touch targets, reading size, and the bullet dot        | 0029                                                   |
 | Spotlight dim + breathing room                         | 0033, 0060                                             |
 | Focus sessions, Pomodoro, and Document PiP             | 0074, 0002                                             |
-| Lunora retirement and retained exports                 | 0061-retire-lunora-through-per-user-cutover            |
+| Retired backend storage and restore guards             | 0075                                                   |
 
 ## Architecture
 
@@ -62,10 +62,6 @@ Writing, reviewing, or pruning a test: read [`CONTRIBUTING.md#testing`](./CONTRI
 ## Billing
 
 Entitlements and checkout: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
-
-## Lunora
-
-Retirement, recovery, and retained internal exports: [ADR 0061](./docs/adr/0061-retire-lunora-through-per-user-cutover.md). The historical sync design is [ADR 0058](./docs/adr/0058-lunora-replaces-custom-outline-sync.md).
 
 ## Review
 

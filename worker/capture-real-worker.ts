@@ -15,7 +15,7 @@ import productionWorker from "./index";
 import { unfurlTitleE } from "./unfurl";
 
 export { UserOutlineDO } from "./outline-do";
-export { ShardDO } from "./lunora-app";
+export { ShardDO } from "./retained-shard";
 
 type Env = Parameters<NonNullable<typeof productionWorker.fetch>>[1] & {
   USER_OUTLINE: DurableObjectNamespace<import("./outline-do").UserOutlineDO>;
@@ -61,6 +61,11 @@ export default {
     const stub = env.USER_OUTLINE.get(
       env.USER_OUTLINE.idFromName(resolveUserId(input.userId, env)),
     );
+
+    if (url.pathname === "/fixture/restore-snapshot") {
+      await stub.restoreSnapshot({ nodes: [], kv: [] });
+      return Response.json({ restored: true });
+    }
 
     if (url.pathname === "/fixture/seed") {
       const now = Date.now();

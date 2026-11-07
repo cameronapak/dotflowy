@@ -15,7 +15,7 @@ const VITE = fileURLToPath(
 export default defineConfig({
   testDir: "./e2e",
   // Real Worker suites own their backend rather than using this Vite server.
-  testIgnore: ["lunora-retirement-real.spec.ts", "worker-browser/**"],
+  testIgnore: ["worker-browser/**"],
   fullyParallel: true,
   // Each worker owns a browser in addition to the shared Vite server. Leave
   // room for the agent and other checks on a medium Orb (4 CPUs, 8 GB RAM).

@@ -72,8 +72,7 @@ A new field touches at least seven places: `src/data/wire-schema.ts`, `src/data/
 fixtures and inbound-frame decode rejects every snapshot. Build nodes with
 `createNode()` — a schema default makes the field optional in the encoded type
 ([ADR 0003](./adr/0003-no-schema-defaults.md)). Also update any MCP/CLI output
-schema that exposes the field and Lunora's retained retirement schema, then run
-`bun run lunora:codegen`.
+schema that exposes the field.
 
 ### Reading the tree
 

@@ -2848,8 +2848,7 @@ function useNodeCommands({
                     content.kind,
                   );
                 } else if (!caretAtEnd) {
-                  // Mid-split: one atomic Lunora mutator (or insertSibling+setText
-                  // inside this runStructural batch on the custom-DO path).
+                  // Mid-split: insertSibling+setText inside this runStructural batch.
                   // Mirror rows force caretAtEnd above, so this arm is never a mirror.
                   newId = splitNode(idx, {
                     nodeId: contentId,

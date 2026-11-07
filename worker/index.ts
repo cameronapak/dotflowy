@@ -40,7 +40,7 @@ import {
   sendAnnouncements,
   type AnnounceBatchResult,
 } from "./announce";
-import { createAuth } from "./auth";
+import { createAuth, type AuthEnv } from "./auth";
 import {
   OutlineSnapshotSchema,
   backupKey,
@@ -66,16 +66,6 @@ import {
   pendingWaitlistEmails,
   type InviteBatchResult,
 } from "./invites";
-import { ShardDO, type LunoraEnv } from "./lunora-app";
-import {
-  RetirementOperationInProgress,
-  RetirementOperationRejected,
-  retirementDiagnostic,
-  retirementPopulation,
-  retirementRepairPreview,
-  retirementReport,
-  runRetirementOperation,
-} from "./lunora-retirement-service";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
@@ -86,7 +76,6 @@ import { unfurlTextE } from "./unfurl-text";
 import {
   AdminAnnouncePostBody,
   AdminInvitePostBody,
-  AdminLunoraRetirementPostBody,
   AdminRestorePostBody,
   AdminSnapshotRestorePostBody,
   KvClaimBody,
@@ -110,12 +99,10 @@ export const UserOutlineDO = Sentry.instrumentDurableObjectWithSentry(
 );
 type UserOutlineDO = BaseUserOutlineDO;
 
-// Lunora ShardDO (ADR 0058) — re-export for wrangler `SHARD` binding.
-// TEMP: not Sentry-wrapped — Lunora's ShardDOState.sql typing doesn't satisfy
-// Sentry's DurableObjectState constraint (document in HANDOFF).
-export { ShardDO };
+// Preserve the deployed storage class without the retired backend runtime.
+export { ShardDO } from "./retained-shard";
 
-interface Env extends LunoraEnv {
+interface Env extends AuthEnv {
   /** Public Sentry DSN (a wrangler.jsonc var, not a secret; it ships in the
    *  client bundle too). Unset => error monitoring is dormant. See worker/
    *  sentry.ts (ticket #227, decided in #156). */
@@ -812,8 +799,6 @@ function handleApiRequest(
   | NodeLimitExceeded
   | NodeLocked
   | StaleOutlineWrite
-  | RetirementOperationInProgress
-  | RetirementOperationRejected
 > {
   return Effect.gen(function* () {
     // executionCtx lets auth ride transactional-email sends on waitUntil
@@ -1050,90 +1035,6 @@ function handleApiRequest(
         }),
       );
       return json({ key, ...result });
-    }
-
-    // Temporary ADR 0061 operator API. Mutations are one user per request;
-    // scripts/lunora-retirement.ts owns sequential batching. The shared admin
-    // gate remains fail-closed and returns 404 to every non-admin probe.
-    if (url.pathname === "/api/admin/lunora-retirement") {
-      const session = yield* Effect.promise(() =>
-        auth.api.getSession({ headers: request.headers }),
-      );
-      if (!isAdminSession(session, env)) {
-        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
-      }
-      if (
-        (url.searchParams.get("diagnostic") === "1" ||
-          url.searchParams.get("repairPreview") === "1") &&
-        request.method !== "GET"
-      ) {
-        return json({ error: "diagnostic requires GET" }, 405);
-      }
-      if (request.method === "GET") {
-        if (
-          url.searchParams.get("diagnostic") === "1" ||
-          url.searchParams.get("repairPreview") === "1"
-        ) {
-          const userId = yield* resolveRestoreUserId(env, {
-            userId: url.searchParams.get("userId") ?? undefined,
-            email: url.searchParams.get("email") ?? undefined,
-          });
-          const target = yield* Effect.promise(() =>
-            env.DB.prepare('SELECT id FROM "user" WHERE id = ?')
-              .bind(userId)
-              .first<{ id: string }>(),
-          );
-          if (!target)
-            return yield* Effect.fail(
-              new BadRequest({ reason: "unknown user id" }),
-            );
-          const report =
-            url.searchParams.get("repairPreview") === "1"
-              ? yield* Effect.promise(() =>
-                  retirementRepairPreview(env, userId),
-                )
-              : yield* Effect.promise(() => retirementDiagnostic(env, userId));
-          return json(report);
-        }
-        if (url.searchParams.get("population") === "1") {
-          return json({
-            userIds: yield* Effect.promise(() => retirementPopulation(env)),
-          });
-        }
-        const userId =
-          url.searchParams.has("userId") || url.searchParams.has("email")
-            ? yield* resolveRestoreUserId(env, {
-                userId: url.searchParams.get("userId") ?? undefined,
-                email: url.searchParams.get("email") ?? undefined,
-              })
-            : undefined;
-        return json(yield* Effect.promise(() => retirementReport(env, userId)));
-      }
-      if (request.method !== "POST") {
-        return json({ error: "method not allowed" }, 405);
-      }
-      const body = yield* decodeBody(request, AdminLunoraRetirementPostBody);
-      const targetUserId = yield* resolveRestoreUserId(env, body);
-      return json(
-        yield* Effect.tryPromise({
-          try: () =>
-            runRetirementOperation(
-              env,
-              targetUserId,
-              body.operation,
-              undefined,
-              body.approvedManifestHash,
-            ),
-          catch: (cause) => cause,
-        }).pipe(
-          Effect.catch((cause) =>
-            cause instanceof RetirementOperationInProgress ||
-            cause instanceof RetirementOperationRejected
-              ? Effect.fail(cause)
-              : Effect.die(cause),
-          ),
-        ),
-      );
     }
 
     // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the
@@ -1406,12 +1307,6 @@ const handler = {
       );
     }
 
-    // The retired experimental HTTP namespace stays reserved rather than
-    // falling through to the SPA. Shard access is Worker-internal only.
-    if (url.pathname === "/_lunora" || url.pathname.startsWith("/_lunora/")) {
-      return new Response("not found", { status: 404 });
-    }
-
     // The static shell + assets are PUBLIC so the login screen can load. Serve
     // them without instantiating auth — only the data API (and the token-gated
     // `/mcp`, handled in the pipeline below) is gated.
@@ -1438,14 +1333,6 @@ const handler = {
         Effect.catchTag("RouteNotFound", () =>
           Effect.succeed(json({ error: "not found" }, 404)),
         ),
-        Effect.catchTag("RetirementOperationInProgress", () =>
-          Effect.succeed(
-            json({ error: "retirement_operation_in_progress" }, 409),
-          ),
-        ),
-        Effect.catchTag("RetirementOperationRejected", (e) =>
-          Effect.succeed(json({ error: e.message }, 409)),
-        ),
         // 403 with a machine-readable body the client keys on to show an upgrade
         // prompt (src/data/nodes-client-effect.ts NodesLimitError).
         Effect.catchTag("NodeLimitExceeded", () =>
@@ -1460,23 +1347,16 @@ const handler = {
           Effect.succeed(json({ error: "stale_outline" }, 409)),
         ),
       ),
-    )
-      .catch((err) => {
-        // Reachable unauthenticated via /api/waitlist, so the body must NOT echo
-        // the internal error string (audit #159, finding 1) — it goes to Workers
-        // Logs + Sentry (#227) instead, and the client gets a constant. Sentry's
-        // `withSentry` never sees this rejection on its own: the `.catch`
-        // swallows it before it escapes the handler, so capture it here.
-        console.error(err);
-        Sentry.captureException(err);
-        return json({ error: "internal error" }, 500);
-      })
-      .then((response) => {
-        if (url.pathname === "/api/admin/lunora-retirement") {
-          response.headers.set("cache-control", "private, no-store");
-        }
-        return response;
-      });
+    ).catch((err) => {
+      // Reachable unauthenticated via /api/waitlist, so the body must NOT echo
+      // the internal error string (audit #159, finding 1) — it goes to Workers
+      // Logs + Sentry (#227) instead, and the client gets a constant. Sentry's
+      // `withSentry` never sees this rejection on its own: the `.catch`
+      // swallows it before it escapes the handler, so capture it here.
+      console.error(err);
+      Sentry.captureException(err);
+      return json({ error: "internal error" }, 500);
+    });
   },
 } satisfies ExportedHandler<Env>;
 
