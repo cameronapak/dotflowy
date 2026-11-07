@@ -18,6 +18,8 @@
 // -- NOT routed through `NodeCommands`, whose capture/pending-focus semantics are
 // editor-edit concerns a get-or-create that navigates away doesn't want.
 
+import { Calendar03Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { Effect } from "effect";
 import {
@@ -198,6 +200,33 @@ function dateWidget(tok: string, key: string): WidgetEl {
 
 // --- header slot: the "Today" button ----------------------------------------
 
+function openToday(
+  getCtx: () => PluginContext,
+  navigate: ReturnType<typeof useNavigate>,
+) {
+  const ctx = getCtx();
+  ctx.run(
+    Effect.promise(async () => {
+      const dayId = await getOrCreateDay(localDateKey(), {
+        seedEntryLine: true,
+      });
+      if (!dayId) return;
+      const isHidden = getViewIsHidden();
+      const kids = childrenOf(buildTreeIndex(getLiveNodes()), dayId).filter(
+        (node) => !isHidden(node),
+      );
+      const last = kids[kids.length - 1];
+      // A section already in the Day stream scrolls in place (ADR 0070).
+      if (scrollStreamTo(localDateKey(), last?.id)) return;
+      navigate({
+        to: "/$nodeId",
+        params: { nodeId: dayId },
+        search: { focus: "last" },
+      });
+    }),
+  );
+}
+
 function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
   const pending = useDailyNavigationPending();
   const navigate = useNavigate();
@@ -208,35 +237,7 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
       disabled={pending}
       aria-busy={pending}
       data-daily-nav-pending={pending ? "" : undefined}
-      onClick={() => {
-        const ctx = getCtx();
-        // The Today button is a write-intent surface (ADR 0041): seed an entry
-        // line and route to the day with focus=last so the caret lands on it.
-        // Unlike a date chip (which zooms via goToDate), this navigates the
-        // route -- the on-load focus mechanism needs a pivotless navigation.
-        ctx.run(
-          Effect.promise(async () => {
-            const dayId = await getOrCreateDay(localDateKey(), {
-              seedEntryLine: true,
-            });
-            if (!dayId) return; // getOrCreateDay owns the generic toast now (F3)
-            // Inside the Day stream, Today is a section: scroll to it and land
-            // the caret on its last line instead of navigating (ADR 0070).
-            const isHidden = getViewIsHidden();
-            const kids = childrenOf(
-              buildTreeIndex(getLiveNodes()),
-              dayId,
-            ).filter((node) => !isHidden(node));
-            const last = kids[kids.length - 1];
-            if (scrollStreamTo(localDateKey(), last?.id)) return;
-            navigate({
-              to: "/$nodeId",
-              params: { nodeId: dayId },
-              search: { focus: "last" },
-            });
-          }),
-        );
-      }}
+      onClick={() => openToday(getCtx, navigate)}
     >
       {pending ? (
         <Loader2Icon className="animate-spin" />
@@ -388,6 +389,16 @@ export default definePlugin({
     {
       id: "daily-today",
       render: (getCtx) => <TodayButton getCtx={getCtx} />,
+      mobileTab: {
+        label: "Today",
+        href: "/today",
+        icon: <HugeiconsIcon icon={Calendar03Icon} aria-hidden="true" />,
+        onSelect: openToday,
+        isActive: (rootId, sectionKey) =>
+          rootId !== null &&
+          getKeyForNode(rootId)?.length === 10 &&
+          (sectionKey ?? getKeyForNode(rootId)) === localDateKey(),
+      },
     },
   ],
 

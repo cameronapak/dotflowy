@@ -16,6 +16,26 @@ const DAY = "2030-06-12";
 const PREV = "2030-06-11";
 const NEXT = "2030-06-13";
 
+/** The dock yields to the software keyboard. Model Done before navigation,
+ * then restore the synthetic keyboard used by these caret-reveal journeys. */
+async function tapToday(page: Page) {
+  await page.evaluate(() => {
+    Object.defineProperty(visualViewport, "height", {
+      configurable: true,
+      get: () => innerHeight,
+    });
+    visualViewport!.dispatchEvent(new Event("resize"));
+  });
+  await page.getByRole("link", { name: "Today", exact: true }).tap();
+  await page.evaluate(() => {
+    Object.defineProperty(visualViewport, "height", {
+      configurable: true,
+      get: () => innerHeight - 300,
+    });
+    visualViewport!.dispatchEvent(new Event("resize"));
+  });
+}
+
 const TREE = [
   ...STANDARD_TREE,
   { id: "the-day", parentId: null, prevSiblingId: "charlie", text: "" },
@@ -218,10 +238,6 @@ test.describe("day navigation on touch", () => {
       await openSeededOutline(page, { anchorId: "alpha" });
       // Model a standalone iPhone's nonzero safe-area top inset.
       await page.addStyleTag({ content: ".outline-chrome { top: 24px; }" });
-      const today = page.getByRole("button", {
-        name: "Today's daily note",
-        exact: true,
-      });
       const title = section(page, DAY, "title");
       const last = text(page, "entry-79");
       const gap = () =>
@@ -242,7 +258,7 @@ test.describe("day navigation on touch", () => {
 
       // Home -> Today uses the same title/focus contract as an in-stream tap.
       // The last child starts far outside the virtual window.
-      await today.tap();
+      await tapToday(page);
       await seated();
       await expect(page.locator(".outline-chrome")).toHaveCSS("top", "24px");
       await expect(text(page, "hidden-tail")).not.toBeAttached();
@@ -288,7 +304,7 @@ test.describe("day navigation on touch", () => {
           ),
         )
         .toBeLessThan(2);
-      await today.tap();
+      await tapToday(page);
       await seated();
       // Observe every frame, not just a final position that two scroll
       // writers might eventually agree on.
@@ -313,7 +329,7 @@ test.describe("day navigation on touch", () => {
       // Dictation/replacement and IME paths need no keydown or pointerdown.
       // Each must release before a subsequent layout change.
       for (const event of ["beforeinput", "compositionstart", "input"]) {
-        await today.tap();
+        await tapToday(page);
         await seated();
         const neighborsMounted = await last.evaluate(async (el, event) => {
           el.dispatchEvent(
@@ -419,7 +435,7 @@ test.describe("day navigation on touch", () => {
         .toBeLessThan(2);
       await expect(page).toHaveURL(/day=2030-06-11/);
       await expect(last).toBeFocused();
-      await today.tap();
+      await tapToday(page);
       await seated();
     });
 
@@ -435,9 +451,7 @@ test.describe("day navigation on touch", () => {
       await openSeededOutline(page, { anchorId: "alpha" });
       // Hold the stream's settle until the covered caret is ready.
       await page.clock.pauseAt(new Date("2030-06-12T12:00:01"));
-      await page
-        .getByRole("button", { name: "Today's daily note", exact: true })
-        .tap();
+      await tapToday(page);
       const editor = text(page, "standup");
       await expect
         .poll(async () => {
@@ -525,9 +539,7 @@ test.describe("day navigation on touch", () => {
       await openSeededOutline(page, { anchorId: "alpha" });
       // Paused, no stream settle (180ms) can load days before the race below.
       await page.clock.pauseAt(new Date("2030-06-12T12:00:01"));
-      await page
-        .getByRole("button", { name: "Today's daily note", exact: true })
-        .tap();
+      await tapToday(page);
       const editor = text(page, "standup");
       await expect
         .poll(async () => {

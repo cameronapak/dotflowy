@@ -10,6 +10,7 @@ import {
   FocusIcon,
   Logout01Icon,
   Settings01Icon,
+  Search01Icon,
   ShieldCheckIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
@@ -32,9 +33,11 @@ import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 import { useTree } from "../data/useTree";
 import { getViewRootId } from "../data/view-state";
+import { useIsMobile } from "../hooks/use-mobile";
 import { signOutAndReload, useSession } from "../lib/auth-client";
 import { usePluginChrome } from "../plugins/registry";
 import { openChangelog } from "./changelog-opener";
+import { openFilterInput } from "./query-filter-nav";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
 import { Button } from "./ui/button";
@@ -170,6 +173,7 @@ export function setViewCollapsed(collapsed: boolean) {
 
 /** Current-view actions and display toggles, separate from account/help (ADR 0072). */
 export function HeaderViewMenu() {
+  const mobile = useIsMobile();
   const { globalActions } = usePluginChrome();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
@@ -194,6 +198,12 @@ export function HeaderViewMenu() {
         >
           This view
         </div>
+        {mobile && (
+          <DropdownMenuItem onClick={openFilterInput}>
+            <HugeiconsIcon icon={Search01Icon} />
+            Filter this view
+          </DropdownMenuItem>
+        )}
         {current && (
           <DropdownMenuCheckboxItem
             checked={current.bookmarkedAt != null}

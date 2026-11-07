@@ -14,6 +14,7 @@
         "@hugeicons/core-free-icons": "^4.3.5",
         "@hugeicons/react": "^1.1.10",
         "@icons-pack/react-simple-icons": "^13.15.1",
+        "@onlymoein/liquidglass": "0.11.2",
         "@react-aria/utils": "^3.34.1",
         "@rgrove/parse-xml": "^5.0.0",
         "@sentry/cloudflare": "^10.74.0",
@@ -383,6 +384,8 @@
     "@nodelib/fs.stat": ["@nodelib/fs.stat@2.0.5", "", {}, "sha512-RkhPPp2zrqDAQA/2jNhnztcPAlv64XdhIp7a7454A5ovI7Bukxgt7MX7udwAu3zg1DcpPU0rz3VV1SeaqvY4+A=="],
 
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
+
+    "@onlymoein/liquidglass": ["@onlymoein/liquidglass@0.11.2", "", { "peerDependencies": { "react": ">=18", "react-dom": ">=18" } }, "sha512-IVh2N6jR6FI/7DvYTyUjhSO0sUR9hSQ5Hh4QlQAKVNGT+f0ejoYX5T/c7mFscGL9zWRTmkUXlWlQPbV8+I41KQ=="],
 
     "@oozcitak/dom": ["@oozcitak/dom@2.0.2", "", { "dependencies": { "@oozcitak/infra": "^2.0.2", "@oozcitak/url": "^3.0.0", "@oozcitak/util": "^10.0.0" } }, "sha512-GjpKhkSYC3Mj4+lfwEyI1dqnsKTgwGy48ytZEhm4A/xnH/8z9M3ZVXKr/YGQi3uCLs1AEBS+x5T2JPiueEDW8w=="],
 

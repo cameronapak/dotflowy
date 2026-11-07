@@ -3754,6 +3754,8 @@ function BreadcrumbTrail({
     if (el) el.scrollLeft = el.scrollWidth;
   }, [rootId, trail.length]);
 
+  if (isMobile && rootId === null) return null;
+
   return (
     <nav
       ref={navRef}

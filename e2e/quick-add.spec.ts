@@ -626,7 +626,10 @@ test.describe("quick-add mobile FAB (coarse pointer)", () => {
   }) => {
     await page.setViewportSize({ width: 412, height: 900 });
     await load(page);
-    await fab(page).tap();
+    await page
+      .locator("header")
+      .getByRole("button", { name: "Quick add", exact: true })
+      .tap();
     await expect(dialog(page)).toBeVisible();
 
     await page.evaluate(() => {
