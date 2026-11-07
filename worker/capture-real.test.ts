@@ -1,3 +1,4 @@
+import { hashPassword } from "better-auth/crypto";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { build } from "esbuild";
 import { Miniflare, Response as FixtureResponse } from "miniflare";
@@ -161,6 +162,15 @@ beforeAll(async () => {
             BETTER_AUTH_URL: { type: "text", value: "http://fixture" },
             SIGNUP_OPEN: { type: "text", value: "true" },
             OWNER_USER_ID: { type: "text", value: "nobody-is-the-owner" },
+            AMP_FEEDBACK_USER_ID: { type: "text", value: "feedback-owner" },
+            AMP_FEEDBACK_CLIENT_ID: {
+              type: "text",
+              value: "client_TestReview",
+            },
+            ADMIN_EMAILS: {
+              type: "text",
+              value: "feedback-other@capture.test",
+            },
           },
           exports: {
             UserOutlineDO: { type: "durable-object", storage: "sqlite" },
@@ -385,6 +395,71 @@ test("persisted cutover receipts still prevent replacing a recovered outline", a
       (await fixture<Inspection>("inspect", { userId })).snapshot.nodes,
     ).toEqual(before.nodes);
   }
+});
+
+test("feedback widget config requires the pinned real session, not email, admin status or a claimed identity", async () => {
+  const password = "disposable-feedback-password";
+  const cookies: string[] = [];
+  for (const userId of ["feedback-owner", "feedback-other"]) {
+    await fixture("seed", { userId, password: await hashPassword(password) });
+    const signin = await mf.dispatchFetch(
+      "http://fixture/api/auth/sign-in/email",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://fixture",
+        },
+        body: JSON.stringify({ email: `${userId}@capture.test`, password }),
+      },
+    );
+    expect(signin.status).toBe(200);
+    cookies.push(
+      signin.headers
+        .getSetCookie()
+        .map((c) => c.split(";")[0])
+        .join("; "),
+    );
+  }
+  const request = (cookie = "", method = "GET") =>
+    mf.dispatchFetch(
+      "http://fixture/api/feedback-widget?userId=feedback-owner",
+      {
+        method,
+        headers: {
+          cookie,
+          "x-user-id": "feedback-owner",
+          origin: "http://fixture",
+        },
+      },
+    );
+  for (const cookie of ["", "better-auth.session_token=forged", cookies[1]]) {
+    const denied = await request(cookie);
+    expect(denied.status).toBe(404);
+    expect(denied.headers.get("cache-control")).toBe("private, no-store");
+    expect(await denied.json()).toEqual({ error: "not found" });
+  }
+  const allowed = await request(cookies[0]);
+  expect(allowed.status).toBe(200);
+  expect(allowed.headers.get("cache-control")).toBe("private, no-store");
+  expect(await allowed.json()).toEqual({
+    userId: "feedback-owner",
+    clientId: "client_TestReview",
+  });
+  const wrongMethod = await request(cookies[0], "POST");
+  expect(wrongMethod.status).toBe(405);
+  expect(wrongMethod.headers.get("allow")).toBe("GET");
+  const signedOut = await mf.dispatchFetch("http://fixture/api/auth/sign-out", {
+    method: "POST",
+    headers: {
+      cookie: cookies[0],
+      origin: "http://fixture",
+      "content-type": "application/json",
+    },
+    body: "{}",
+  });
+  expect(signedOut.status).toBe(200);
+  expect((await request(cookies[0])).status).toBe(404);
 });
 
 test("free-account HTTP capture honors explicit date and has decisive idempotency", async () => {

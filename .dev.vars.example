@@ -54,3 +54,9 @@ INVITE_CODES=dev-invite
 # prod: `wrangler secret put GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
 # GOOGLE_CLIENT_ID=
 # GOOGLE_CLIENT_SECRET=
+
+# Optional owner-only Amp feedback (docs/feedback-widget.md). Both unset = off.
+# Pin the approved account's Better Auth user.id, NOT its email or an Amp ID.
+# These are authorization config and a public client ID, not credentials.
+# AMP_FEEDBACK_USER_ID=
+# AMP_FEEDBACK_CLIENT_ID=

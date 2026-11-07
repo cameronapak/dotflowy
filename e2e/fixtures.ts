@@ -316,6 +316,12 @@ export async function seedOutline(
       body: JSON.stringify(data),
     });
 
+  // Unconfigured deployments do not load Amp. Widget-specific journeys can
+  // override this route after seeding without contacting an external service.
+  await page.route("**/api/feedback-widget", (route) =>
+    route.fulfill({ status: 404, json: { error: "not found" } }),
+  );
+
   // The app is gated behind a Better Auth session (root AuthGate). The editor
   // only mounts once `useSession()` resolves to a session, so mock the
   // get-session endpoint with a fixed authed user. Without this the specs would

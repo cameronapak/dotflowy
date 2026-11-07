@@ -85,3 +85,34 @@ scripts in the authenticated document, runtime plugins, or Lane-B MCP Apps in
 nodes. Server-side extraction and URL validation produce iframe descriptors;
 the compiled-in plugin constructs the frame. X remains gated on clarification
 of its conflicting published iframe guidance.
+
+## November 7 amendment: owner-only Amp feedback
+
+Cameron approved loading Amp's feedback widget on his own live account after
+reviewing its host-document privileges. This is a narrow exception to the
+third-party-script restriction, not a new plugin lane or general permission
+for authenticated users to load runtime code.
+
+The Worker authorizes exactly one pinned Better Auth `user.id` through
+`GET /api/feedback-widget`. Both optional Worker settings must be valid:
+`AMP_FEEDBACK_USER_ID` and the public `AMP_FEEDBACK_CLIENT_ID`. Neither email
+matching nor admin membership grants access. Configuration responses and errors
+are private and non-cacheable. The browser validates the account-bound response
+and constructs the URL only on `https://ampcode.com/w/`; callers cannot supply
+a script URL. No credential, feedback-write endpoint, or deployment capability
+is added. Forks and unconfigured deployments remain off.
+
+The loader lives with the authenticated editor, outside node rendering. Once a
+script has been inserted, unmounting that surface forces a document reload:
+removing a tag cannot unload third-party code. Failed configuration requests
+remain silent and leave the widget off. Amp's `?amp` behavior controls visibility,
+not authorization. Amp separately enforces its project permissions and allowed
+origins for submission. Neither check sandboxes the host-page script.
+
+The accepted risk is access to the owner's rendered production notes, browser
+storage, and requests permitted by the owner's session. MCP spoiler redaction
+does not cover DOM capture. An isolated synthetic-data preview remains an
+alternative, not a prerequisite. Prefer nonsensitive reproduction content.
+Admin enablement, allowed-origin changes, and deployment require separate
+approval. Setup, revocation, and the feedback-to-update workflow live in the
+[feedback widget guide](../feedback-widget.md).

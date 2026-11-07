@@ -83,3 +83,85 @@ test("a failed sign-out stays put and says so (no silent no-op)", async ({
   expect(await hasMarker(page)).toBe(true);
   await expect(text(page, "alpha")).toBeVisible();
 });
+
+test("owner feedback loads once and session loss destroys its document without a sign-out click", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  let scriptLoads = 0;
+  await page.route("https://ampcode.com/w/client_TestReview.js", (route) => {
+    scriptLoads++;
+    return route.fulfill({
+      contentType: "text/javascript",
+      body: "window.__feedbackTestLoaded = true;",
+    });
+  });
+  await page.route("**/api/feedback-widget", (route) =>
+    route.fulfill({
+      json: { userId: "test-user", clientId: "client_TestReview" },
+    }),
+  );
+  await page.route("**/api/auth-config", (route) =>
+    route.fulfill({ json: { signupOpen: false, turnstileSiteKey: null } }),
+  );
+  await openSeededOutline(page, { anchorId: "alpha" });
+  await page.evaluate(() => Object.assign(window, { __preNavMarker: true }));
+  await expect
+    .poll(() => page.evaluate(() => "__feedbackTestLoaded" in window))
+    .toBe(true);
+  // Ordinary SPA navigation must not request the script again.
+  await page.getByRole("button", { name: /Account and help/ }).click();
+  await page.getByRole("menuitem", { name: /^settings/i }).click();
+  await expect(page).toHaveURL(/\/settings/);
+  expect(scriptLoads).toBe(1);
+  await page.route("**/api/auth/get-session", (route) =>
+    route.fulfill({ json: null }),
+  );
+  const refreshed = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/auth/get-session",
+  );
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("visibilitychange")),
+  );
+  await refreshed;
+  await expect.poll(() => hasMarker(page)).toBe(false);
+  await expect(page.getByRole("button", { name: /^sign in$/i })).toBeVisible();
+  expect(await page.evaluate(() => "__feedbackTestLoaded" in window)).toBe(
+    false,
+  );
+  expect(scriptLoads).toBe(1);
+});
+
+test("denied, malformed and mismatched feedback config never loads a widget script", async ({
+  page,
+}) => {
+  const scriptRequests: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.resourceType() === "script" &&
+      new URL(request.url()).hostname === "ampcode.com"
+    )
+      scriptRequests.push(request.url());
+  });
+  await seedOutline(page, TREE);
+  for (const config of [
+    null,
+    { userId: "test-user", clientId: "client_../../evil" },
+    { userId: "different-user", clientId: "client_TestReview" },
+  ]) {
+    await page.route("**/api/feedback-widget", (route) =>
+      route.fulfill({
+        status: config === null ? 404 : 200,
+        json: config,
+      }),
+    );
+    const response = page.waitForResponse("**/api/feedback-widget");
+    await openSeededOutline(page, { anchorId: "alpha", path: "/?amp" });
+    await (await response).finished();
+    await expect(text(page, "alpha")).toBeVisible();
+    expect(scriptRequests).toEqual([]);
+    await expect(
+      page.locator('script[src^="https://ampcode.com/w/"]'),
+    ).toHaveCount(0);
+  }
+});

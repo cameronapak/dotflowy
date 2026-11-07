@@ -35,6 +35,7 @@ import { Data, Effect, Schema } from "effect";
 import type { KvClaim, WeekStartMigrationResult } from "./outline-do";
 import type { Node } from "./wire";
 
+import { AmpFeedbackConfig } from "../src/data/amp-feedback";
 import {
   pendingAnnounceEmails,
   sendAnnouncements,
@@ -115,6 +116,12 @@ interface Env extends AuthEnv {
    *  the owner's existing data carries over with zero copy. Everyone else
    *  routes to their own `user.id`. See resolveUserId. */
   OWNER_USER_ID?: string;
+  /** Optional feedback reviewer, pinned to one Better Auth user.id. Separate
+   *  from admin access and DO routing; no email fallback. Both widget settings
+   *  must be present or the integration stays off. */
+  AMP_FEEDBACK_USER_ID?: string;
+  /** Public client ID from Amp's widget script tag, not an access token. */
+  AMP_FEEDBACK_CLIENT_ID?: string;
   /** Owner key the legacy D1 rows are scoped under, read once during the
    *  one-time import into the owner's DO. Defaults to 'owner'. */
   APP_OWNER?: string;
@@ -824,6 +831,27 @@ function handleApiRequest(
       });
     }
 
+    // This is a widget-loading gate, not an Amp credential. Never authorize by
+    // email/admin status or accept a caller-supplied identity or script URL.
+    if (url.pathname === "/api/feedback-widget") {
+      const config = {
+        clientId: env.AMP_FEEDBACK_CLIENT_ID,
+        userId: env.AMP_FEEDBACK_USER_ID,
+      };
+      if (!Schema.is(AmpFeedbackConfig)(config)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!session || session.user.id !== config.userId) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method !== "GET")
+        return json({ error: "method not allowed" }, 405, { Allow: "GET" });
+      return json(config);
+    }
+
     // Alpha waitlist: POST is PUBLIC (submitters have no account yet) — must
     // sit before the session gate below; its hardening lives in handleWaitlist.
     // GET is the ADMIN view (the /admin/waitlist page): session + the
@@ -1347,16 +1375,23 @@ const handler = {
           Effect.succeed(json({ error: "stale_outline" }, 409)),
         ),
       ),
-    ).catch((err) => {
-      // Reachable unauthenticated via /api/waitlist, so the body must NOT echo
-      // the internal error string (audit #159, finding 1) — it goes to Workers
-      // Logs + Sentry (#227) instead, and the client gets a constant. Sentry's
-      // `withSentry` never sees this rejection on its own: the `.catch`
-      // swallows it before it escapes the handler, so capture it here.
-      console.error(err);
-      Sentry.captureException(err);
-      return json({ error: "internal error" }, 500);
-    });
+    )
+      .catch((err) => {
+        // Reachable unauthenticated via /api/waitlist, so the body must NOT echo
+        // the internal error string (audit #159, finding 1) — it goes to Workers
+        // Logs + Sentry (#227) instead, and the client gets a constant. Sentry's
+        // `withSentry` never sees this rejection on its own: the `.catch`
+        // swallows it before it escapes the handler, so capture it here.
+        console.error(err);
+        Sentry.captureException(err);
+        return json({ error: "internal error" }, 500);
+      })
+      .then((response) => {
+        if (url.pathname === "/api/feedback-widget") {
+          response.headers.set("cache-control", "private, no-store");
+        }
+        return response;
+      });
   },
 } satisfies ExportedHandler<Env>;
 

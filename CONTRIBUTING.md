@@ -146,6 +146,14 @@ Worker/DO/asset path rather than UI. See `scripts/cf-dev.ts` for the details.
 It uses `landing/vite.config.ts`, not the app's Vite configuration. In an orb,
 start a supervised service with `--port 3100` so its portal matches Vite's port.
 
+### Visual feedback with Amp
+
+The [feedback widget guide](./docs/feedback-widget.md) covers owner-only live
+review, public versus secret configuration, access controls, and the
+review-to-update workflow. It stays disabled until `AMP_FEEDBACK_USER_ID` and
+`AMP_FEEDBACK_CLIENT_ID` are configured on the Worker. ADR 0031 records the
+approved owner-only exception; Amp enablement and deployment remain separate.
+
 ### Testing the MCP OAuth flow locally
 
 The MCP endpoint (`/mcp`) is OAuth-gated, and testing it against `wrangler dev`
