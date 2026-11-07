@@ -1272,7 +1272,7 @@ test("export_opml over the 5,000-node ceiling rejects, never truncates", async (
 
 test("a store fault surfaces as a tool error with the real message", async () => {
   // Store faults used to become protocol-level -32603 "internal error",
-  // which hid the Lunora shard's compound-SELECT failure behind a generic
+  // which hid a compound-SELECT failure behind a generic
   // message. They now match commit(): an isError tool result carrying the
   // store's own diagnostic (the caller is the shard owner's own agent).
   const broken: OutlineStore = {

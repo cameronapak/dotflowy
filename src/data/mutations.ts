@@ -64,9 +64,7 @@ export function insertSibling(
   const prevSiblingId = afterId;
 
   // The node currently following `afterId` becomes the new node's follower.
-  // A null `afterId` is a HEAD insert, so the current head is the follower --
-  // the same branch `planInsertSibling` already has (planners.ts), which is what
-  // keeps the classic and Lunora chains identical for an insert-above.
+  // A null `afterId` is a HEAD insert, so the current head is the follower.
   const siblings = childrenOf(index, parentId);
   let nextSiblingId: string | null = null;
   if (afterId) {
@@ -124,8 +122,8 @@ export function insertChildAtStart(
 
 /**
  * Enter mid-split: leave `leftText` on `nodeId`, insert a sibling carrying
- * `rightText`. Lunora path is ONE mutator (single watermark); custom-DO path
- * is insertSibling + setText inside the caller's `runStructural` batch.
+ * `rightText`, using insertSibling + setText inside the caller's
+ * `runStructural` batch.
  */
 export function splitNode(
   index: TreeIndex,
@@ -191,9 +189,7 @@ export function joinIntoPrevious(
  * Append a node at the end of `parentId`'s children. Used by quick-add born
  * capture and the legacy first-run seed.
  *
- * Flag OFF: pass `prevSiblingId` explicitly (caller owns the wiring). Flag ON:
- * Lunora `appendChild` resolves the last sibling server-side (one watermark);
- * `prevSiblingId` is ignored for the mutator path.
+ * Pass `prevSiblingId` explicitly; the caller owns the sibling wiring.
  *
  * `id` lets a caller supply the node id up front; defaults to a fresh id.
  * Optional `isTask` / `kind` let quick-add fold `/todo`/`/paragraph` into the
@@ -247,10 +243,7 @@ export function mirrorNode(
   targetId: string | null,
 ): string | null {
   if (!index.byId.has(sourceId)) {
-    // Named per guard because all three collapse into one bare `null`, which is
-    // exactly what disguised the Lunora daily-mirror bug as a plausible refusal
-    // toast. An index of size 0 here means the caller read a starved node
-    // source (ADR 0058); see getLiveNodes().
+    // Name each guard so a missing source is distinguishable from a cycle.
     if (import.meta.env.DEV) {
       console.warn("[mirrorNode] refused: source is absent from the index", {
         sourceId,
@@ -301,8 +294,7 @@ export function mirrorManyNodes(
 ): number {
   let made = 0;
   for (const id of ids) {
-    // Live store (classic or Lunora) — nodesCollection is empty when the
-    // Lunora flag is ON, so rebuilding from it would no-op every mirror.
+    // Rebuild from live nodes after each structural mutation.
     const index = buildTreeIndex(getLiveNodes());
     if (mirrorNode(index, id, targetId)) made++;
   }
@@ -846,7 +838,7 @@ export function removeNode(index: TreeIndex, nodeId: string): string | null {
   const node = index.byId.get(nodeId);
   if (!node) return null;
 
-  // Determine focus target before mutating (shared by Lunora + custom-DO paths).
+  // Determine focus target before mutating.
   const siblings = childrenOf(index, node.parentId);
   const i = siblings.findIndex((n) => n.id === nodeId);
   let focusId: string | null = null;

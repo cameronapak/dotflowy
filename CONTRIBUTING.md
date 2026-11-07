@@ -350,10 +350,7 @@ prune or tighten tests:
 The pass is done when every remaining test satisfies every rule, the PR
 description lists what you deleted, consolidated, and kept (each deletion names
 the rule it broke; each kept test that looks borderline says why it stays), and
-the gates are green. Line reduction is not a completion criterion. Lunora
-retirement tests leave with their modules
-([ADR 0061](./docs/adr/0061-retire-lunora-through-per-user-cutover.md)), not in
-a pruning pass.
+the gates are green. Line reduction is not a completion criterion.
 
 ## Before you open a PR
 

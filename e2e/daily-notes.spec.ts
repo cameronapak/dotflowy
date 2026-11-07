@@ -607,8 +607,7 @@ test("Cmd+K creates and reopens an ISO day, then creates a prose date", async ({
 test("a lost claim adopts the winner's note (no duplicate on a race)", async ({
   page,
 }) => {
-  // Classic-only: fakes a stale `/api/kv` replica + `?op=claim` winner ack.
-  // Lunora delivers daily-index via shapes (no empty-GET + claim override).
+  // Fake a stale `/api/kv` replica + `?op=claim` winner ack.
   // Simulate the race: this device's local daily-index replica is empty (it
   // GETs an empty /api/kv below), so it thinks today is absent and CLAIMS --
   // but another device already created the container + today's note, so the
@@ -691,9 +690,8 @@ test("orphaned kv mapping materializes the node instead of zooming to a ghost", 
 }) => {
   // daily-index points at ids with no matching outline rows (stale mapping).
   // Today must create those nodes under the claimed ids, not show the
-  // "That bullet doesn't exist" empty state. Seed via `kv` so both classic
-  // `/api/kv` and Lunora `userDailyIndex` shapes see the orphans (a post-seed
-  // `/api/kv` route override is classic-only).
+  // "That bullet doesn't exist" empty state. Seed via `kv` so `/api/kv`
+  // returns the orphaned claims.
   const d = new Date();
   const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
     2,

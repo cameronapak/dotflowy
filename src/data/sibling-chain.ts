@@ -24,8 +24,7 @@ import type { Node } from "./schema";
  * After the primary walk from `null`, remaining orphans are stitched by
  * following *their* `prevSiblingId` links as subchains (arrival order only as a
  * last resort). A fan that leaves a paste block off the winning head must not
- * scramble that block into collection order — that is what made Lunora
- * multi-paragraph paste look "scattered" after refresh on a corrupted
+ * scramble that block into collection order after refresh on a corrupted
  * top-level chain.
  *
  * The iteration cap makes a cyclic chain terminate. Pass the children of a

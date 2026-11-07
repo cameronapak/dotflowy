@@ -514,10 +514,7 @@ export default definePlugin({
         // Rebuild fresh: today may have just been created, so ctx.tree is stale
         // (no `after`, no cycle context). Capture AFTER, so undo removes the
         // mirror but keeps the new day note (mirrors the runMany path below).
-        // Explicit build (not captureLive): `mirrorNode` consumes this index,
-        // and it must come from the LIVE store -- an index built from the
-        // ready-and-empty `nodesCollection` fails `mirrorNode`'s first guard on
-        // the Lunora path, so every mirror-to-today toasted an error.
+        // Explicit build (not captureLive): `mirrorNode` consumes this live index.
         const index = buildTreeIndex(getLiveNodes());
         const drop = capture(index, nodeId);
         const newId = runStructural(() => {

@@ -388,7 +388,7 @@
 
 ### Patch Changes
 
-- 216969c: Bump Lunora alpha packages (db, ratelimit, react, lunorash) and regenerate codegen. Worker MCP applyChangeOps keeps a typed cast for a nullable FunctionReference codegen quirk.
+- 216969c: Bump the experimental sync engine's alpha packages and regenerate codegen. Worker MCP applyChangeOps keeps a typed cast for a nullable FunctionReference codegen quirk.
 
 ## 1.12.0
 
@@ -400,7 +400,7 @@
 
 ### Patch Changes
 
-- 13d67ba: Fixed MCP tools failing on Lunora-synced accounts. Date-targeted tools (`add_to_today`, `add_subtree` with a date, `mirror_to_today`) and `delete_node` hit a SQLite compound-SELECT limit; writes now scope to their table, and tool errors report the real cause instead of "internal error".
+- 13d67ba: Fixed MCP tools failing on experimental-sync accounts. Date-targeted tools (`add_to_today`, `add_subtree` with a date, `mirror_to_today`) and `delete_node` hit a SQLite compound-SELECT limit; writes now scope to their table, and tool errors report the real cause instead of "internal error".
 
 ## 1.11.2
 
@@ -412,8 +412,8 @@
 
 ### Patch Changes
 
-- 099483e: The first daily command of a new day now works with the Lunora sync beta on. Creating the day note reported "Couldn't open today's daily note" even though it had been written. The /today route now waits for the outline to load before it opens the note.
-- 099483e: Mirror to Today now works with the Lunora sync beta on, and undo after a daily command no longer deletes unrelated nodes
+- 099483e: The first daily command of a new day now works with the experimental sync beta on. Creating the day note reported "Couldn't open today's daily note" even though it had been written. The /today route now waits for the outline to load before it opens the note.
+- 099483e: Mirror to Today now works with the experimental sync beta on, and undo after a daily command no longer deletes unrelated nodes
 
 ## 1.11.0
 
@@ -447,7 +447,7 @@
 
 ### Patch Changes
 
-- 7dafec3: Upgraded outline sync migrate no longer fails when healing daily-index/KV (unscoped Lunora patch UNION bug on Workerd SQLite).
+- 7dafec3: Upgraded outline sync migrate no longer fails when healing daily-index/KV (unscoped patch UNION bug on Workerd SQLite).
 
 ## 1.10.1
 

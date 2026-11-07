@@ -77,13 +77,7 @@ test("feature switches default on and save independently across reloads", async 
   await page.route("**/api/auth/subscription/list", (route) =>
     route.fulfill({ json: [] }),
   );
-  await seedOutline(page, TREE, {
-    kv: {
-      "account-prefs": [
-        { key: "lunora-beta", value: { key: "lunora-beta", enabled: false } },
-      ],
-    },
-  });
+  await seedOutline(page, TREE);
   await page.goto("/settings");
   await expect(
     page.getByRole("heading", { name: "Settings", level: 1 }),

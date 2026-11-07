@@ -338,8 +338,8 @@ function SwitcherDialog({
   function runAction(action: CommandCenterAction) {
     if (action.disabled) return;
     // Run BEFORE close: verbs like Delete prefer `findFocusedId() ?? id`, and
-    // closing the dialog first lets Radix restore focus onto an unrelated row
-    // (Lunora tree remounts make this common) — deleting the wrong bullet.
+    // closing the dialog first can restore focus onto an unrelated row,
+    // deleting the wrong node.
     action.run();
     close();
   }

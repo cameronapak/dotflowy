@@ -159,7 +159,7 @@ export interface ToolDef {
 
 // --- Shared plumbing ----------------------------------------------------------
 
-/** Store failures carry real diagnostics (e.g. the Lunora shard's SQLite
+/** Store failures carry real diagnostics (e.g. a SQLite
  *  message). `Effect.promise` would turn them into defects, which the MCP
  *  endpoint reports as a bare "internal error" — so every store call goes
  *  through `tryPromise` with a catch that lifts the failure's message into
