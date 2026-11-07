@@ -40,8 +40,10 @@ export function Header({
     <>
       {mobile ? (
         // One boundary for the toolbar and the dock, so they reveal together
-        // instead of React throttling a second reveal on a timer.
-        <Suspense fallback={<div className="h-15" />}>
+        // instead of React throttling a second reveal on a timer. The fallback
+        // is a 60px <header>, the toolbar's height, so spotlight can measure
+        // the sticky chrome before the glass chunk arrives.
+        <Suspense fallback={<header className="outline-header h-15" />}>
           <MobileGlassHeader
             leading={children}
             slots={headerSlots}
