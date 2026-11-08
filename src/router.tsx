@@ -7,6 +7,7 @@ export function getRouter() {
   const router = createRouter({
     routeTree,
     scrollRestoration: true,
+    scrollToTopSelectors: [".outline-scroll"],
     defaultPreload: "intent",
     // A render error shows a humane screen and reports to Sentry (#227),
     // instead of a white page.

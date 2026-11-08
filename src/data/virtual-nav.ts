@@ -12,6 +12,8 @@
  * guards internally, so callers never branch.
  */
 
+import { getOutlineScroller } from "./outline-scroll";
+
 interface VirtualNav {
   scrollToIndex: (
     index: number,
@@ -20,7 +22,7 @@ interface VirtualNav {
   indexOf: (id: string) => number;
   /**
    * Measured (or estimated) start/size for a flat-list index. `start` is in
-   * DOCUMENT space: the window virtualizer folds `scrollMargin` into every
+   * SCROLL CONTAINER space: the virtualizer folds `scrollMargin` into every
    * measurement (the first item starts at paddingStart + scrollMargin), which
    * is why the render subtracts it (`translateY(start - scrollMargin)`,
    * OutlineRow). Consumers must NOT add scrollMargin again.
@@ -38,20 +40,29 @@ export function setVirtualNav(next: VirtualNav | null) {
 /**
  * The viewport rect (top/height) of a visible row from the virtualizer's
  * measurements, NOT the DOM -- so an off-screen drop target during a drag still
- * has geometry (estimated until it renders). `scrollY` is passed so the caller
- * controls when it's read (auto-scroll re-projects). Null when virtual nav is
+ * has geometry (estimated until it renders). Reads the editor viewport at call
+ * time (auto-scroll re-projects). Null when virtual nav is
  * inactive or the id isn't a visible row. See use-drag-reorder.ts (ADR 0019).
  */
 export function virtualRowRect(
   id: string,
-  scrollY: number,
+  viewportOffset?: number,
 ): { top: number; height: number } | null {
   if (!nav) return null;
   const i = nav.indexOf(id);
   if (i < 0) return null;
   const m = nav.measurementAt(i);
   if (!m) return null;
-  return { top: m.start - scrollY, height: m.size };
+  // Drag projection supplies one snapshot for all rows in the same frame.
+  if (viewportOffset === undefined) {
+    const scroller = getOutlineScroller();
+    if (!scroller) return null;
+    viewportOffset = scroller.scrollTop - scroller.getBoundingClientRect().top;
+  }
+  return {
+    top: m.start - viewportOffset,
+    height: m.size,
+  };
 }
 
 /**

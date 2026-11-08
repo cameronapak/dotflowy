@@ -456,7 +456,7 @@ export function HistoryRestoreDialog() {
           // A windowed row may still be mounting. Hand it the range only now,
           // with no further yield before busy is released. Hidden/filtered
           // rows must not leave a stale caret for some unrelated later mount.
-          if (caret && virtualRowRect(key, window.scrollY)) {
+          if (caret && virtualRowRect(key)) {
             setPendingCaretSelection(key, caret);
             getNodeActionBridge()?.focusNode(key);
           }

@@ -14,7 +14,6 @@ import {
   useState,
   type ComponentProps,
 } from "react";
-import { createPortal } from "react-dom";
 
 import type { HeaderSlotSpec, PluginContext } from "../plugins/types";
 
@@ -112,7 +111,7 @@ export default function MobileNavigation({
       : (slots.find((slot) => slot.mobileTab?.isActive(rootId, day))?.id ??
         null);
 
-  return createPortal(
+  return (
     <NavigationContext value={{ slots, getCtx }}>
       <div className="mobile-navigation" hidden={keyboard}>
         {opaque ? (
@@ -140,7 +139,6 @@ export default function MobileNavigation({
           />
         )}
       </div>
-    </NavigationContext>,
-    document.body,
+    </NavigationContext>
   );
 }

@@ -86,9 +86,13 @@ test.describe("mobile actions bar (coarse pointer)", () => {
       const bottom =
         document.querySelector("[data-mobile-bar]")!.getBoundingClientRect()
           .top - 12;
-      window.scrollBy(0, el.getBoundingClientRect().bottom - bottom);
+      document
+        .querySelector(".outline-scroll")!
+        .scrollBy(0, el.getBoundingClientRect().bottom - bottom);
     });
-    const before = await page.evaluate(() => window.scrollY);
+    const before = await page
+      .locator(".outline-scroll")
+      .evaluate((el) => el.scrollTop);
     for (let i = 0; i < 4; i++) {
       await page.keyboard.insertText(
         " More words that wrap onto the next line.",
@@ -105,7 +109,9 @@ test.describe("mobile actions bar (coarse pointer)", () => {
         )
         .toBeLessThan(0);
     }
-    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
+    expect(
+      await page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+    ).toBeGreaterThan(before);
     await expect(input).toBeFocused();
     await expect(input).toContainText("Writing line 10 More words");
 
@@ -138,7 +144,9 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     for (const viewport of [
       { width: 1024, height: 768, visible: 368 },
       { width: 844, height: 390, visible: 180 },
-      { width: 874, height: 338, visible: 90 },
+      // Leave one text line between normal-flow chrome and the toolbar.
+      // Smaller bands require native viewport panning, absent from this mock.
+      { width: 874, height: 338, visible: 144 },
     ]) {
       await page.setViewportSize(viewport);
       await page.evaluate((height) => {
@@ -147,7 +155,8 @@ test.describe("mobile actions bar (coarse pointer)", () => {
           value: height,
         });
         visualViewport!.dispatchEvent(new Event("resize"));
-        window.scrollTo(0, document.documentElement.scrollHeight);
+        const scroller = document.querySelector(".outline-scroll")!;
+        scroller.scrollTo(0, scroller.scrollHeight);
       }, viewport.visible);
       const last = text(page, "row-29");
       await placeCaret(last, "end");
@@ -201,10 +210,12 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await placeCaret(input, 5);
     await expect(bar(page)).toHaveCount(0);
     await input.evaluate(() => {
-      window.scrollBy(
-        0,
-        getSelection()!.getRangeAt(0).getBoundingClientRect().bottom - 525,
-      );
+      document
+        .querySelector(".outline-scroll")!
+        .scrollBy(
+          0,
+          getSelection()!.getRangeAt(0).getBoundingClientRect().bottom - 525,
+        );
       Object.defineProperty(visualViewport!, "height", {
         configurable: true,
         value: 537,
@@ -258,6 +269,14 @@ test.describe("mobile actions bar (coarse pointer)", () => {
       visualViewport!.dispatchEvent(new Event("resize"));
     });
     await expect(bar(page)).toBeVisible();
+    const chromeTop = await page
+      .locator(".outline-chrome")
+      .evaluate((el) => el.getBoundingClientRect().top);
+    expect(
+      await page
+        .locator(".outline-shell")
+        .evaluate((el) => el.getBoundingClientRect().height),
+    ).toBe(900);
     await page.evaluate(() => {
       Object.defineProperty(visualViewport!, "height", {
         configurable: true,
@@ -266,6 +285,12 @@ test.describe("mobile actions bar (coarse pointer)", () => {
       visualViewport!.dispatchEvent(new Event("resize"));
     });
     await expect(text(page, "alpha")).toBeFocused();
+    await expect(text(page, "alpha")).toBeInViewport();
+    expect(
+      await page
+        .locator(".outline-chrome")
+        .evaluate((el) => el.getBoundingClientRect().top),
+    ).toBe(chromeTop);
     await expect(bar(page)).toHaveCount(0);
     // Pinch zoom without a keyboard must not bring it back.
     await page.evaluate(() => {
@@ -311,13 +336,15 @@ test.describe("mobile actions bar (coarse pointer)", () => {
       visualViewport!.dispatchEvent(new Event("resize"));
     });
     await expect(bar(page)).toBeVisible();
-    await page.evaluate(() => window.scrollTo(0, 20000));
+    await page
+      .locator(".outline-scroll")
+      .evaluate((el) => el.scrollTo(0, 20000));
     await expect(text(page, "row-0")).toHaveCount(0);
     expect(
       await page.evaluate(() => document.activeElement === document.body),
     ).toBe(true);
     await expect(bar(page)).toHaveCount(0);
-    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator(".outline-scroll").evaluate((el) => el.scrollTo(0, 0));
     await text(page, "row-0").tap();
     await expect(text(page, "row-0")).toBeFocused();
     await expect(bar(page)).toBeVisible();

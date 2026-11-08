@@ -88,8 +88,10 @@ and dock targets are at least 44 CSS pixels.
 
 The header pads its sides with `max(12px, env(safe-area-inset-*))`; the
 body's existing padding keeps the top inset.
-The dock includes safe-area insets and reserves bottom document space so the
-last node can scroll clear. A visual-viewport reduction greater than 100 CSS
+The dock includes safe-area insets and reserves bottom editor space so the
+last node can scroll clear. [ADR 0077](./0077-screen-height-editor-shell.md)
+positions the dock absolutely within the screen-height shell rather than fixed
+against the viewport. A visual-viewport reduction greater than 100 CSS
 pixels hides it, normalized for pinch zoom, leaving editing controls in charge.
 This shares the existing docked-keyboard heuristic, not a universal keyboard API:
 floating keyboards and engines without Visual Viewport cannot be detected.

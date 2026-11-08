@@ -766,8 +766,8 @@ test("Embed mirrors share the body while collapsing only their own child instanc
     'li[data-node-id="mirror"] > .outline-row > .collapse-toggle',
   );
   await mirrorToggle.evaluate((el) =>
-    window.scrollTo({
-      top: el.getBoundingClientRect().top + window.scrollY - 100,
+    document.querySelector(".outline-scroll")!.scrollBy({
+      top: el.getBoundingClientRect().top - 100,
     }),
   );
   await mirrorToggle.click();

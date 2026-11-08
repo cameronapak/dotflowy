@@ -11,8 +11,8 @@ import {
 } from "@tanstack/react-router";
 import {
   defaultRangeExtractor,
-  observeWindowOffset,
-  useWindowVirtualizer,
+  observeElementOffset,
+  useVirtualizer,
 } from "@tanstack/react-virtual";
 import { Cause, Effect, Fiber } from "effect";
 import {
@@ -401,16 +401,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     findFocusedId,
   } = useOutlineFocus();
 
-  // The windowed list container, so the drag
-  // indicator knows how wide to draw and the window virtualizer can measure its
-  // document-top offset (scrollMargin).
+  // List offsets are measured inside the editor's vertical scroll surface.
   const listRef = useRef<HTMLElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const pointerFocus = useRef(false);
-  // The sticky header block above the list. Observed so scrollMargin re-measures
-  // when its height changes (tag-filter subheader opening, breadcrumb wrap, the
-  // daily-progress bar) without a route remount -- else windowed rows drift by
-  // that delta. See the scrollMargin effect below.
+  // Header and subheaders stay in normal flow above the scrolling editor.
   const headerRef = useRef<HTMLDivElement | null>(null);
 
   // Zoom navigation: the shared-element morph between a node's title and list-
@@ -957,22 +953,16 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     pendingFocus,
     pendingFocusAtStart,
   ]);
-  // scrollMargin = the list container's distance from the document top (header +
-  // title above it). Measure per zoom view and when loading ends: the initial
+  // scrollMargin = the list's offset inside the scroll surface (title + padding).
+  // Measure per zoom view and when loading ends: the initial
   // layout effect can run while the skeleton is mounted and listRef is unset.
   const [scrollMargin, setScrollMargin] = useState(0);
-  // The sticky header's height: a stream aligns sections just below it.
-  const [headerHeight, setHeaderHeight] = useState(0);
-  // The tallest the header has been in this view. Pages size from it, so a
-  // header that shrinks for a moment (the week strip collapsing while the
-  // daily index re-syncs) does not resize every page above the day in view.
-  const [pageHeader, setPageHeader] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(() =>
     hasWindow() ? window.innerHeight : 0,
   );
   // One section's page: a screen below the header, minus a peek of the next
   // section's title.
-  const streamPage = viewportHeight - pageHeader - STREAM_PEEK;
+  const streamPage = viewportHeight - STREAM_PEEK;
   // The first index of each section's items, for page-end sizing.
   const sectionStarts = useMemo(() => {
     const m = new Map<string, number>();
@@ -983,13 +973,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     return m;
   }, [items]);
   useLayoutEffect(() => {
-    let height = window.innerHeight;
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    let height = scroller.clientHeight;
     const measure = () => {
       // Resizing changes estimates for unmounted days too. Preserve the
       // focused row before those page heights change underneath its caret.
       if (
         stream &&
-        window.innerHeight !== height &&
+        scroller.clientHeight !== height &&
         !titleAnchorRef.current &&
         !heldRef.current
       ) {
@@ -1003,23 +995,29 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           heldRef.current = {
             key: item.key,
             top: focused.getBoundingClientRect().top,
-            scrollY: window.scrollY,
+            scrollY: scroller.scrollTop,
           };
       }
-      height = window.innerHeight;
+      height = scroller.clientHeight;
       const el = listRef.current;
-      if (el) setScrollMargin(el.getBoundingClientRect().top + window.scrollY);
-      const next = headerRef.current?.offsetHeight ?? 0;
-      setHeaderHeight(next);
-      setPageHeader((prev) => Math.max(prev, next));
-      setViewportHeight(window.innerHeight);
+      if (el)
+        setScrollMargin(
+          el.getBoundingClientRect().top -
+            scroller.getBoundingClientRect().top +
+            scroller.scrollTop,
+        );
+      setViewportHeight(height);
     };
     measure();
     window.addEventListener("resize", measure);
-    // Re-measure when the sticky header resizes (the tag-filter subheader is a
+    // Re-measure when the header resizes (the tag-filter subheader is a
     // query-param change, not a remount, so the deps below never fire for it).
     const header = headerRef.current;
     const ro = hasResizeObserver() ? new ResizeObserver(measure) : null;
+    ro?.observe(scroller);
+    // Spotlight animates content padding without resizing the scroll viewport.
+    // Its changing list offset must reach the virtualizer before rows unmount.
+    ro?.observe(scroller.firstElementChild!, { box: "border-box" });
     if (header) ro?.observe(header);
     const titleBody = document.querySelector("[data-title-body]");
     if (titleBody) ro?.observe(titleBody);
@@ -1078,7 +1076,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           ? {
               key: itemsRef.current[i]!.key,
               top: el.getBoundingClientRect().top,
-              scrollY: window.scrollY,
+              scrollY: scrollRef.current!.scrollTop,
             }
           : null;
     }
@@ -1125,10 +1123,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const observeScrollRef = useRef<
     ((offset: number, isScrolling: boolean) => void) | null
   >(null);
-  const virtualizer = useWindowVirtualizer<HTMLLIElement>({
+  // This component already opts out of React Compiler for the virtualizer (ADR 0019).
+  // eslint-disable-next-line react/incompatible-library
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLLIElement>({
+    getScrollElement: () => scrollRef.current,
     observeElementOffset: (instance, onChange) => {
       observeScrollRef.current = onChange;
-      const cleanup = observeWindowOffset(instance, onChange);
+      const cleanup = observeElementOffset(instance, onChange);
       return () => {
         observeScrollRef.current = null;
         cleanup?.();
@@ -1159,12 +1160,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     },
     count: items.length,
     ...sizing,
-    // A stream scrolls sections to just below the sticky header.
-    scrollPaddingStart: stream ? headerHeight : 0,
     overscan: 8,
     scrollMargin,
     // Seed the viewport size so the FIRST paint already has a non-empty window.
-    // Without it the window virtualizer starts at a 0-height rect and renders no
+    // Without it the virtualizer starts at a 0-height rect and renders no
     // rows until it observes the window a frame later -- a gap that, under heavy
     // load, can outlast a "row is visible" assertion (and shows a blank flash).
     initialRect: hasWindow()
@@ -1255,21 +1254,19 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const sectionStartsRef = useRef(sectionStarts);
   const streamRef = useRef(stream);
   const snapshotRef = useRef(streamSnapshot);
-  const headerHeightRef = useRef(headerHeight);
   const rangeRef = useRef(range);
   useLayoutEffect(() => {
     itemsRef.current = items;
     sectionStartsRef.current = sectionStarts;
     streamRef.current = stream;
     snapshotRef.current = streamSnapshot;
-    headerHeightRef.current = headerHeight;
     rangeRef.current = range;
   });
 
-  /** The section whose start sits at or above the sticky header's bottom. */
+  /** The section at the top of the scrolling editor. */
   const sectionInView = useCallback((): string | null => {
     const cache = virtualizer.measurementsCache;
-    const line = window.scrollY + headerHeightRef.current + 48;
+    const line = scrollRef.current!.scrollTop + 48;
     let found: string | null = null;
     for (const [section, i] of sectionStartsRef.current) {
       const m = cache[i];
@@ -1305,13 +1302,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     const first = cache[0];
     const last = cache[cache.length - 1];
     if (!first || !last || cache.length !== list.length) return;
-    const y = window.scrollY;
-    const vh = window.innerHeight;
+    const scroller = scrollRef.current!;
+    const y = scroller.scrollTop;
+    const vh = scroller.clientHeight;
     if (!snapshot.atStart && y - first.start < vh * 1.5) {
       // iOS cancels momentum on a programmatic scroll write. Defer insertion
       // AND its compensation until idle, not just the compensating scroll.
       if (deferPrependRef.current) return;
-      const top = y + headerHeightRef.current;
+      const top = y;
       let held = 0;
       for (let i = 0; i < cache.length; i++) {
         if (cache[i]!.start <= top) held = i;
@@ -1330,7 +1328,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         );
         heldRef.current = {
           key: list[held]!.key,
-          top: el ? el.getBoundingClientRect().top : cache[held]!.start - y,
+          top: el
+            ? el.getBoundingClientRect().top
+            : scroller.getBoundingClientRect().top + cache[held]!.start - y,
           scrollY: y,
         };
       }
@@ -1417,17 +1417,17 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       `:scope > li[data-index="${i}"]`,
     );
     const start = virtualizer.measurementsCache[i]?.start;
-    const target = anchor
-      ? (headerRef.current?.getBoundingClientRect().bottom ?? headerHeight)
-      : held!.top;
+    const scroller = scrollRef.current!;
+    const viewportTop = scroller.getBoundingClientRect().top;
+    const target = anchor ? viewportTop : held!.top;
     const delta = el
       ? el.getBoundingClientRect().top - target
       : start === undefined
         ? 0
-        : start - window.scrollY - target;
+        : viewportTop + start - scroller.scrollTop - target;
     if (Math.abs(delta) >= 1)
-      window.scrollBy({ top: delta, behavior: "instant" });
-    if (held) held.scrollY = window.scrollY;
+      scroller.scrollBy({ top: delta, behavior: "instant" });
+    if (held) held.scrollY = scroller.scrollTop;
     if (anchor?.focusKey) {
       const focus = refs.get(anchor.focusKey);
       if (focus) {
@@ -1445,6 +1445,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       setStreamView(null);
       return;
     }
+    const scroller = scrollRef.current!;
     const publish = () => {
       const inView = sectionInView();
       if (inView) setStreamView({ anchor: stream.anchor, inView });
@@ -1474,11 +1475,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // prepend's compensation relative to the newly revealed position.
       const held = heldRef.current;
       if (held) {
-        const moved = window.scrollY - held.scrollY;
+        const moved = scroller.scrollTop - held.scrollY;
         if (Math.abs(moved) >= 1) {
           if (extendingRef.current) {
             held.top -= moved;
-            held.scrollY = window.scrollY;
+            held.scrollY = scroller.scrollTop;
           } else heldRef.current = null;
         }
       }
@@ -1508,7 +1509,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       const { y } = caretPosition(e.target);
       const viewport = window.visualViewport;
       const top =
-        (viewport?.offsetTop ?? 0) +
+        Math.max(
+          scroller.getBoundingClientRect().top,
+          viewport?.offsetTop ?? 0,
+        ) +
         (parseFloat(getComputedStyle(e.target).lineHeight) || 24) +
         8;
       const bar = document.querySelector("[data-mobile-bar]");
@@ -1529,13 +1533,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         ) - 8;
       const delta = y < top || y > bottom ? y - (top + bottom) / 2 : 0;
       if (!delta) return;
-      const from = window.scrollY;
-      window.scrollBy({ top: delta, behavior: "instant" });
+      const from = scroller.scrollTop;
+      scroller.scrollBy({ top: delta, behavior: "instant" });
       // Keep a hold on the revealed caret, not where the title left it.
       const held = heldRef.current;
       if (held) {
-        held.top -= window.scrollY - from;
-        held.scrollY = window.scrollY;
+        held.top -= scroller.scrollTop - from;
+        held.scrollY = scroller.scrollTop;
       }
       // A late prepend measurement can beat the native scroll event. Publish
       // the reveal through the offset observer so compensation AND the mounted
@@ -1545,18 +1549,17 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       // release the hold and let measurements compensate from a stale offset.
       let observed: number;
       do {
-        observed = window.scrollY;
+        observed = scroller.scrollTop;
         observeScrollRef.current?.(observed, true);
-      } while (window.scrollY !== observed);
+      } while (scroller.scrollTop !== observed);
     };
     const onKey = (e: KeyboardEvent) => {
       onEdit(e);
       releaseTitle();
     };
     publish();
-    window.addEventListener("scroll", onScroll, {
+    scroller.addEventListener("scroll", onScroll, {
       passive: true,
-      capture: true,
     });
     window.addEventListener("wheel", markGesture, { passive: true });
     window.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -1589,7 +1592,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       resetScrollGestureRef.current = null;
       deferPrependRef.current = false;
       window.clearTimeout(settle);
-      window.removeEventListener("scroll", onScroll, true);
+      scroller.removeEventListener("scroll", onScroll);
       window.removeEventListener("wheel", markGesture);
       window.removeEventListener("touchstart", onTouchStart);
       window.removeEventListener("touchmove", markGesture);
@@ -1945,10 +1948,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         pendingFlash={pendingFlash}
       />
       <SelectionActionsMenu ops={selection.ops} getCtx={pluginCtx} />
-      <div
-        className="outline-chrome relative sticky top-0 z-10"
-        ref={headerRef}
-      >
+      <div className="outline-chrome" ref={headerRef}>
         <Header getCtx={pluginCtx}>
           <BreadcrumbTrail
             trail={trail}
@@ -1959,238 +1959,242 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         <Subheader getCtx={pluginCtx} />
         <DailyNavigationProgress />
       </div>
-      {/* Tag chips live inside the bullets' contentEditable, so the click that
+      <div className="outline-scroll" ref={scrollRef}>
+        {/* Tag chips live inside the bullets' contentEditable, so the click that
           filters is captured here (mousedown blocks the editing caret). */}
-      <div
-        role="region"
-        aria-label="Outline"
-        className={
-          spotlight
-            ? "mx-auto mb-[50vh] max-w-180 p-6 pt-[50vh] max-sm:p-4 max-sm:pt-[50vh]"
-            : "mx-auto mb-[50vh] max-w-180 p-6 max-sm:p-4"
-        }
-        onMouseDown={onContentMouseDown}
-        onPointerDown={onContentPointerDown}
-        onPointerUp={onContentPointerUp}
-        onPointerCancel={onContentPointerCancel}
-        onClick={onContentClick}
-        onKeyDown={onContentKeyDown}
-        onContextMenu={onContentContextMenu}
-        onPointerDownCapture={(event) => {
-          pointerFocus.current = true;
-          activateSectionAt(event.target);
-        }}
-        onPointerCancelCapture={() => {
-          pointerFocus.current = false;
-        }}
-        onClickCapture={() => {
-          // Dead-space taps focus text during click, after pointerup. Clear
-          // after dispatch so those taps preserve the view too.
-          queueMicrotask(() => {
+        <div
+          role="region"
+          aria-label="Outline"
+          className={
+            spotlight
+              ? "mx-auto mb-[50vh] max-w-180 p-6 pt-[50vh] max-sm:p-4 max-sm:pt-[50vh]"
+              : "mx-auto mb-[50vh] max-w-180 p-6 max-sm:p-4"
+          }
+          onMouseDown={onContentMouseDown}
+          onPointerDown={onContentPointerDown}
+          onPointerUp={onContentPointerUp}
+          onPointerCancel={onContentPointerCancel}
+          onClick={onContentClick}
+          onKeyDown={onContentKeyDown}
+          onContextMenu={onContentContextMenu}
+          onPointerDownCapture={(event) => {
+            pointerFocus.current = true;
+            activateSectionAt(event.target);
+          }}
+          onPointerCancelCapture={() => {
             pointerFocus.current = false;
-          });
-        }}
-        onKeyDownCapture={() => {
-          pointerFocus.current = false;
-        }}
-        onFocus={(event) => {
-          activateSectionAt(event.target);
-          setFocusedFilterKey(findFocusedId());
-          if (
-            !pointerFocus.current &&
-            event.target instanceof HTMLElement &&
-            event.target.classList.contains("node-text")
-          )
-            revealOutlineRow(event.target);
-        }}
-        onBlur={(event) => {
-          // Portaled row menus sit outside this region in the DOM. Keep the
-          // focused-row subscription while focus is in one, or this state
-          // change would detach the menu before its click lands.
-          const next = event.relatedTarget;
-          if (
-            next instanceof HTMLElement &&
-            next.closest('[data-slot="dropdown-menu-content"]')
-          )
-            return;
-          // Base UI can move focus after blur dispatch, leaving relatedTarget
-          // null. Wait through the pointer event's default focus transfer before
-          // deciding the row is truly unfocused.
-          window.setTimeout(() => {
+          }}
+          onClickCapture={() => {
+            // Dead-space taps focus text during click, after pointerup. Clear
+            // after dispatch so those taps preserve the view too.
+            queueMicrotask(() => {
+              pointerFocus.current = false;
+            });
+          }}
+          onKeyDownCapture={() => {
+            pointerFocus.current = false;
+          }}
+          onFocus={(event) => {
+            activateSectionAt(event.target);
+            setFocusedFilterKey(findFocusedId());
             if (
-              document.activeElement instanceof HTMLElement &&
-              document.activeElement.closest(
-                '[data-slot="dropdown-menu-content"]',
-              )
+              !pointerFocus.current &&
+              event.target instanceof HTMLElement &&
+              event.target.classList.contains("node-text")
+            )
+              revealOutlineRow(event.target);
+          }}
+          onBlur={(event) => {
+            // Portaled row menus sit outside this region in the DOM. Keep the
+            // focused-row subscription while focus is in one, or this state
+            // change would detach the menu before its click lands.
+            const next = event.relatedTarget;
+            if (
+              next instanceof HTMLElement &&
+              next.closest('[data-slot="dropdown-menu-content"]')
             )
               return;
-            setFocusedFilterKey(null);
-          }, 0);
-        }}
-      >
-        {/* Mobile-only keyboard-anchored action strip. Mounts only on a coarse
-            pointer and only while a bullet is focused (both gated inside the
-            component), so on desktop this renders nothing. ADR 0030. */}
-        <MobileActionsBar
-          actions={mobileBarActions}
-          formatActions={selectionFormatActions}
-          findFocusedId={findFocusedId}
-        />
-
-        {/* Desktop-only formatting toolbar over a text selection (ADR 0036).
-            Gates itself on a fine pointer + a single-span selection, so it
-            renders nothing on touch or when nothing is selected. */}
-        <SelectionFormatToolbar actions={selectionFormatActions} />
-
-        {overlayNode}
-
-        {/* Tier-3 side panel host (ADR 0031). A plugin (or the node-decoration
-            overflow affordance) opens rich, contained UI here via ctx.openPanel;
-            the Sheet owns the backdrop + dismiss so it can't crowd the outline. */}
-        <Sheet
-          open={panelNode != null}
-          onOpenChange={(open) => {
-            if (!open) setPanelNode(null);
+            // Base UI can move focus after blur dispatch, leaving relatedTarget
+            // null. Wait through the pointer event's default focus transfer before
+            // deciding the row is truly unfocused.
+            window.setTimeout(() => {
+              if (
+                document.activeElement instanceof HTMLElement &&
+                document.activeElement.closest(
+                  '[data-slot="dropdown-menu-content"]',
+                )
+              )
+                return;
+              setFocusedFilterKey(null);
+            }, 0);
           }}
         >
-          <SheetContent side="right">{panelNode}</SheetContent>
-        </Sheet>
+          {/* Mobile-only keyboard-anchored action strip. Mounts only on a coarse
+            pointer and only while a bullet is focused (both gated inside the
+            component), so on desktop this renders nothing. ADR 0030. */}
+          <MobileActionsBar
+            actions={mobileBarActions}
+            formatActions={selectionFormatActions}
+            findFocusedId={findFocusedId}
+          />
 
-        {loading ? (
-          <OutlineLoading />
-        ) : (
-          <div className={revealOnLoad ? "outline-reveal" : undefined}>
-            {zoomedNode && !stream && (
-              <>
-                <ZoomedTitle
-                  node={zoomedNode}
-                  isPivot={pivotId === zoomedNode.id}
-                  registerRef={registerRef}
-                  getCtx={pluginCtx}
-                  setPendingFocus={commands.setPendingFocus}
-                  onTextChange={(text) =>
-                    commands.onTextChange(zoomedNode.id, text)
-                  }
-                  onAddChild={() =>
-                    runStructural(() => {
-                      capture(getTreeIndex(), zoomedNode.id, null, {
-                        label: "create",
-                      });
-                      const newId = insertChildAtStart(
-                        getTreeIndex(),
-                        zoomedNode.id,
-                      );
-                      pendingFocus.current = newId;
-                    })
-                  }
-                  onArrowDown={() =>
-                    commands.onMoveFocus(zoomedNode.id, "down")
-                  }
-                />
-                {/* "{n} backlinks" under the title (ADR 0032) -- core chrome in
+          {/* Desktop-only formatting toolbar over a text selection (ADR 0036).
+            Gates itself on a fine pointer + a single-span selection, so it
+            renders nothing on touch or when nothing is selected. */}
+          <SelectionFormatToolbar actions={selectionFormatActions} />
+
+          {overlayNode}
+
+          {/* Tier-3 side panel host (ADR 0031). A plugin (or the node-decoration
+            overflow affordance) opens rich, contained UI here via ctx.openPanel;
+            the Sheet owns the backdrop + dismiss so it can't crowd the outline. */}
+          <Sheet
+            open={panelNode != null}
+            onOpenChange={(open) => {
+              if (!open) setPanelNode(null);
+            }}
+          >
+            <SheetContent side="right">{panelNode}</SheetContent>
+          </Sheet>
+
+          {loading ? (
+            <OutlineLoading />
+          ) : (
+            <div className={revealOnLoad ? "outline-reveal" : undefined}>
+              {zoomedNode && !stream && (
+                <>
+                  <ZoomedTitle
+                    node={zoomedNode}
+                    isPivot={pivotId === zoomedNode.id}
+                    registerRef={registerRef}
+                    getCtx={pluginCtx}
+                    setPendingFocus={commands.setPendingFocus}
+                    onTextChange={(text) =>
+                      commands.onTextChange(zoomedNode.id, text)
+                    }
+                    onAddChild={() =>
+                      runStructural(() => {
+                        capture(getTreeIndex(), zoomedNode.id, null, {
+                          label: "create",
+                        });
+                        const newId = insertChildAtStart(
+                          getTreeIndex(),
+                          zoomedNode.id,
+                        );
+                        pendingFocus.current = newId;
+                      })
+                    }
+                    onArrowDown={() =>
+                      commands.onMoveFocus(zoomedNode.id, "down")
+                    }
+                  />
+                  {/* "{n} backlinks" under the title (ADR 0032) -- core chrome in
                     the mirror-badge family; renders nothing at zero. */}
-                <Backlinks nodeId={zoomedNode.id} />
-              </>
-            )}
+                  <Backlinks nodeId={zoomedNode.id} />
+                </>
+              )}
 
-            {noMatches && renderedRows.length === 0 && filter?.emptyMessage ? (
-              <div className="outline-empty">{filter.emptyMessage}</div>
-            ) : (
-              <div
-                ref={canvasViewportRef}
-                className="outline-canvas-viewport scroll-fade-x"
-              >
+              {noMatches &&
+              renderedRows.length === 0 &&
+              filter?.emptyMessage ? (
+                <div className="outline-empty">{filter.emptyMessage}</div>
+              ) : (
                 <div
-                  className="outline-canvas"
-                  style={{
-                    width: `max(100%, calc(${deepestVisibleDepth * INDENT_PX}px + var(--outline-node-min-width)))`,
-                  }}
+                  ref={canvasViewportRef}
+                  className="outline-canvas-viewport scroll-fade-x"
                 >
-                  <ul
-                    className="outline-list"
-                    ref={(el) => {
-                      listRef.current = el;
-                    }}
+                  <div
+                    className="outline-canvas"
                     style={{
-                      position: "relative",
-                      height: virtualizer.getTotalSize(),
+                      width: `max(100%, calc(${deepestVisibleDepth * INDENT_PX}px + var(--outline-node-min-width)))`,
                     }}
                   >
-                    {virtualItems.map((vi) => {
-                      const item = items[vi.index];
-                      if (!item) return null;
-                      if (item.kind !== "row")
-                        return renderStreamItem(item, vi.index, vi.start);
-                      const row = item.row;
-                      return (
-                        <OutlineRow
-                          key={vi.key}
-                          nodeId={row.id}
-                          rowKey={row.key}
-                          contentId={row.contentId}
-                          isMirror={row.isMirror}
-                          capped={row.capped}
-                          broken={row.broken}
-                          depth={row.depth}
-                          ancestorCompleted={row.ancestorCompleted}
-                          exiting={presentation.exiting.has(row.key)}
-                          exitInert={
-                            presentation.exiting.get(row.key)?.fading ?? false
-                          }
-                          commands={commands}
-                          pluginCtx={pluginCtx}
-                          registerRef={registerRef}
-                          pivotId={pivotId}
-                          isHidden={isHidden}
-                          filter={filter}
-                          pendingFocus={pendingFocus}
-                          pendingFocusAtStart={pendingFocusAtStart}
-                          pendingFlash={pendingFlash}
-                          index={vi.index}
-                          start={vi.start}
-                          scrollMargin={virtualizer.options.scrollMargin}
-                          measureRef={virtualizer.measureElement}
-                        />
-                      );
-                    })}
-                  </ul>
-                  {/* Click in the whitespace below the list adds a new top-level
+                    <ul
+                      className="outline-list"
+                      ref={(el) => {
+                        listRef.current = el;
+                      }}
+                      style={{
+                        position: "relative",
+                        height: virtualizer.getTotalSize(),
+                      }}
+                    >
+                      {virtualItems.map((vi) => {
+                        const item = items[vi.index];
+                        if (!item) return null;
+                        if (item.kind !== "row")
+                          return renderStreamItem(item, vi.index, vi.start);
+                        const row = item.row;
+                        return (
+                          <OutlineRow
+                            key={vi.key}
+                            nodeId={row.id}
+                            rowKey={row.key}
+                            contentId={row.contentId}
+                            isMirror={row.isMirror}
+                            capped={row.capped}
+                            broken={row.broken}
+                            depth={row.depth}
+                            ancestorCompleted={row.ancestorCompleted}
+                            exiting={presentation.exiting.has(row.key)}
+                            exitInert={
+                              presentation.exiting.get(row.key)?.fading ?? false
+                            }
+                            commands={commands}
+                            pluginCtx={pluginCtx}
+                            registerRef={registerRef}
+                            pivotId={pivotId}
+                            isHidden={isHidden}
+                            filter={filter}
+                            pendingFocus={pendingFocus}
+                            pendingFocusAtStart={pendingFocusAtStart}
+                            pendingFlash={pendingFlash}
+                            index={vi.index}
+                            start={vi.start}
+                            scrollMargin={virtualizer.options.scrollMargin}
+                            measureRef={virtualizer.measureElement}
+                          />
+                        );
+                      })}
+                    </ul>
+                    {/* Click in the whitespace below the list adds a new top-level
                 bullet. Hidden while filtering -- there's no "add here" then.
                 `size="icon"` (32px) is what puts the glyph on the same vertical
                 axis as the bullets above and the breadcrumb Home button. */}
-                  {!filter && !stream && (
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      aria-label="Add node"
-                      data-outline-add=""
-                      onClick={() =>
-                        runStructural(() => {
-                          capture(getTreeIndex(), null, null, {
-                            label: "create",
-                          });
-                          const siblings = childrenOf(getTreeIndex(), rootId);
-                          const afterId = siblings.length
-                            ? siblings[siblings.length - 1]!.id
-                            : null;
-                          const newId = insertSibling(
-                            getTreeIndex(),
-                            rootId,
-                            afterId,
-                          );
-                          pendingFocus.current = newId;
-                        })
-                      }
-                    >
-                      <PlusIcon />
-                    </Button>
-                  )}
+                    {!filter && !stream && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        aria-label="Add node"
+                        data-outline-add=""
+                        onClick={() =>
+                          runStructural(() => {
+                            capture(getTreeIndex(), null, null, {
+                              label: "create",
+                            });
+                            const siblings = childrenOf(getTreeIndex(), rootId);
+                            const afterId = siblings.length
+                              ? siblings[siblings.length - 1]!.id
+                              : null;
+                            const newId = insertSibling(
+                              getTreeIndex(),
+                              rootId,
+                              afterId,
+                            );
+                            pendingFocus.current = newId;
+                          })
+                        }
+                      >
+                        <PlusIcon />
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );

@@ -76,7 +76,10 @@ test("the window bounds mounted rows, preserves depth, and follows scrolling", a
   // settle, so two separate reads could race). This is the "the window follows
   // the scroll" property -- asserting a deep index rather than the literal last
   // leaf, which estimate-based sizing makes finicky to hit by scrolling.
-  await page.evaluate(() => window.scrollTo(0, 20000));
+  const chromeTop = await page
+    .locator(".outline-chrome")
+    .evaluate((el) => el.getBoundingClientRect().top);
+  await page.locator(".outline-scroll").evaluate((el) => el.scrollTo(0, 20000));
   await expect
     .poll(
       () =>
@@ -96,7 +99,13 @@ test("the window bounds mounted rows, preserves depth, and follows scrolling", a
     .toBe(true);
 
   // Scroll back to the top: the first node mounts again.
-  await page.evaluate(() => window.scrollTo(0, 0));
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  expect(
+    await page
+      .locator(".outline-chrome")
+      .evaluate((el) => el.getBoundingClientRect().top),
+  ).toBe(chromeTop);
+  await page.locator(".outline-scroll").evaluate((el) => el.scrollTo(0, 0));
   await expect(page.locator('li[data-node-id="p0"]')).toBeVisible();
 });
 
@@ -135,7 +144,7 @@ test("offscreen filtered selection keeps its logical identity and Escape restore
   };
   await expect.poll(selection).toEqual(expected);
 
-  await page.evaluate(() => window.scrollTo(0, 20000));
+  await page.locator(".outline-scroll").evaluate((el) => el.scrollTo(0, 20000));
   await expect(text(page, "p0c0")).toHaveCount(0);
   await expect(text(page, "p0c2")).toHaveCount(0);
   expect(await selection()).toEqual(expected);

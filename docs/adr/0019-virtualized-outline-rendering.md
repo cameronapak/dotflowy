@@ -65,11 +65,12 @@ attempt it.
 **Shipped (default on; the recursive rollback fallback has since been deleted).** What
 landed and the non-obvious calls:
 
-- **The flat row is `OutlineRow` (`OutlineRow.tsx`), windowed by `useWindowVirtualizer`** over
-  `useVisibleRows` (`tree-store.ts`). The outline scrolls the **window**, not a container, so it's
-  the _window_ virtualizer with `scrollMargin` = the list's document-top offset (measured per zoom
-  view) and `initialRect` seeded from the viewport (else the first paint renders 0 rows until the
-  window is observed — a blank flash, and an under-load test flake).
+- **The flat row is `OutlineRow` (`OutlineRow.tsx`), windowed by `useVirtualizer`** over
+  `useVisibleRows` (`tree-store.ts`). [ADR 0077](./0077-screen-height-editor-shell.md)
+  moves vertical scrolling from the window into the editor element. `scrollMargin`
+  is the list's offset inside that element, measured per zoom view and resize.
+  `initialRect` remains seeded from the viewport until the element is observed,
+  avoiding a blank first paint.
 - **`OutlineRow` IS the positioned + measured `<li>`** (not a wrapper div): it carries the
   `transform: translateY(start - scrollMargin)`, `data-index`, and `virtualizer.measureElement` ref
   directly, so the row stays an `<li[data-node-id]>` directly under the list `<ul>` (CSS + e2e

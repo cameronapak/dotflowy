@@ -136,12 +136,22 @@ test("dropping on a visible row keeps the scrolled day and reading position", as
         ),
       )
       .toBeLessThan(2);
-    const seated = await page.evaluate(() => window.scrollY);
+    const seated = await page
+      .locator(".outline-scroll")
+      .evaluate((el) => el.scrollTop);
+    await page
+      .locator(".outline-scroll")
+      .hover({ position: { x: 100, y: 200 } });
     await page.mouse.wheel(0, offset);
     await expect
       .poll(() =>
         page.evaluate(
-          ({ seated, offset }) => Math.abs(window.scrollY - seated - offset),
+          ({ seated, offset }) =>
+            Math.abs(
+              document.querySelector(".outline-scroll")!.scrollTop -
+                seated -
+                offset,
+            ),
           { seated, offset },
         ),
       )
@@ -153,7 +163,9 @@ test("dropping on a visible row keeps the scrolled day and reading position", as
       .locator(`li[data-node-id="entry-${entry + 4}"]`)
       .boundingBox();
     if (!from || !target) throw new Error("missing visible drag rows");
-    const before = await page.evaluate(() => window.scrollY);
+    const before = await page
+      .locator(".outline-scroll")
+      .evaluate((el) => el.scrollTop);
     const x = from.x + from.width / 2;
     const y = from.y + from.height / 2;
     await page.mouse.move(x, y);
@@ -184,7 +196,12 @@ test("dropping on a visible row keeps the scrolled day and reading position", as
       let maximum = 0;
       const until = performance.now() + 700;
       while (performance.now() < until) {
-        maximum = Math.max(maximum, Math.abs(window.scrollY - before));
+        maximum = Math.max(
+          maximum,
+          Math.abs(
+            document.querySelector(".outline-scroll")!.scrollTop - before,
+          ),
+        );
         await new Promise(requestAnimationFrame);
       }
       return maximum;
@@ -237,7 +254,7 @@ test.describe("day navigation on touch", () => {
       }, spotlight);
       await openSeededOutline(page, { anchorId: "alpha" });
       // Model a standalone iPhone's nonzero safe-area top inset.
-      await page.addStyleTag({ content: ".outline-chrome { top: 24px; }" });
+      await page.addStyleTag({ content: "body { padding-top: 24px; }" });
       const title = section(page, DAY, "title");
       const last = text(page, "entry-79");
       const gap = () =>
@@ -260,7 +277,11 @@ test.describe("day navigation on touch", () => {
       // The last child starts far outside the virtual window.
       await tapToday(page);
       await seated();
-      await expect(page.locator(".outline-chrome")).toHaveCSS("top", "24px");
+      expect(
+        await page
+          .locator(".outline-chrome")
+          .evaluate((el) => el.getBoundingClientRect().top),
+      ).toBe(24);
       await expect(text(page, "hidden-tail")).not.toBeAttached();
       expect(await page.locator("li[data-node-id]").count()).toBeLessThan(50);
       const nodes: ApiNode[] = await page.evaluate(() =>
@@ -351,7 +372,7 @@ test.describe("day navigation on touch", () => {
         expect(neighborsMounted).toBe(true);
         await expect(page.locator(".outline-chrome")).toHaveCSS(
           "position",
-          "relative",
+          "static",
         );
         await expect(last).toBeInViewport({ ratio: 1 });
         await expect
@@ -368,16 +389,27 @@ test.describe("day navigation on touch", () => {
             }),
           )
           .toBe(true);
-        const beforeScroll = await page.evaluate(() => window.scrollY);
-        await page.evaluate(() => window.scrollBy(0, 260));
+        const beforeScroll = await page
+          .locator(".outline-scroll")
+          .evaluate((el) => el.scrollTop);
+        // Model a reading gesture and its scroll separately: mobile WebKit
+        // cannot dispatch a native wheel through Playwright. The gesture must
+        // release input-driven caret following before the scroll loads rows.
+        await page.locator(".outline-scroll").evaluate((el) => {
+          el.dispatchEvent(
+            new WheelEvent("wheel", { bubbles: true, deltaY: 260 }),
+          );
+          el.scrollBy(0, 260);
+        });
         await expect
-          .poll(() => page.evaluate(() => window.scrollY))
+          .poll(() =>
+            page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+          )
           .toBeGreaterThan(beforeScroll + 200);
         await expect(last).toBeFocused();
         if (event === "compositionstart")
           await last.dispatchEvent("compositionend", { data: "" });
-        // End this editing session before starting the next independent input
-        // path. Mobile intentionally unsticks chrome while editing.
+        // End this editing session before starting the next independent input path.
         if (event !== "input") await last.evaluate((el) => el.blur());
       }
       // Real input still goes to the last child and persists normally.
@@ -521,10 +553,22 @@ test.describe("day navigation on touch", () => {
         inViewport: true,
         aboveToolbar: true,
       });
-      const before = await page.evaluate(() => scrollY);
-      await page.evaluate(() => window.scrollBy(0, 100));
+      const before = await page
+        .locator(".outline-scroll")
+        .evaluate((el) => el.scrollTop);
+      // A reading gesture releases the caret hold before its native scroll.
+      // Bare scrollBy can race the virtualizer's earlier scroll listener.
+      await page.locator(".outline-scroll").evaluate((el) => {
+        el.dispatchEvent(new TouchEvent("touchstart", { bubbles: true }));
+        el.dispatchEvent(new TouchEvent("touchmove", { bubbles: true }));
+        el.scrollBy(0, 100);
+        el.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
+      });
+      await page.clock.runFor(32);
       await expect
-        .poll(() => page.evaluate(() => scrollY))
+        .poll(() =>
+          page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+        )
         .toBeGreaterThan(before + 90);
     });
 
@@ -621,7 +665,9 @@ test.describe("day navigation on touch", () => {
               document.execCommand("insertText", false, "appended");
               // A caret reveal can advance before the dispatched prepend
               // commits. Its scroll must not discard that compensation.
-              window.scrollBy({ top: 8, behavior: "instant" });
+              document
+                .querySelector(".outline-scroll")!
+                .scrollBy({ top: 8, behavior: "instant" });
             }, ms);
             return settleId;
           }) as typeof window.setTimeout;
@@ -652,10 +698,22 @@ test.describe("day navigation on touch", () => {
       await expect.poll(caretClear).toBe(true);
       // The raced settle did load the days above.
       await expect(section(page, PREV, "title")).toBeAttached();
-      const before = await page.evaluate(() => scrollY);
-      await page.evaluate(() => window.scrollBy(0, 100));
+      const before = await page
+        .locator(".outline-scroll")
+        .evaluate((el) => el.scrollTop);
+      // Model the reading gesture as well as its scroll, then let the next
+      // frames run so a transient move followed by a snap-back cannot pass.
+      await page.locator(".outline-scroll").evaluate((el) => {
+        el.dispatchEvent(new TouchEvent("touchstart", { bubbles: true }));
+        el.dispatchEvent(new TouchEvent("touchmove", { bubbles: true }));
+        el.scrollBy(0, 100);
+        el.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
+      });
+      await page.clock.runFor(32);
       await expect
-        .poll(() => page.evaluate(() => scrollY))
+        .poll(() =>
+          page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+        )
         .toBeGreaterThan(before + 90);
     });
   }
@@ -737,7 +795,8 @@ test.describe("touch momentum", () => {
       // chunks the cold opening needed. Follow a visible title from here.
       await page.keyboard.press("Escape");
       await page.evaluate(async () => {
-        window.scrollTo(0, 1900);
+        const scroller = document.querySelector(".outline-scroll")!;
+        scroller.scrollTo(0, scroller.clientHeight * 1.5 + 650);
         for (let i = 0; i < 30; i++) await new Promise(requestAnimationFrame);
       });
       const heldKey = await page.evaluate(() => {
@@ -754,7 +813,9 @@ test.describe("touch momentum", () => {
       const held = section(page, heldKey, "title");
       const before = await held.evaluate((el) => ({
         top: el.getBoundingClientRect().top,
-        start: el.getBoundingClientRect().top + scrollY,
+        start:
+          el.getBoundingClientRect().top +
+          document.querySelector(".outline-scroll")!.scrollTop,
       }));
 
       // CDP sends trusted native touch input. Keep sampling the same title's
@@ -785,7 +846,11 @@ test.describe("touch momentum", () => {
           );
           if (el) {
             const top = el.getBoundingClientRect().top;
-            samples.push({ top, start: top + scrollY, ended });
+            samples.push({
+              top,
+              start: top + document.querySelector(".outline-scroll")!.scrollTop,
+              ended,
+            });
           }
           raf = requestAnimationFrame(sample);
         };
@@ -844,7 +909,7 @@ test.describe("touch momentum", () => {
         );
         await page.evaluate(async () => {
           for (let i = 0; i < 13; i++) {
-            window.scrollBy(0, -40);
+            document.querySelector(".outline-scroll")!.scrollBy(0, -40);
             await new Promise(requestAnimationFrame);
             await new Promise(requestAnimationFrame);
           }
@@ -859,7 +924,7 @@ test.describe("touch momentum", () => {
       // tests our deferral contract, not physical iOS momentum physics.
       await page.evaluate(async () => {
         for (let i = 0; i < 10; i++) {
-          window.scrollBy(0, -30);
+          document.querySelector(".outline-scroll")!.scrollBy(0, -30);
           await new Promise(requestAnimationFrame);
           await new Promise(requestAnimationFrame);
         }
@@ -867,7 +932,11 @@ test.describe("touch momentum", () => {
       });
       await expect
         .poll(() =>
-          held.evaluate((el) => el.getBoundingClientRect().top + scrollY),
+          held.evaluate(
+            (el) =>
+              el.getBoundingClientRect().top +
+              document.querySelector(".outline-scroll")!.scrollTop,
+          ),
         )
         .toBeGreaterThan(before.start + 1000);
       const result = await page.evaluate(() => {
@@ -1238,7 +1307,7 @@ test("typing stays local and scrolling reuses day-stream layout and content", as
   // can legitimately invalidate layout. The shell must render, its content not.
   await page.evaluate(() => {
     performance.clearMarks();
-    window.scrollBy(0, 8);
+    document.querySelector(".outline-scroll")!.scrollBy(0, 8);
   });
   await settle();
   const scrolling = await marks();

@@ -3,6 +3,8 @@ import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 import type { VisibleRow } from "../data/visible-order";
 
+import { getOutlineScroller } from "../data/outline-scroll";
+
 const CHECKED_MS = 80;
 const FADE_MS = 80;
 const MOVE_MS = 80;
@@ -234,9 +236,13 @@ export function useCompletionTransition({
       const old = properties[property];
       const computed = getComputedStyle(el);
       const currentY = new DOMMatrixReadOnly(computed.transform).m42;
+      const scroller = getOutlineScroller()!;
       const base = opacity
         ? 0
-        : el.getBoundingClientRect().y + window.scrollY - currentY;
+        : el.getBoundingClientRect().y -
+          scroller.getBoundingClientRect().top +
+          scroller.scrollTop -
+          currentY;
       if (
         old?.target === target &&
         old.deadline === deadline &&

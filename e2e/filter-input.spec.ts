@@ -257,7 +257,7 @@ test("a retained row stays filtered out after its focused editor unmounts", asyn
   await expect(editor).toHaveText("Edited!");
   await expect(editor).toBeFocused();
 
-  await page.evaluate(() => window.scrollTo(0, 4000));
+  await page.locator(".outline-scroll").evaluate((el) => el.scrollTo(0, 4000));
   await expect(row(page, "node-0")).toHaveCount(0);
   await expect
     .poll(() =>
@@ -268,7 +268,7 @@ test("a retained row stays filtered out after its focused editor unmounts", asyn
         .then(Number),
     )
     .toBeGreaterThan(50);
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.locator(".outline-scroll").evaluate((el) => el.scrollTo(0, 0));
   await expect(row(page, "node-1")).toBeVisible();
   await expect(row(page, "node-0")).toHaveCount(0);
   await expect(input(page)).toHaveValue("match");

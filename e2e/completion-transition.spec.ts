@@ -364,7 +364,9 @@ test("a large disappearing subtree stays windowed and hands focus to an initiall
   });
   expect(
     await row(page, "after").evaluate(
-      (el) => el.getBoundingClientRect().y + window.scrollY,
+      (el) =>
+        el.getBoundingClientRect().y +
+        document.querySelector(".outline-scroll")!.scrollTop,
     ),
   ).toBeCloseTo(targetTop, 0);
   await page.clock.runFor(208);
@@ -500,7 +502,7 @@ test("late-mounted exiting rows join the fade and cannot take focus", async ({
           observer.observe(document.querySelector(".outline-list")!, {
             childList: true,
           });
-          window.scrollTo(0, 3500);
+          document.querySelector(".outline-scroll")!.scrollTo(0, 3500);
         },
       ),
   );
@@ -523,7 +525,7 @@ test("late-mounted exiting rows join the fade and cannot take focus", async ({
     if (el instanceof HTMLElement) el.focus();
   });
   await expect(late.locator(".node-text")).not.toBeFocused();
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.locator(".outline-scroll").evaluate((el) => el.scrollTo(0, 0));
   await page.clock.runFor(32);
   expect(
     await row(page, "task").evaluate(
