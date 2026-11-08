@@ -9,6 +9,7 @@ import type { QueryFilter } from "../data/filter-query";
 import type { ExternalDropTargetSpec, PluginContext } from "../plugins/types";
 
 import { isMirrorsEnabled } from "../data/flags";
+import { getOutlineScroller } from "../data/outline-scroll";
 import { getSelectionDragSet } from "../data/selection-fill";
 import { type Node, type TreeIndex } from "../data/tree";
 import { virtualRowRect } from "../data/virtual-nav";
@@ -336,10 +337,12 @@ export function useDragReorder(deps: DragDeps) {
     // position, estimated until it renders.
     const listEl = depsRef.current.getListEl();
     const listRect = listEl?.getBoundingClientRect();
-    const scrollY = window.scrollY;
+    const scroller = getOutlineScroller()!;
+    const viewportOffset =
+      scroller.scrollTop - scroller.getBoundingClientRect().top;
     const pairs: { row: Row; rect: RowRect }[] = [];
     for (const r of s.rows) {
-      const vr = virtualRowRect(r.key, scrollY);
+      const vr = virtualRowRect(r.key, viewportOffset);
       if (!vr) continue;
       // Uniform indent: depth-0 left is the container left; deeper rows add
       // depth * indent (OutlineRow's paddingInlineStart). project() backs
@@ -438,16 +441,19 @@ export function useDragReorder(deps: DragDeps) {
   }, []);
 
   // Auto-scroll loop: while the pointer sits in a viewport edge band, scroll
-  // the window vertically or the outline canvas horizontally, then re-project
+  // the editor vertically or the outline canvas horizontally, then re-project
   // so off-screen drop targets and depths become reachable.
   const tickScroll = useCallback(() => {
     const s = state.current;
     if (!s || !s.dragging) return;
+    const scroller = getOutlineScroller()!;
+    const bounds = scroller.getBoundingClientRect();
     const y = s.lastY;
-    const h = window.innerHeight;
     let dy = 0;
-    if (y < EDGE) dy = -SCROLL_MAX * (1 - y / EDGE);
-    else if (y > h - EDGE) dy = SCROLL_MAX * (1 - (h - y) / EDGE);
+    if (y < bounds.top + EDGE)
+      dy = -SCROLL_MAX * (1 - Math.max(0, y - bounds.top) / EDGE);
+    else if (y > bounds.bottom - EDGE)
+      dy = SCROLL_MAX * (1 - Math.max(0, bounds.bottom - y) / EDGE);
     const horizontal = depsRef.current.getHorizontalScrollEl();
     const rect = horizontal?.getBoundingClientRect();
     let dx = 0;
@@ -458,7 +464,7 @@ export function useDragReorder(deps: DragDeps) {
         dx = SCROLL_MAX * (1 - (rect.right - s.lastX) / EDGE);
       }
     }
-    if (dy !== 0) window.scrollBy(0, dy);
+    if (dy !== 0) scroller.scrollBy(0, dy);
     if (dx !== 0) horizontal?.scrollBy(dx, 0);
     if (dx !== 0 || dy !== 0) {
       project(s.lastX, s.lastY);

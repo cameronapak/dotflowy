@@ -6,9 +6,9 @@ status: accepted
 
 **What.** Deeply nested visible nodes stop shrinking once their body would
 become unreadable. The outline content column owns a horizontal **outline
-canvas** whose width grows with visible depth; the page and fixed header do not
-scroll sideways. The window remains the vertical scroll surface required by
-ADR 0019.
+canvas** whose width grows with visible depth; the page and header do not
+scroll sideways. [ADR 0077](./0077-screen-height-editor-shell.md) moves vertical
+scrolling from the window into the editor beneath normal-flow header chrome.
 
 The canvas width is at least the viewport content width. When necessary it grows
 to `deepest visible depth × 24px + minimum readable node body`, including the
@@ -39,7 +39,7 @@ Back navigation minimally reveals the node that led to the zoomed view rather
 than maintaining per-route horizontal scroll state.
 
 **Pointer and touch behavior.** A touch beginning on row text or empty row space
-uses native direction locking for horizontal canvas panning or vertical window
+uses native direction locking for horizontal canvas panning or vertical editor
 scrolling. A bullet tap zooms; a swipe beginning on the bullet also pans or
 scrolls. To reorder with touch, hold for 350ms within the existing 5px movement
 threshold, then move. Earlier movement cancels the pending drag and leaves
@@ -81,7 +81,7 @@ each virtual row still measures its full body and remains a direct child of the
 list. A row caps at the viewport content width plus its own indent, so a shallow
 row does not grow merely because a deeper sibling expands the canvas. The
 horizontal owner must hide, not scroll, vertical overflow; otherwise CSS turns
-it into a second vertical scroll container and fights window virtualization.
+it into a second vertical scroll container and fights editor virtualization.
 Canvas-width changes must not fork visible-order traversal. Width and edge-state
 updates should follow visible structure and resize events, not text keystrokes.
 

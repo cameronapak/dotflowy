@@ -17,6 +17,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
+import { getOutlineScroller } from "../data/outline-scroll";
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 import { caretPosition } from "./caret-menu-utils";
@@ -311,6 +312,7 @@ export function MobileActionsBar({
     const bar = barRef.current;
     const frame = bar?.parentElement;
     if (!editing || !bar || !frame) return;
+    const scroller = getOutlineScroller()!;
     const viewport = window.top === window ? window.visualViewport : null;
     let raf = 0;
     let following = false;
@@ -368,9 +370,9 @@ export function MobileActionsBar({
       bottom -= gap;
       // The last row needs real scroll range, not just a scroll request. Keep
       // the reservation for this editing session so Safari cannot clamp it away.
-      document.body.style.setProperty(
+      scroller.style.setProperty(
         "--outline-keyboard-space",
-        `${Math.max(0, window.innerHeight - bottom)}px`,
+        `${Math.max(0, scroller.getBoundingClientRect().bottom - bottom)}px`,
       );
       if (bottom - top < caretHeight) return;
       const delta =
@@ -380,7 +382,7 @@ export function MobileActionsBar({
             ? y - caretHeight - top
             : 0;
       if (Math.abs(delta) >= 1)
-        window.scrollBy({ top: delta, behavior: "instant" });
+        scroller.scrollBy({ top: delta, behavior: "instant" });
     };
     const schedule = () => {
       following = true;
@@ -401,7 +403,9 @@ export function MobileActionsBar({
       if (following) schedule();
     };
     observer.observe(frame);
-    observer.observe(document.body);
+    observer.observe(scroller);
+    // The viewport stays fixed-height; late row measurements resize its content.
+    observer.observe(scroller.firstElementChild!);
     schedule();
     document.addEventListener("input", schedule);
     document.addEventListener("compositionend", schedule);
@@ -416,7 +420,7 @@ export function MobileActionsBar({
       cancel();
       reconcileCaret.current = null;
       observer.disconnect();
-      document.body.style.removeProperty("--outline-keyboard-space");
+      scroller.style.removeProperty("--outline-keyboard-space");
       document.removeEventListener("input", schedule);
       document.removeEventListener("compositionend", schedule);
       document.removeEventListener("focusin", schedule);

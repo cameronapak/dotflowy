@@ -145,8 +145,37 @@
   }
 }
 
+/* Only outline routes lock the root. Settings, auth and legal pages retain
+   document scrolling. Safari's keyboard may pan this viewport natively. */
+html:has(.outline-shell),
+body:has(.outline-shell) {
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+
+.outline-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .outline-chrome {
-  top: env(safe-area-inset-top);
+  flex: none;
+  z-index: 10;
+}
+
+.outline-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  scroll-padding-block: 8px;
 }
 
 /* ADR 0076: navigation below, actions above. Package selectors stay scoped. */
@@ -159,11 +188,12 @@
   --lg-brightness-small: 1.511;
   --lg-saturate-small: 2;
   --dock-tab-width: clamp(100px, calc((100vw - 64px) / 2), 132px);
-  position: fixed;
+  position: absolute;
   z-index: 20;
-  bottom: calc(16px + env(safe-area-inset-bottom));
-  left: calc(16px + env(safe-area-inset-left));
-  right: calc(16px + env(safe-area-inset-right));
+  /* The shell is already inside body's safe-area padding. */
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
   display: flex;
   justify-content: center;
   pointer-events: none;
@@ -402,8 +432,12 @@
 }
 
 @media (width < 768px) {
-  body:has(.mobile-navigation) {
-    padding-bottom: calc(100px + env(safe-area-inset-bottom));
+  .outline-shell:has(.mobile-navigation) .outline-scroll {
+    scroll-padding-bottom: 100px;
+  }
+
+  .outline-shell:has(.mobile-navigation) .outline-scroll > [role="region"] {
+    padding-bottom: 100px;
   }
 
   body:has(.outline-header) [data-quick-add-fab] {
@@ -421,17 +455,8 @@
      to lift its caret above suggestions or the keyboard toolbar. Landscape needs
      the keyboard reservation even when the layout is wider than 768px. Keep it
      for the editing session: removing it mid-edit clamps Safari's scroll. */
-  body:has(.node-text:focus) {
+  .outline-scroll:has(.node-text:focus) > [role="region"] {
     padding-bottom: max(50vh, var(--outline-keyboard-space, 0px));
-  }
-
-  /* Keep chrome's positioning stable as a typed trigger opens/closes a menu.
-     A day jump can focus an offscreen entry while still showing its title and
-     navigation. Editing releases that title anchor before opening a menu.
-     Landscape touch keyboards also need the header's space for the caret. */
-  body:has(.node-text:focus) .outline-chrome:not([data-title-anchored]) {
-    position: relative;
-    top: 0;
   }
 }
 
@@ -2033,7 +2058,7 @@ dotflowy-widget[data-bible-ref][data-atom-selected] > span {
 }
 .outline-canvas-viewport {
   /* Row widths depend on this viewport, not on deeper children widening the
-     canvas. Inline containment leaves window-owned vertical sizing intact. */
+     canvas. Inline containment leaves the editor's vertical sizing intact. */
   container-type: inline-size;
   width: calc(100% + 16px);
   max-width: none;

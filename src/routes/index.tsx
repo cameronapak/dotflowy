@@ -10,7 +10,7 @@ export const Route = createFileRoute("/")({
 
 function HomePage() {
   return (
-    <main>
+    <main className="outline-shell">
       <OutlineEditor rootId={null} />
     </main>
   );

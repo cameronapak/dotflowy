@@ -320,22 +320,34 @@ test.describe("narrow-screen drawers", () => {
     await editor(page).evaluate(() => {
       const range = window.getSelection()!.getRangeAt(0).cloneRange();
       range.collapse(false);
-      window.scrollBy({
+      document.querySelector(".outline-scroll")!.scrollBy({
         top: range.getBoundingClientRect().bottom - 280,
         behavior: "instant",
       });
     });
-    const before = await page.evaluate(() => window.scrollY);
+    const before = await page
+      .locator(".outline-scroll")
+      .evaluate((el) => el.scrollTop);
     await page.keyboard.type("#");
     await expect(suggestions(page)).toBeVisible();
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+    await expect
+      .poll(() =>
+        page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+      )
+      .toBe(before);
     await page.keyboard.type("urg");
     await expect(page.getByRole("option")).toHaveCount(1);
     await expect(editor(page)).toBeFocused();
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+    await expect
+      .poll(() =>
+        page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+      )
+      .toBe(before);
     await page.keyboard.press("Escape");
     await expect(drawer(page)).toHaveCount(0);
-    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+    expect(
+      await page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+    ).toBe(before);
     await expect(editor(page)).toBeFocused();
     await expect(editor(page)).toHaveText("Note #urg");
 
@@ -349,7 +361,7 @@ test.describe("narrow-screen drawers", () => {
     await editor(page).evaluate(() => {
       const range = window.getSelection()!.getRangeAt(0).cloneRange();
       range.collapse(false);
-      window.scrollBy({
+      document.querySelector(".outline-scroll")!.scrollBy({
         top: range.getBoundingClientRect().bottom - (innerHeight - 100),
         behavior: "instant",
       });
@@ -398,7 +410,9 @@ test.describe("narrow-screen drawers", () => {
     await expect(page.getByTestId("week-calendar-month")).toBeVisible();
     await editor(page).tap();
     await page.keyboard.type("/");
-    await setVisualViewport(page, 260, 31);
+    // Normal-flow daily chrome plus suggestions must leave room for a line.
+    // Safari's native outer pan in smaller bands is not modeled here.
+    await setVisualViewport(page, 320, 31);
     await expect(suggestions(page)).toBeVisible();
     const caretVisible = () =>
       editor(page).evaluate((el) => {
@@ -407,7 +421,7 @@ test.describe("narrow-screen drawers", () => {
         const caret = range.getBoundingClientRect();
         const bottom =
           document.querySelector(".typing-suggestions")?.getBoundingClientRect()
-            .top ?? 291;
+            .top ?? 351;
         const hit = document.elementFromPoint(
           caret.left - 1,
           (caret.top + caret.bottom) / 2,
@@ -423,22 +437,27 @@ test.describe("narrow-screen drawers", () => {
         page.evaluate(
           () =>
             new Promise<boolean>((resolve) => {
-              const y = window.scrollY;
+              const scroller = document.querySelector(".outline-scroll")!;
+              const y = scroller.scrollTop;
               requestAnimationFrame(() =>
-                requestAnimationFrame(() => resolve(window.scrollY === y)),
+                requestAnimationFrame(() => resolve(scroller.scrollTop === y)),
               );
             }),
         ),
       )
       .toBe(true);
-    const beforeClose = await page.evaluate(() => window.scrollY);
+    const beforeClose = await page
+      .locator(".outline-scroll")
+      .evaluate((el) => el.scrollTop);
     await page.keyboard.press("Escape");
     await expect.poll(caretVisible).toBe(true);
-    expect(await page.evaluate(() => window.scrollY)).toBe(beforeClose);
+    expect(
+      await page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+    ).toBe(beforeClose);
     await editor(page).evaluate((el) => el.blur());
-    await expect(page.locator("div.sticky").first()).toHaveCSS(
+    await expect(page.locator(".outline-chrome")).toHaveCSS(
       "position",
-      "sticky",
+      "static",
     );
   });
 
@@ -562,10 +581,14 @@ test.describe("narrow-screen drawers", () => {
     ]);
     await page.goto("/");
     await expect(editor(page)).toBeVisible({ timeout: 15_000 });
-    await page.evaluate(() =>
-      window.scrollTo({ top: 400, behavior: "instant" }),
-    );
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(400);
+    await page
+      .locator(".outline-scroll")
+      .evaluate((el) => el.scrollTo({ top: 400, behavior: "instant" }));
+    await expect
+      .poll(() =>
+        page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+      )
+      .toBe(400);
     await page.keyboard.press("q");
     await expect(quickAdd(page)).toBeVisible();
     const draft = page.locator(".quick-add-editor [contenteditable]");
@@ -602,7 +625,9 @@ test.describe("narrow-screen drawers", () => {
     await page.locator("[data-quick-add-dest]").tap();
     await expect(drawer(page)).toBeVisible();
     await settleSheet(page);
-    expect(await page.evaluate(() => window.scrollY)).toBe(400);
+    expect(
+      await page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+    ).toBe(400);
     await page.touchscreen.tap(10, 100);
     await expect(drawer(page)).toBeHidden();
     await expect(quickAdd(page)).toBeVisible();
@@ -647,11 +672,15 @@ test.describe("narrow-screen drawers", () => {
     );
     await expect(draft).toHaveText("Capture /todo");
     await expect(draft).toBeFocused();
-    const beforeClose = await page.evaluate(() => window.scrollY);
+    const beforeClose = await page
+      .locator(".outline-scroll")
+      .evaluate((el) => el.scrollTop);
     await page.keyboard.press("Escape");
     await expect(quickAdd(page)).toBeHidden();
     await expect
-      .poll(() => page.evaluate(() => window.scrollY))
+      .poll(() =>
+        page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+      )
       .toBe(beforeClose);
   });
 
@@ -761,7 +790,7 @@ test.describe("narrow-screen drawers", () => {
       timeout: 15_000,
     });
     expect(
-      await page.evaluate(() => document.documentElement.scrollHeight),
+      await page.locator(".outline-scroll").evaluate((el) => el.scrollHeight),
     ).toBeGreaterThan(620);
     // Observe actual painted geometry: an autofocus jump to the resting snap
     // passes click tests but must fail the smooth-entry contract.
@@ -826,7 +855,9 @@ test.describe("narrow-screen drawers", () => {
     const y = box.y + 60;
     const x = box.x + box.width / 2;
     const top = (await sheet(page).boundingBox())!.y;
-    const pageY = await page.evaluate(() => window.scrollY);
+    const pageY = await page
+      .locator(".outline-scroll")
+      .evaluate((el) => el.scrollTop);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
@@ -845,7 +876,9 @@ test.describe("narrow-screen drawers", () => {
       "opacity",
       "1",
     );
-    expect(await page.evaluate(() => window.scrollY)).toBe(pageY);
+    expect(
+      await page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+    ).toBe(pageY);
     for (let step = 7; step >= 0; step--) {
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchMove",
@@ -865,13 +898,15 @@ test.describe("narrow-screen drawers", () => {
     await swipeSheet(page);
     await expect(drawer(page)).toBeHidden();
     await expect(trigger).toBeFocused();
+    await page
+      .locator(".outline-scroll")
+      .hover({ position: { x: 180, y: 100 } });
+    await page.mouse.wheel(0, 120);
     await expect
       .poll(() =>
-        page.evaluate(
-          () => getComputedStyle(document.documentElement).overflowY,
-        ),
+        page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
       )
-      .not.toBe("hidden");
+      .toBeGreaterThan(pageY);
   });
 
   test("reduced motion keeps modal controls and dismissal usable", async ({
@@ -951,12 +986,13 @@ test("keyboard opening App focuses its first item and supports immediate arrows"
     timeout: 15_000,
   });
   expect(
-    await page.evaluate(() => document.documentElement.scrollHeight),
+    await page.locator(".outline-scroll").evaluate((el) => el.scrollHeight),
   ).toBeGreaterThan(620);
   expect(
-    await page.evaluate(
-      () => innerWidth - document.documentElement.clientWidth,
-    ),
+    await page.locator(".outline-scroll").evaluate((el) => {
+      // SAFETY: OutlineEditor renders .outline-scroll as an HTML div.
+      return (el as HTMLElement).offsetWidth - el.clientWidth;
+    }),
   ).toBeGreaterThan(0);
   const trigger = page.getByRole("button", { name: /^More/ });
   await trigger.focus();
@@ -964,7 +1000,7 @@ test("keyboard opening App focuses its first item and supports immediate arrows"
   const items = drawer(page).locator('button[role^="menuitem"]:not(:disabled)');
   await expect(items.first()).toBeFocused();
   await settleSheet(page);
-  // A classic page scrollbar must not push the sheet outside the viewport.
+  // The editor's classic scrollbar must not push the sheet outside the viewport.
   await expect
     .poll(() =>
       sheetDialog(page).evaluate(

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 /**
  * The visible viewport's height and top edge for the mobile toolbar (ADR 0030).
  * Adobe handles keyboard-aware sizing; the offset follows iOS viewport panning.
- * Keep the editor's window scrolling intact and size only the toolbar's frame.
+ * Size only the toolbar's frame; the editor shell stays at 100% height (ADR 0077).
  */
 export function useKeyboardViewport() {
   const { height } = useViewportSize();

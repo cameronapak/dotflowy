@@ -198,7 +198,9 @@ test.describe("touch drag", () => {
     if (!box) throw new Error("no bullet box");
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
-    const before = await page.evaluate(() => scrollY);
+    const before = await page
+      .locator(".outline-scroll")
+      .evaluate((el) => el.scrollTop);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
@@ -215,7 +217,9 @@ test.describe("touch drag", () => {
       touchPoints: [],
     });
     await expect
-      .poll(() => page.evaluate(() => scrollY))
+      .poll(() =>
+        page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
+      )
       .toBeGreaterThan(before + 40);
     await expect(page.locator(".drag-pill")).toHaveCount(0);
     const saved = await page.evaluate(async () =>

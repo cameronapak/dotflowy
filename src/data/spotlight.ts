@@ -25,7 +25,7 @@
  *     scrolls: edge rows clamp, and the breathing-room padding (also ADR
  *     0060) lives in OutlineEditor.
  *  4. The breathing-room grow/collapse on toggle (ADR 0060): ONE tween drives
- *     the region's inline padding AND the window scroll in the same frames,
+ *     the region's inline padding AND the editor scroll in the same frames,
  *     so the anchored row stays glued to the screen. Two separate animations
  *     (a CSS padding transition plus a scroll tween) always fight -- that was
  *     the bounce. The `pt-[50vh]` class is the steady state the tween hands
@@ -33,6 +33,7 @@
  */
 
 import { SPOTLIGHT_KEY } from "../lib/storage-keys";
+import { getOutlineScroller } from "./outline-scroll";
 
 // -- toggle store -----------------------------------------------------------
 
@@ -158,8 +159,10 @@ function runTween(
 /** Interruptible ease-out scroll. */
 function slideBy(delta: number, ms: number): void {
   if (Math.abs(delta) < 1) return;
-  const from = window.scrollY;
-  runTween(ms, (t) => window.scrollTo(0, from + delta * t));
+  const scroller = getOutlineScroller();
+  if (!scroller) return;
+  const from = scroller.scrollTop;
+  runTween(ms, (t) => scroller.scrollTo(0, from + delta * t));
 }
 
 /**
@@ -184,7 +187,7 @@ function breathPad(): number {
 
 /**
  * Grow (enable) or collapse (disable) the breathing room as ONE animation:
- * the tween drives the region's inline padding AND the window scroll in the
+ * the tween drives the region's inline padding AND the editor scroll in the
  * same frames, so the row the user is anchored to stays GLUED to the screen
  * while the page eases into its new shape. Two separate animations (CSS
  * padding transition + scroll tween) always fight -- each cancels or
@@ -202,7 +205,9 @@ function animateBreath(
     if (region) region.style.paddingTop = "";
     return;
   }
-  const from = window.scrollY;
+  const scroller = getOutlineScroller();
+  if (!scroller) return;
+  const from = scroller.scrollTop;
   breathAnimating = true;
   if (region) {
     // The tween owns the scroll for its whole flight; the browser's scroll
@@ -215,7 +220,7 @@ function animateBreath(
     (t) => {
       if (region)
         region.style.paddingTop = `${Math.round(padFrom + (padTo - padFrom) * t)}px`;
-      window.scrollTo(0, from + scrollDelta * t);
+      scroller.scrollTo(0, from + scrollDelta * t);
     },
     () => {
       breathAnimating = false;
@@ -249,27 +254,21 @@ function isMobileViewport(): boolean {
   return window.matchMedia("(max-width: 767px)").matches;
 }
 
-/** `headerRef` is the sticky wrapper around `<header>` (plus subheader chrome). */
-function stickyHeaderHeight(): number {
-  const header = document.querySelector("header");
-  if (!(header instanceof HTMLElement)) return 0;
-  const sticky = header.parentElement;
-  const el =
-    sticky instanceof HTMLElement && sticky.classList.contains("sticky")
-      ? sticky
-      : header;
-  return el.getBoundingClientRect().height;
-}
-
 function alignScrollDelta(rowTop: number, rowHeight: number): number {
-  const viewTop = window.visualViewport?.offsetTop ?? 0;
-  const viewHeight = window.visualViewport?.height ?? window.innerHeight;
+  const bounds = getOutlineScroller()?.getBoundingClientRect();
+  if (!bounds) return 0;
+  const viewport = window.visualViewport;
+  const viewTop = Math.max(bounds.top, viewport?.offsetTop ?? 0);
+  const bottom = Math.min(
+    bounds.bottom,
+    (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight),
+  );
   return centerScrollDelta(
     rowTop,
     rowHeight,
     viewTop,
-    viewHeight,
-    stickyHeaderHeight(),
+    bottom - viewTop,
+    0,
     isMobileViewport(),
   );
 }
@@ -469,5 +468,9 @@ export function uninstallSpotlight(): void {
     // collapsed frame before the tween's first write.
     region.style.paddingTop = `${flight}px`;
   }
-  animateBreath(flight, base, held ? -(flight - base) : -window.scrollY);
+  animateBreath(
+    flight,
+    base,
+    held ? -(flight - base) : -(getOutlineScroller()?.scrollTop ?? 0),
+  );
 }

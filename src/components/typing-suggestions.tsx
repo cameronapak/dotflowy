@@ -2,6 +2,7 @@ import { motion, useIsPresent, useReducedMotion } from "motion/react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { getOutlineScroller } from "../data/outline-scroll";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
 import { caretPosition } from "./caret-menu-utils";
 
@@ -49,7 +50,7 @@ export function TypingSuggestions({
       const bottom = offsetTop + height - body.offsetHeight - margin - 8;
       const delta = y - bottom;
       if (delta > 1)
-        window.scrollBy({
+        getOutlineScroller()?.scrollBy({
           top: delta,
           behavior: reducedMotion ? "instant" : "smooth",
         });

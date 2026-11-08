@@ -42,20 +42,14 @@ function tallTree(): SeedNode[] {
 async function rowAlign(page: Page, nodeId: string) {
   return page.evaluate((id) => {
     const el = document.querySelector<HTMLElement>(`li[data-node-id="${id}"]`);
-    const header = document.querySelector("header");
-    const sticky =
-      header instanceof HTMLElement &&
-      header.parentElement instanceof HTMLElement &&
-      header.parentElement.classList.contains("sticky")
-        ? header.parentElement
-        : header;
-    if (!el || !(sticky instanceof HTMLElement)) return null;
+    const scroller = document.querySelector(".outline-scroll");
+    if (!el || !scroller) return null;
     const rect = el.getBoundingClientRect();
-    const viewTop = window.visualViewport?.offsetTop ?? 0;
-    const viewHeight = window.visualViewport?.height ?? window.innerHeight;
+    const bounds = scroller.getBoundingClientRect();
     return {
-      topGap: rect.top - viewTop - sticky.getBoundingClientRect().height,
-      centerDelta: rect.top + rect.height / 2 - (viewTop + viewHeight / 2),
+      topGap: rect.top - bounds.top,
+      centerDelta:
+        rect.top + rect.height / 2 - (bounds.top + bounds.height / 2),
     };
   }, nodeId);
 }
@@ -94,9 +88,10 @@ test("a startup reinstall centers a row focused before cleanup animation ends", 
       let max = 0;
       const sample = () => {
         const rect = el.closest("li")!.getBoundingClientRect();
-        const center =
-          (window.visualViewport?.offsetTop ?? 0) +
-          (window.visualViewport?.height ?? window.innerHeight) / 2;
+        const bounds = document
+          .querySelector(".outline-scroll")!
+          .getBoundingClientRect();
+        const center = bounds.top + bounds.height / 2;
         max = Math.max(max, Math.abs(rect.top + rect.height / 2 - center));
         if (performance.now() - start >= 300) resolve(max);
         else requestAnimationFrame(sample);
