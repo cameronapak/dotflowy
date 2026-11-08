@@ -95,6 +95,12 @@ source text while preserving the caret; composing text waits until IME ends.
 CLI and MCP daily operations remain available. See
 [ADR 0064](./adr/0064-account-wide-editor-feature-preferences.md).
 
+The Day stream is temporarily unavailable, including for accounts with a saved
+opt-in. Its disabled setting explains that we're working to bring it back.
+Daily notes, Today, and single-day calendar navigation remain available; no
+notes or saved preferences are deleted. Empty days options are disabled with
+the stream. See [ADR 0070's suspension](./adr/0070-day-stream.md#november-8-amendment-temporary-suspension).
+
 Embeds also requires the independent `external-embeds` account permission,
 off by default. Approval must persist before provider requests start. The reviewed
 `row:body` and `title:body` positions render below editable text through

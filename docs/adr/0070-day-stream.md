@@ -4,6 +4,34 @@ status: accepted
 
 # The day stream replaces the single-day page
 
+## November 8 amendment: temporary suspension
+
+The Day stream shipped prematurely and scrolling between days can jump or skip.
+It is temporarily unavailable, not removed. The effective `dayStream` preference
+is always false, including before preferences load and when an account has a
+saved opt-in. Its setter does nothing, Settings shows a disabled off switch with
+a note that we're working to bring it back, and Cmd+K no longer offers its
+toggle. Empty days controls remain disabled because they apply only to streams.
+Saved preferences, daily-index mappings, and outline nodes are not rewritten.
+Stream code and its browser journeys remain for a future return; those journeys
+are explicitly skipped while the feature is unavailable, without a test bypass.
+
+Daily notes remain enabled independently. Today, `/today`, Cmd+K's Go to Today,
+date chips, week-strip pills, and the month picker keep their single-day paths.
+Today retains write-intent seeding; date browsing remains seed-free. The Week
+strip and Week start options remain available. CLI, MCP, and capture are unchanged.
+An old `/$nodeId?day=...` URL opens the anchor node named in the path, ignoring
+the stream-only day parameter, as the existing stream-off fallback already did.
+Visiting an empty day through date navigation may create its dated node and
+scaffold, but does not seed a child. Unlike streaming, browsing those dates is
+not a placeholder-only preview.
+
+This is a client release, not a remote kill switch: an already-open old bundle
+keeps its old behavior until reloaded. Re-enabling the stream requires a code
+change and fresh verification, not a preference change or data migration.
+
+## Original decision
+
 A zoomed Daily note now reads as a **Day stream**: one page per calendar day,
 continuing into earlier and later days, with free vertical scrolling.
 It replaces the single-day page. Cam picked this over a Reflect-style

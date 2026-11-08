@@ -876,14 +876,20 @@ function DailyNotesOptions() {
       </SettingsOptionRow>
       <SettingsOptionRow
         title="Day stream"
-        description="Scroll from one day to the next instead of opening one day at a time."
+        description={
+          <span id="day-stream-status">
+            Temporarily unavailable because scrolling between days can jump or
+            skip. We're working to bring it back. Daily notes still open one day
+            at a time.
+          </span>
+        }
       >
         <SettingsSwitchTarget>
           <Switch
             aria-label="Day stream"
+            aria-describedby="day-stream-status"
             checked={preferences.dayStream}
-            disabled={disabled}
-            onCheckedChange={toggle("dayStream", "the day stream")}
+            disabled
           />
         </SettingsSwitchTarget>
       </SettingsOptionRow>

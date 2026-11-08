@@ -259,13 +259,12 @@ test("zoomed day unifies date-mention backlinks with node-link referrers", async
       },
     },
   );
-  await openSeededOutline(page, { path: `/${DAY_ID}` });
-  const day = page.locator(
-    `[data-stream-item="title"][data-section="${DAY_KEY}"]`,
-  );
-  await expect(day.locator(".zoomed-title")).toContainText("April 22");
+  // This day has no children, so its ordinary outline list has no height.
+  await page.goto(`/${DAY_ID}`);
+  await page.locator(".zoomed-title").waitFor({ state: "visible" });
+  await expect(page.locator(".zoomed-title")).toContainText("April 22");
 
-  const line = day.getByRole("button", { name: /2 backlinks/ });
+  const line = page.getByRole("button", { name: /2 backlinks/ });
   await expect(line).toBeVisible();
   await line.click();
   const dialog = page.getByRole("dialog");
