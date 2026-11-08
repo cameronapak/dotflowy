@@ -449,7 +449,6 @@ export function LinkEditPopover({
   return mobile ? (
     <MenuSheetContent
       title={focus === "url" ? "Add link" : "Edit link"}
-      compact
       isOpen={sheetOpen}
       onOpenChange={setSheetOpen}
       onAfterClose={() => {

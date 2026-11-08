@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // A small nested tree: alpha has a subtree (for "Collapse all"), bravo is a
 // sibling to indent under alpha, zephyr is a distinctive leaf whose text matches
@@ -30,8 +30,7 @@ const text = (page: Page, id: string) =>
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
-  await page.goto("/");
-  await expect(text(page, "alpha")).toBeVisible({ timeout: 15_000 });
+  await openSeededOutline(page, { anchorId: "alpha" });
 }
 
 async function openPalette(page: Page) {
@@ -75,9 +74,6 @@ test("View bookmarks the current page on desktop and removes it in the narrow sh
   const more = page.getByRole("button", { name: "More", exact: true });
   await more.click();
   await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
-  await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
-    "data-expanded",
-  );
   await expect(bookmark).toHaveAttribute("aria-checked", "true");
   await bookmark.click();
   await expect(bookmark).toHaveAttribute("aria-checked", "false");

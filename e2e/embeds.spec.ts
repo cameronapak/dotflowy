@@ -872,10 +872,7 @@ for (const width of [1168, 320]) {
     await pencil.click();
     const editor = page.getByRole("dialog", { name: "Edit link" });
     await expect(editor).toBeVisible();
-    if (width < 768)
-      await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
-        "data-expanded",
-      );
+    if (width < 768) await expect(editor.locator(".lg-sheet")).toBeVisible();
     await expect(viewport).toHaveJSProperty("clientWidth", viewportWidth);
     await expect(viewport).toHaveJSProperty("scrollLeft", scrollLeft);
     await page.keyboard.press("Escape");
@@ -959,10 +956,7 @@ for (const width of [1280, 390]) {
     });
     const editor = page.getByRole("dialog", { name: "Edit link" });
     const settleEditor = async () => {
-      if (width < 768)
-        await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
-          "data-expanded",
-        );
+      if (width < 768) await expect(editor.locator(".lg-sheet")).toBeVisible();
     };
     const saved = () =>
       page.evaluate(
@@ -1269,19 +1263,16 @@ test.describe("mobile link editor sheet", () => {
       name: "Edit link",
     });
     const editor = page.getByRole("dialog", { name: "Edit link" });
-    for (const dismiss of ["Cancel", "Close", "Escape", "backdrop", "swipe"]) {
+    for (const dismiss of ["Cancel", "Escape", "backdrop", "swipe"]) {
       await pencil.tap();
-      await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
-        "data-expanded",
-      );
       await expect(editor).toBeVisible();
       await expect
         .poll(() =>
-          editor.evaluate((el) =>
-            Math.round(el.getBoundingClientRect().bottom),
-          ),
+          editor
+            .locator(".lg-sheet")
+            .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
         )
-        .toBe(await page.evaluate(() => innerHeight));
+        .toBe(await page.evaluate(() => innerHeight - 8));
       // Opening the choices should not summon the keyboard before a field is tapped.
       await expect(editor.getByLabel("Link text")).not.toBeFocused();
       await editor.getByLabel("Link text").fill("Discard this title");
@@ -1289,7 +1280,7 @@ test.describe("mobile link editor sheet", () => {
       if (dismiss === "Escape") await page.keyboard.press("Escape");
       else if (dismiss === "backdrop") await page.touchscreen.tap(4, 4);
       else if (dismiss === "swipe") {
-        const handle = await page.locator(".sheet-handle").boundingBox();
+        const handle = await page.locator(".lg-sheet-handle").boundingBox();
         const x = handle!.x + handle!.width / 2;
         const y = handle!.y + handle!.height / 2;
         // Native snap positions are a viewport apart. A short partial pull is
@@ -1340,20 +1331,16 @@ test.describe("mobile link editor sheet", () => {
     await page.goto("/");
     await note(page, "link").getByRole("button", { name: "Edit link" }).tap();
     const editor = page.getByRole("dialog", { name: "Edit link" });
-    await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
-      "data-expanded",
-    );
+    await expect(editor).toBeVisible();
     await editor.getByLabel("Link text").fill("Keep my draft");
     await editor.getByRole("button", { name: "Plain URL", exact: true }).tap();
     await page.setViewportSize({ width: 768, height: 844 });
-    await expect(page.locator(".sheet-surface")).toHaveCount(0);
+    await expect(page.locator(".lg-sheet")).toHaveCount(0);
     await expect(editor.getByLabel("Link text")).toHaveValue("Keep my draft");
     await expect(editor.getByLabel("Link text")).toBeDisabled();
     await expect(editor.getByLabel("Link URL")).toBeFocused();
     await page.setViewportSize({ width: 320, height: 640 });
-    await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
-      "data-expanded",
-    );
+    await expect(editor.locator(".lg-sheet")).toBeVisible();
     await expect(editor.getByLabel("Link text")).toHaveValue("Keep my draft");
     await expect(
       editor.getByRole("button", { name: "Embed", exact: true }),
@@ -1361,7 +1348,14 @@ test.describe("mobile link editor sheet", () => {
     await expect(
       editor.getByText("This URL doesn’t support embeds."),
     ).toBeVisible();
-    const box = await editor.boundingBox();
+    await expect
+      .poll(() =>
+        editor
+          .locator(".lg-sheet")
+          .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
+      )
+      .toBe(632);
+    const box = await editor.locator(".lg-sheet").boundingBox();
     expect(box!.x).toBeGreaterThanOrEqual(8);
     expect(box!.x + box!.width).toBeLessThanOrEqual(312);
     await editor.getByRole("button", { name: "Link Title", exact: true }).tap();

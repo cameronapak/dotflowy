@@ -1293,9 +1293,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   latestSearchDayRef.current = routeSearch.day ?? null;
   const maybeExtend = useCallback(() => {
     if (!streamRef.current || extendingRef.current) return;
-    // Native sheets capture the document offset on entry. A background prepend
-    // moves that stage out of view and dismisses it; resume on the next scroll.
-    if (document.querySelector(".menu-sheet-overlay")) return;
+    // Do not extend the background stream while a modal sheet is in use.
+    // Resume on the next scroll after it releases the native top layer.
+    if (document.querySelector("dialog[open].lg-sheet-dialog")) return;
     const snapshot = snapshotRef.current;
     const list = itemsRef.current;
     const cache = virtualizer.measurementsCache;
@@ -3906,7 +3906,7 @@ function CollapsedCrumbs({
         className="w-[min(22rem,calc(100vw-1.5rem))]"
       >
         {trigger && (
-          <DropdownMenuItem onClick={() => onNavigate(null, rootId)}>
+          <DropdownMenuItem onAfterClose={() => onNavigate(null, rootId)}>
             <HomeIcon />
             Home
           </DropdownMenuItem>
@@ -3914,7 +3914,7 @@ function CollapsedCrumbs({
         {hidden.map((ancestor) => (
           <DropdownMenuItem
             key={ancestor.id}
-            onClick={() => onNavigate(ancestor.id, rootId)}
+            onAfterClose={() => onNavigate(ancestor.id, rootId)}
           >
             <span className="min-w-0 flex-1 truncate">
               {crumbLabel(ancestor)}

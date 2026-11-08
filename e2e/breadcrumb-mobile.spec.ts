@@ -67,10 +67,10 @@ test("mobile Back names the parent, and the breadcrumb sheet holds Home and the 
   await expect
     .poll(() =>
       page
-        .locator(".sheet-menu-content")
+        .locator(".lg-sheet")
         .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
     )
-    .toBe(700);
+    .toBe(692);
 
   // Picking an intermediate ancestor navigates to it.
   await items.nth(3).click(); // n2

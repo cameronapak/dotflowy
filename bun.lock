@@ -80,7 +80,7 @@
     },
   },
   "patchedDependencies": {
-    "react-aria-components@1.22.0": "patches/react-aria-components@1.22.0.patch",
+    "@onlymoein/liquidglass@0.12.0": "patches/@onlymoein%2Fliquidglass@0.12.0.patch",
   },
   "packages": {
     "@babel/code-frame": ["@babel/code-frame@8.0.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^8.0.0", "js-tokens": "^10.0.0" } }, "sha512-dYYg153EyN2Ekbqw2zAsbd6/JR+9N2SEoC7YV2GyyqMM7x9bLDTjBD6XBhSMLH0wtIVyJj03jWNriQhaN+eoCw=="],

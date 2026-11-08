@@ -1,11 +1,12 @@
 import {
   createContext,
   useContext,
+  useRef,
   useState,
   type ComponentProps,
   type ReactElement,
 } from "react";
-import { SheetTrigger } from "react-aria-components/Sheet";
+import { DialogTrigger } from "react-aria-components/Dialog";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
@@ -22,9 +23,11 @@ import {
 } from "./dropdown-menu";
 import { Separator } from "./separator";
 
-const MobileMenu = createContext<{ title: string; close: () => void } | null>(
-  null,
-);
+const MobileMenu = createContext<{
+  title: string;
+  close: (action?: () => void) => void;
+  afterClose: () => void;
+} | null>(null);
 
 export function ResponsiveMenu({
   title,
@@ -35,12 +38,30 @@ export function ResponsiveMenu({
 }) {
   const mobile = useIsMobile();
   const [open, setOpen] = useState(false);
+  const pending = useRef<(() => void) | undefined>(undefined);
   return (
-    <MobileMenu value={mobile ? { title, close: () => setOpen(false) } : null}>
+    <MobileMenu
+      value={
+        mobile
+          ? {
+              title,
+              close: (action) => {
+                pending.current = action;
+                setOpen(false);
+              },
+              afterClose: () => {
+                const action = pending.current;
+                pending.current = undefined;
+                action?.();
+              },
+            }
+          : null
+      }
+    >
       {mobile ? (
-        <SheetTrigger isOpen={open} onOpenChange={setOpen}>
+        <DialogTrigger isOpen={open} onOpenChange={setOpen}>
           {children}
-        </SheetTrigger>
+        </DialogTrigger>
       ) : (
         <DropdownMenu open={open} onOpenChange={setOpen}>
           {children}
@@ -69,7 +90,7 @@ export function ResponsiveMenuContent({
 }: ComponentProps<typeof DropdownMenuContent>) {
   const mobile = useContext(MobileMenu);
   return mobile ? (
-    <MenuSheetContent title={mobile.title}>
+    <MenuSheetContent title={mobile.title} onAfterClose={mobile.afterClose}>
       <div
         role="menu"
         aria-label={mobile.title}
@@ -110,6 +131,7 @@ const itemClass =
 export function ResponsiveMenuItem({
   children,
   onClick,
+  onAfterClose,
   className,
   variant,
   ...props
@@ -119,6 +141,8 @@ export function ResponsiveMenuItem({
 > & {
   "data-unseen"?: string;
   onClick?: () => void;
+  /** Focus handoffs wait for the native top layer; wide menus run immediately. */
+  onAfterClose?: () => void;
 }) {
   const mobile = useContext(MobileMenu);
   return mobile ? (
@@ -132,7 +156,8 @@ export function ResponsiveMenuItem({
         className,
       )}
       onClick={() => {
-        mobile.close();
+        mobile.close(onAfterClose);
+        // Clipboard writes and new tabs must retain the original user gesture.
         onClick?.();
       }}
     >
@@ -140,7 +165,10 @@ export function ResponsiveMenuItem({
     </button>
   ) : (
     <DropdownMenuItem
-      onClick={onClick}
+      onClick={() => {
+        onClick?.();
+        onAfterClose?.();
+      }}
       className={className}
       variant={variant}
       {...props}

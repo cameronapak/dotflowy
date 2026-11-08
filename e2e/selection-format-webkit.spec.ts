@@ -69,15 +69,28 @@ test("the link sheet settles on screen with the url focused", async ({
     .getByRole("button", { name: "Link", exact: true })
     .tap();
 
-  const url = page.locator(".sheet-surface").getByLabel("Link URL");
+  const sheet = page.getByRole("dialog", { name: "Add link", exact: true });
+  const url = sheet.getByLabel("Link URL");
   await expect(url).toBeFocused();
   await expect
     .poll(() =>
       url.evaluate((el) => {
         const r = el.getBoundingClientRect();
-        return r.top >= 0 && r.bottom <= window.innerHeight;
+        return (
+          r.top >= visualViewport!.offsetTop &&
+          r.bottom <= visualViewport!.height + visualViewport!.offsetTop
+        );
       }),
     )
     .toBe(true);
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await url.fill("https://example.com/webkit");
+  await sheet.getByRole("button", { name: "Done", exact: true }).tap();
+  await expect(sheet).toHaveCount(0);
+  await expect(text(page, "n")).toBeFocused();
+  await expect(
+    text(page, "n").locator(
+      '.link-url-chip[data-src="https://example.com/webkit"]',
+    ),
+  ).toHaveCount(1);
 });
