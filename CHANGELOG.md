@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.32.2
+
+### Patch Changes
+
+- b9a5b92: Keep header and subheaders above a separately scrolling outline in a screen-height editor.
+
 ## 1.32.1
 
 ### Patch Changes
