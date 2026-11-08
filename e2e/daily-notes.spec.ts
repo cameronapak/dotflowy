@@ -57,10 +57,7 @@ function todayChain() {
 
 async function load(page: Page, tree: SeedNode[] = STANDARD_TREE) {
   await seedOutline(page, tree);
-  await page.goto("/");
-  await expect(
-    page.locator('li[data-node-id="alpha"] > .outline-row .node-text'),
-  ).toBeVisible({ timeout: 15_000 });
+  await openSeededOutline(page, { anchorId: "alpha" });
 }
 
 // The breadcrumb's leading icon button zooms back to the top. It's a CLIENT
