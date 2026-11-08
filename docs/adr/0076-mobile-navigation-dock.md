@@ -65,7 +65,7 @@ Other zoomed pages select neither tab. No invented destinations or Node fields.
 ## Glass and fallbacks
 
 Use the MIT-licensed `@onlymoein/liquidglass` TabBar for the dock and its
-Toolbar, ToolbarGroup and Button for the header, pinned to 0.11.2. Load them
+Toolbar, ToolbarGroup and Button for the header, pinned to 0.12.0. Load them
 with the mobile chunks, not desktop's initial editor graph. Scope palette
 overrides to each surface and follow Dotflowy's theme, not the OS appearance:
 the package reads `prefers-color-scheme`, so the header pins both its light and
