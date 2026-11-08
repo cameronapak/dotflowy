@@ -556,9 +556,15 @@ test.describe("day navigation on touch", () => {
       const before = await page
         .locator(".outline-scroll")
         .evaluate((el) => el.scrollTop);
-      await page
-        .locator(".outline-scroll")
-        .evaluate((el) => el.scrollBy(0, 100));
+      // A reading gesture releases the caret hold before its native scroll.
+      // Bare scrollBy can race the virtualizer's earlier scroll listener.
+      await page.locator(".outline-scroll").evaluate((el) => {
+        el.dispatchEvent(new TouchEvent("touchstart", { bubbles: true }));
+        el.dispatchEvent(new TouchEvent("touchmove", { bubbles: true }));
+        el.scrollBy(0, 100);
+        el.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
+      });
+      await page.clock.runFor(32);
       await expect
         .poll(() =>
           page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
@@ -695,9 +701,15 @@ test.describe("day navigation on touch", () => {
       const before = await page
         .locator(".outline-scroll")
         .evaluate((el) => el.scrollTop);
-      await page
-        .locator(".outline-scroll")
-        .evaluate((el) => el.scrollBy(0, 100));
+      // Model the reading gesture as well as its scroll, then let the next
+      // frames run so a transient move followed by a snap-back cannot pass.
+      await page.locator(".outline-scroll").evaluate((el) => {
+        el.dispatchEvent(new TouchEvent("touchstart", { bubbles: true }));
+        el.dispatchEvent(new TouchEvent("touchmove", { bubbles: true }));
+        el.scrollBy(0, 100);
+        el.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
+      });
+      await page.clock.runFor(32);
       await expect
         .poll(() =>
           page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
