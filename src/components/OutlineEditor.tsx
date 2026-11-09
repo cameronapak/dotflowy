@@ -78,6 +78,7 @@ import {
   toggleCompleted,
 } from "../data/mutations";
 import { flattenNodeText } from "../data/node-links";
+import { isQuoteText, QUOTE_MARKER } from "../data/quote";
 import { appRuntime } from "../data/runtime";
 import { bootstrapOutline } from "../data/seed";
 import { useSyncSelectionFillRows } from "../data/selection-fill";
@@ -153,7 +154,7 @@ import {
   useViewFilter,
 } from "../plugins/registry";
 import { Backlinks } from "./backlinks";
-import { TitleParagraphGlyph } from "./bullet-glyph";
+import { TitleGlyph } from "./bullet-glyph";
 import { caretPosition } from "./caret-menu-utils";
 import {
   caretFromPoint,
@@ -209,6 +210,7 @@ import {
   guardProtected,
   ProtectionIndicator,
 } from "./protection";
+import { useQuoteMarkerBackspace } from "./quote-marker";
 import { useNativeFormatInput } from "./selection-format";
 import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
 import {
@@ -2750,6 +2752,7 @@ function useNodeCommands({
                 instanceId: string;
                 activeKey: string;
                 atStart: boolean;
+                caret?: number;
               } | null => {
                 // Address the row by its render KEY, not the bare id the keymap passes:
                 // inside a mirror the keymap hands over the CONTENT id, so only the
@@ -2768,10 +2771,22 @@ function useNodeCommands({
                 const content = idx.byId.get(contentId);
                 if (!content) return null;
                 const isMirrorRow = contentId !== instanceId;
-                const offset = Math.max(
+                // A quote carries its `> ` marker to the row Enter creates, so
+                // one Backspace turns that row back into a bullet (ADR 0079).
+                const carry =
+                  content.kind !== "embed" && isQuoteText(content.text)
+                    ? QUOTE_MARKER
+                    : "";
+                const rawOffset = Math.max(
                   0,
                   Math.min(selection.start, content.text.length),
                 );
+                // A split never cuts the marker: a caret inside `> ` splits
+                // after it.
+                const offset =
+                  rawOffset > 0 && rawOffset < carry.length
+                    ? carry.length
+                    : rawOffset;
                 const end = Math.max(
                   offset,
                   Math.min(selection.end, content.text.length),
@@ -2786,6 +2801,8 @@ function useNodeCommands({
                   guardProtected(contentId, "blank", rowOf(activeKey))
                 )
                   return null;
+                // Enter on an empty quote never reaches here: the row keymap
+                // unquotes it in place (ADR 0079).
                 capture(idx, activeKey, null, { label: "create" });
                 // Caret at the very START of a bullet that HAS text: this is not a
                 // split, it's "make room above". The edited node keeps its id, its
@@ -2796,7 +2813,13 @@ function useNodeCommands({
                 // mapping pointing at it.) Checked BEFORE the mirror redirect: this
                 // arm writes nothing to the source and positions the new node beside
                 // the INSTANCE, which is the local-position side (ADR 0022).
-                if (offset === 0 && end === 0 && content.text.length > 0) {
+                // For a quote, "the start" is anywhere up to the end of its
+                // marker, and the new row above is an empty quote.
+                if (
+                  offset <= carry.length &&
+                  end === offset &&
+                  content.text.length > carry.length
+                ) {
                   // Insert BEFORE = insert after our own predecessor. At the head
                   // that's null, which insertSibling handles by repointing the old
                   // head -- so one call covers head and middle alike.
@@ -2805,7 +2828,7 @@ function useNodeCommands({
                     instance.parentId,
                     instance.prevSiblingId,
                     content.isTask,
-                    "",
+                    carry,
                     content.kind,
                   );
                   // Focus stays on the row the user was editing, caret still at its
@@ -2814,7 +2837,12 @@ function useNodeCommands({
                   // the new line: every other arm only moves the caret when it moved
                   // the text.) Still routed through pendingFocus because the row
                   // shifts position in the flat windowed list (ADR 0019).
-                  return { instanceId, activeKey, atStart: true };
+                  return {
+                    instanceId,
+                    activeKey,
+                    atStart: true,
+                    caret: carry ? offset : undefined,
+                  };
                 }
                 // On a mirror's OWN row, Enter never moves text off the source -- the
                 // text is the source's content, so a split would either desync every
@@ -2841,6 +2869,7 @@ function useNodeCommands({
                 }
                 let newId: string;
                 let atStart = false;
+                let caret: number | undefined;
                 if (caretAtEnd && isOpen) {
                   // Dive in: a child of the CONTENT (source), so the new node windows
                   // into every instance, not just the one being edited.
@@ -2848,7 +2877,7 @@ function useNodeCommands({
                     idx,
                     contentId,
                     content.isTask,
-                    "",
+                    carry,
                     undefined,
                     content.kind,
                   );
@@ -2860,11 +2889,13 @@ function useNodeCommands({
                     parentId: instance.parentId,
                     afterId: instanceId,
                     leftText: before,
-                    rightText: after,
+                    rightText: carry + after,
                     isTask: content.isTask,
                     kind: content.kind,
                   });
                   atStart = true;
+                  // The caret lands after the carried marker, not before it.
+                  if (carry) caret = carry.length;
                 } else {
                   // New sibling beside the INSTANCE (position is local to where the row
                   // sits). Off-flag / mirror-free, instance === content === id, so this
@@ -2874,19 +2905,19 @@ function useNodeCommands({
                     instance.parentId,
                     instanceId,
                     content.isTask,
-                    "",
+                    carry,
                     content.kind,
                   );
                 }
-                return { instanceId: newId, activeKey, atStart };
+                return { instanceId: newId, activeKey, atStart, caret };
               },
             );
             if (plan) {
-              pendingFocus.current = focusKeyFor(
-                plan.instanceId,
-                plan.activeKey,
-              );
+              const key = focusKeyFor(plan.instanceId, plan.activeKey);
+              pendingFocus.current = key;
               pendingFocusAtStart.current = plan.atStart;
+              if (plan.caret !== undefined)
+                setPendingCaretOffset(key, plan.caret);
             }
           }),
 
@@ -3478,11 +3509,14 @@ function ZoomedTitle({
   const beforeTextSlots: SlotSpec[] = [
     ...(slotsByPosition.get("title:before-text") ?? []),
     {
-      // A zoomed paragraph keeps its signifier -- muted and non-interactive,
-      // since the title has nothing to zoom into (ADR 0045).
-      id: "core:paragraph-mark",
+      // A zoomed paragraph or quote keeps its signifier -- muted and
+      // non-interactive, since the title has nothing to zoom into (ADR 0045,
+      // ADR 0079).
+      id: "core:kind-mark",
       position: "title:before-text",
-      render: () => <TitleParagraphGlyph kind={node.kind} />,
+      render: () => (
+        <TitleGlyph kind={node.kind} quote={isQuoteText(node.text)} />
+      ),
     },
     {
       id: "core:protection-indicator",
@@ -3542,6 +3576,9 @@ function ZoomedTitle({
     ctx: getCtx,
     onTextChange,
   });
+
+  // Backspace at or inside a quote's `> ` unquotes the title (ADR 0079).
+  useQuoteMarkerBackspace(ref, onTextChange);
 
   // Title shortcuts, scoped to the title's own contentEditable. Enter adds a
   // first child under the title; ArrowDown drops focus into the first child.

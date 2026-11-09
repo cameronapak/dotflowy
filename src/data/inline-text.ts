@@ -26,6 +26,7 @@ import { flattenDateLinks } from "./date-links";
 import { stripEmphasis } from "./emphasis";
 import { stripHighlights } from "./highlight";
 import { stripLinks } from "./links";
+import { stripQuoteMarker } from "./quote";
 import { stripSpoilers } from "./spoiler";
 
 /** The strips a code run shields: highlight fences + color emoji, emphasis
@@ -34,7 +35,8 @@ function stripMarkup(text: string): string {
   return stripSpoilers(stripEmphasis(stripHighlights(text)));
 }
 
-/** Plain reading text of `text`: `[[2026-07-08]]` -> its display label
+/** Plain reading text of `text`: a leading quote marker `> ` drops (ADR 0079),
+ *  `[[2026-07-08]]` -> its display label
  *  ("Today"/"Jul 8" -- ADR 0038), `[label](url)` -> `label`, `==🔴x==` -> `x`,
  *  `*x*`/`**x**`/`~~x~~`/`~x~` -> `x`, `` `x` `` -> `x`, `||x||` -> `x`
  *  (in-app: interior kept). A code run keeps its interior VERBATIM, so
@@ -43,7 +45,7 @@ function stripMarkup(text: string): string {
  *  untouched. */
 export function flattenInline(text: string, today?: string): string {
   return stripCodeShielded(
-    stripLinks(flattenDateLinks(text, today)),
+    stripLinks(flattenDateLinks(stripQuoteMarker(text), today)),
     stripMarkup,
   );
 }

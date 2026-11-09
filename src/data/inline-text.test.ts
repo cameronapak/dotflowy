@@ -27,6 +27,10 @@ test.each([
   // An unclosed backtick is safe: markup around it still flattens.
   ["a `stray tick with **bold**", "a `stray tick with bold"],
   ["`*a*` `*b*`", "*a* *b*"],
+  // Only a leading `> ` (with its space) is a quote marker.
+  ["> **said** it", "said it"],
+  [">5 and -> stay", ">5 and -> stay"],
+  ["a > b", "a > b"],
 ])("flattenInline(%p) -> %p", (text, expected) => {
   expect(flattenInline(text)).toBe(expected);
 });

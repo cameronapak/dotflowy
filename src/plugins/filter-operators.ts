@@ -5,6 +5,7 @@ import { buildFilterOperatorMap } from "../data/filter-query";
 import { HIGHLIGHT_FILTER_OPERATORS } from "./highlight/filter-operators";
 import { LINK_FILTER_OPERATORS } from "./links/filter-operators";
 import { PROVENANCE_FILTER_OPERATORS } from "./provenance/filter-operators";
+import { QUOTE_FILTER_OPERATORS } from "./quote/filter-operators";
 import { TODO_FILTER_OPERATORS } from "./todos/filter-operators";
 
 export const queryOperators = buildFilterOperatorMap([
@@ -13,4 +14,5 @@ export const queryOperators = buildFilterOperatorMap([
   ...PROVENANCE_FILTER_OPERATORS,
   ...LINK_FILTER_OPERATORS,
   ...HIGHLIGHT_FILTER_OPERATORS,
+  ...QUOTE_FILTER_OPERATORS,
 ]);

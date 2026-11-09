@@ -938,7 +938,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     name: "search_nodes",
     title: "Search nodes",
     description:
-      "Find nodes with DQL, the same grammar as the app filter: is:todo -is:complete #dotflowy, has:link, highlight:red, is:agent, is:mirror, phrases, negation, and adjacent-term OR. Tags are exact and case-sensitive; text is case-insensitive. Mirrors match source content. Spoiler interiors cannot match. Returns readable text and structured nodes with ids and breadcrumbs. Pages default to 25 matches; use nextCursor until null for a complete list. Restart if searchable data changes.",
+      "Find nodes with DQL, the same grammar as the app filter: is:todo -is:complete #dotflowy, has:link, highlight:red, is:agent, is:mirror, is:quote, phrases, negation, and adjacent-term OR. Tags are exact and case-sensitive; text is case-insensitive. Mirrors match source content. Spoiler interiors cannot match. Returns readable text and structured nodes with ids and breadcrumbs. Pages default to 25 matches; use nextCursor until null for a complete list. Restart if searchable data changes.",
     input: SearchInput,
     output: SearchPage,
     readOnly: true,

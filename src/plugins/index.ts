@@ -17,6 +17,7 @@ import highlight from "./highlight";
 import links from "./links";
 import nodeLinks from "./node-links";
 import provenance from "./provenance";
+import quote from "./quote";
 import routeBible from "./route-bible";
 import scribble from "./scribble";
 import spoiler from "./spoiler";
@@ -39,6 +40,7 @@ export const plugins: PluginDef[] = [
   emphasis,
   highlight,
   spoiler,
+  quote,
   daily,
   scribble,
   focus,

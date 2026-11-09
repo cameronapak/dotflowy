@@ -70,7 +70,20 @@ describe("DQL agent matching", () => {
         text: "Task #Dotflowy",
         isTask: true,
       }),
+      createNode({
+        id: "quote",
+        parentId: "project",
+        prevSiblingId: "case",
+        text: "> Said well",
+      }),
+      createNode({
+        id: "not-quote",
+        parentId: "project",
+        prevSiblingId: "quote",
+        text: ">no space",
+      }),
     ];
+    expect(ids(nodes, "is:quote")).toEqual(["quote"]);
     expect(ids(nodes, "is:todo -is:complete #dotflowy")).toEqual(["open"]);
     expect(ids(nodes, "is:complete")).toEqual(["completed"]);
     expect(ids(nodes, "is:todo -#dotflowy")).toEqual([
