@@ -131,3 +131,105 @@ test("link opens the edit popover and creates a link", async ({ page }) => {
     "[alphabravo](https://example.com)",
   );
 });
+
+for (const platform of ["MacIntel", "Linux x86_64"]) {
+  test(`Mod+K links selected text in rows, titles, and Quick-add, otherwise opens commands (${platform})`, async ({
+    page,
+  }) => {
+    await page.addInitScript((platform) => {
+      Object.defineProperty(navigator, "platform", { get: () => platform });
+    }, platform);
+    const shortcut = platform === "MacIntel" ? "Meta+k" : "Control+k";
+    await load(page, [
+      {
+        id: "n",
+        parentId: null,
+        prevSiblingId: null,
+        text: "Before bravo after",
+      },
+    ]);
+    const popover = page.locator("[data-link-edit-popover]");
+    const commands = page.getByPlaceholder(/Search nodes and actions/);
+
+    for (const surface of ["row", "title", "quick-add"]) {
+      if (surface === "title") await page.goto("/n");
+      if (surface === "quick-add") {
+        await page.evaluate(() => {
+          const active = document.activeElement;
+          if (active instanceof HTMLElement) active.blur();
+        });
+        await page.keyboard.press("q");
+        const capture = page.getByRole("textbox", {
+          name: "Quick add",
+          exact: true,
+        });
+        await capture.fill("Before bravo after");
+        await expect(capture).not.toHaveAttribute(
+          "data-history-node-id",
+          "__quick_add_draft__",
+        );
+      }
+      const editor =
+        surface === "row"
+          ? text(page, "n")
+          : surface === "title"
+            ? page.locator("h2.zoomed-title .node-text")
+            : page.getByRole("textbox", { name: "Quick add", exact: true });
+      await editor.click();
+      await editor.evaluate((el) => {
+        const node = el.firstChild!;
+        window.getSelection()!.setBaseAndExtent(node, 7, node, 12);
+      });
+      await page.keyboard.press(shortcut);
+      await expect(popover.getByLabel("Link URL")).toBeFocused();
+      await expect(popover.getByLabel("Link text")).toHaveValue("bravo");
+      await expect(commands).toBeHidden();
+
+      if (surface === "quick-add") {
+        await page.keyboard.press("Escape");
+        await expect(popover).toBeHidden();
+        await expect(editor).toBeFocused();
+        await expect(editor).toHaveText("Before bravo after");
+        await editor.evaluate((el) => {
+          const node = el.firstChild!;
+          window.getSelection()!.setBaseAndExtent(node, 7, node, 12);
+        });
+        await page.keyboard.press(shortcut);
+        await expect(popover.getByLabel("Link URL")).toBeFocused();
+      }
+
+      if (surface === "row") {
+        await page.keyboard.press("Escape");
+        await expect(popover).toBeHidden();
+        await expect(editor).toHaveText("Before bravo after");
+      } else {
+        await popover.getByLabel("Link URL").fill("https://example.com/chosen");
+        await page.keyboard.press("Enter");
+        await expect(editor.locator("a[data-link]")).toHaveAttribute(
+          "data-src",
+          "[bravo](https://example.com/chosen)",
+        );
+        await expect(editor).toHaveText("Before bravo after");
+      }
+
+      await editor.click();
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press(shortcut);
+      await expect(commands).toBeVisible();
+      await expect(popover).toBeHidden();
+      await page.keyboard.press("Escape");
+      await expect(commands).toBeHidden();
+      await expect(editor).toBeFocused();
+      if (surface === "quick-add") {
+        await page.keyboard.press("Enter");
+        await expect(
+          page.getByRole("dialog", { name: "Quick add", exact: true }),
+        ).toBeHidden();
+        await page.getByRole("button", { name: "Today's daily note" }).click();
+        await expect(
+          page.locator("li[data-node-id] a[data-link]"),
+        ).toHaveAttribute("data-src", "[bravo](https://example.com/chosen)");
+      }
+    }
+  });
+}

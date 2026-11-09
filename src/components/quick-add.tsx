@@ -688,6 +688,7 @@ function makeDraft(resolveParent: () => Promise<string | null>): DraftState {
 function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   const { daily } = useEditorFeatures();
   const editorRef = useRef<MiniEditorHandle | null>(null);
+  const [overlay, setOverlay] = useState<ReactNode>(null);
   // The off-page toast's "Go there" zooms to the destination (ADR 0049
   // amendment). Quick-add is mounted in `__root.tsx`, inside the router, so the
   // TanStack navigate is available here just as it is to move-dialog/daily.
@@ -1120,7 +1121,12 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       tree: getTreeIndex(),
       mutations: commands,
       nav: { zoom: () => {}, open: () => {} },
-      openOverlay: () => {},
+      openOverlay: (next) => {
+        setOverlay(next);
+        // The capture owns its DOM instead of reconciling stored text. Apply
+        // a popover's write before typing or Enter can read the old draft.
+        if (next === null) editorRef.current?.restore(draftRef.current!.text);
+      },
       openPanel: () => {},
       run: (effect) => {
         appRuntime.runFork(
@@ -1200,7 +1206,10 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     <Dialog
       open
       onOpenChange={(next) => {
-        if (!next) close();
+        if (!next) {
+          if (overlay) getCtx().openOverlay(null);
+          else close();
+        }
       }}
     >
       <DialogContent
@@ -1216,6 +1225,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
         )}
         style={captureStyle}
       >
+        {overlay}
         {/* Escape guard: a caret menu (slash / # / [[) or the target picker owns
             Escape to close ITSELF, but Base UI's Dialog listens for Escape on
             `document` and ignores preventDefault -- so without this it would also
