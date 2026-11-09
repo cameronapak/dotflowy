@@ -54,3 +54,11 @@ ranks within each group and the query-time Actions group is capped so node resul
 Keyboard: ↑/↓ flat across groups, Enter runs an action or navigates to a node, `→`/Tab on a highlighted
 node result opens its action sub-view, `←` (or Backspace on an empty box) steps back. `Escape` closes from
 any level (Radix owns it). Covered by `e2e/command-center.spec.ts`.
+
+**Text-selection shortcut.** With a non-collapsed, formattable selection inside one focused
+node editor, Cmd+K (Ctrl+K on Windows/Linux) opens the links plugin's create-link popover
+instead of the command center. The global capture handler yields to the existing plugin
+keymap before focus moves; the links plugin reuses its `/link` action. This applies to
+rows, zoomed titles, and Quick-add. A collapsed caret, cross-node selection, or selected
+folded chip keeps the command-center behavior. An open typing menu keeps priority over
+editor keymaps. The header search button still opens the command center directly.

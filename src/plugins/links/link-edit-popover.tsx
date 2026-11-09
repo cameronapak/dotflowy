@@ -235,6 +235,10 @@ export function openLinkCreatePopover(
       label={args.selText}
       url=""
       focus="url"
+      portalContainer={
+        document.activeElement?.closest<HTMLElement>('[role="dialog"]') ??
+        undefined
+      }
       x={args.x}
       y={args.y}
       onSubmit={(label, url) => {
@@ -262,6 +266,7 @@ export function LinkEditPopover({
   canEmbed = false,
   mirrorCount = 0,
   focus,
+  portalContainer,
   onSubmit,
   onClose,
 }: {
@@ -274,6 +279,8 @@ export function LinkEditPopover({
   mirrorCount?: number;
   /** Creation focuses the URL; editing follows the current display mode. */
   focus?: "label" | "url";
+  /** Keep a capture's link form inside its dialog's focus trap. */
+  portalContainer?: HTMLElement;
   onSubmit: (label: string, url: string, display: DisplayAs) => void;
   onClose: () => void;
 }) {
@@ -460,6 +467,6 @@ export function LinkEditPopover({
       {form}
     </MenuSheetContent>
   ) : (
-    createPortal(form, document.body)
+    createPortal(form, portalContainer ?? document.body)
   );
 }

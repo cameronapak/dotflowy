@@ -44,6 +44,7 @@ import {
   openNodeSwitcher,
 } from "./node-switcher-opener";
 import { writeQuery } from "./query-filter-nav";
+import { readFormatTarget } from "./selection-format";
 import { Button } from "./ui/button";
 import {
   Command,
@@ -187,6 +188,18 @@ export function NodeSwitcher() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        // A text selection belongs to the editor's link keymap. Let it run
+        // before a command dialog can steal the selection and focus.
+        const active = document.activeElement;
+        if (
+          !openRef.current &&
+          !e.shiftKey &&
+          !e.altKey &&
+          active?.matches(".node-text") &&
+          !active.closest("[data-typing-menu-open]") &&
+          readFormatTarget()
+        )
+          return;
         e.preventDefault();
         if (openRef.current) {
           setOpen(false);
