@@ -30,7 +30,9 @@ package handle, not inside the scrolling content.
 The shared integration lazily loads the package for narrow screens, follows the
 app's explicit theme through the package's `data-theme`, focuses a form's
 requested first field with `preventScroll`, and preserves menu keyboard
-navigation. Native focus restoration remains intact. After pointer dismissal,
+navigation. Pointer opening focuses the named dialog, not the first menu item;
+keyboard opening focuses the first enabled item. Tab reaches the controls after
+a pointer opening. Native focus restoration remains intact. After pointer dismissal,
 only the restored trigger's ring is suppressed; keyboard use restores it.
 The native `close` event, not the start of exit, runs link submissions and
 menu-to-dialog handoffs. Menu actions that need a new focus target use
@@ -42,6 +44,10 @@ The Bun patch fixes package limitations without replacing the spring:
 exit travel includes the 8px bottom inset and finishes below half a pixel;
 viewport resize/scroll updates the sheet against the unzoomed visual viewport
 and preserves its nearest detent. This keeps the sheet above a docked keyboard.
+Geometry initializes in a layout effect before paint, and the outer dialog
+uses `overflow: clip`: Safari focus panning must not scroll the whole sheet
+upward during entry. The inner content remains scrollable. Native dialog
+autofocus and the package's focus handoff remain unchanged.
 Drag-release snapping also respects reduced motion. Pinch zoom remains native.
 Remove each patch hunk when upstream supplies the
 same behavior. Both ESM and CommonJS builds are patched. The former React Aria
@@ -59,7 +65,7 @@ defaults.
 
 Header toggles stay open. One-shot actions and navigation close the sheet.
 Header and breadcrumb menus share open state across the width breakpoint and
-focus their first enabled item after entry. Arrow keys skip disabled items.
+focus their first enabled item for keyboard opening. Arrow keys skip disabled items.
 Calendar month navigation stays open; selecting a day closes it.
 
 Quick-add's destination sheet stays inside the capture dialog's DOM focus

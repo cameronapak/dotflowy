@@ -982,23 +982,43 @@ test.describe("narrow-screen drawers", () => {
     await expect(sheetDialog(page)).toHaveCount(0);
   });
 
-  test("pointer dismissal restores focus without a ring; keyboard dismissal keeps it", async ({
+  test("sheet entry stays bottom-anchored and focus follows pointer or keyboard input", async ({
     page,
   }) => {
     await load(page);
     const trigger = page.getByRole("button", { name: "More", exact: true });
     await trigger.tap();
     await settleSheet(page);
+    await expect(sheetDialog(page)).toBeFocused();
+    // iOS tries to scroll the outer dialog when offscreen content gets focus
+    // during entry. Only the inner content may scroll, never the whole sheet.
+    expect(
+      await sheetDialog(page).evaluate((el) => {
+        el.scrollTop = 400;
+        return el.scrollTop;
+      }),
+    ).toBe(0);
+    await settleSheet(page);
+    await page.keyboard.press("Tab");
+    const first = drawer(page).getByRole("menuitem").first();
+    await expect(first).toBeFocused();
     await page.touchscreen.tap(4, 100);
     await expect(sheetDialog(page)).toHaveCount(0);
     await expect(trigger).toBeFocused();
     await expect(trigger).toHaveCSS("outline-style", "none");
     await page.keyboard.press("Enter");
     await settleSheet(page);
+    await expect(first).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(sheetDialog(page)).toHaveCount(0);
     await expect(trigger).toBeFocused();
     await expect(trigger).toHaveCSS("outline-style", "solid");
+    // A keyboard opening must not leak its focus policy into the next tap.
+    await trigger.tap();
+    await settleSheet(page);
+    await expect(sheetDialog(page)).toBeFocused();
+    await page.touchscreen.tap(4, 100);
+    await expect(sheetDialog(page)).toHaveCount(0);
   });
 
   test("calendar drawer pages months and navigates to a chosen day", async ({

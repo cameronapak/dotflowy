@@ -22,6 +22,12 @@ export function MenuSheetButton({
     <AriaButton
       isDisabled={props.disabled}
       data-sheet-trigger=""
+      onPressStart={({ target, pointerType }) =>
+        target.toggleAttribute(
+          "data-sheet-keyboard-open",
+          pointerType === "keyboard" || pointerType === "virtual",
+        )
+      }
       onKeyDown={(event) =>
         event.currentTarget.removeAttribute("data-sheet-pointer-dismissed")
       }

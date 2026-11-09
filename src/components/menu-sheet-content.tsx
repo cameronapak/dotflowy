@@ -30,6 +30,7 @@ export default function MenuSheetContent({
   const setOpen = onOpenChange ?? trigger?.setOpen;
   const host = useRef<HTMLDivElement>(null);
   const input = useRef<"pointer" | "keyboard" | null>(null);
+  const keyboardOpen = useRef(false);
   const afterClose = useRef(onAfterClose);
   useLayoutEffect(() => {
     afterClose.current = onAfterClose;
@@ -52,6 +53,7 @@ export default function MenuSheetContent({
         );
       }
       input.current = null;
+      keyboardOpen.current = false;
       afterClose.current?.();
     };
     dialog.addEventListener("close", closed);
@@ -72,12 +74,23 @@ export default function MenuSheetContent({
         if (event.key === "Escape") event.stopPropagation();
       }}
       onFocusCapture={(event) => {
+        if (
+          event.relatedTarget instanceof HTMLElement &&
+          event.relatedTarget.hasAttribute("data-sheet-trigger")
+        ) {
+          keyboardOpen.current = event.relatedTarget.hasAttribute(
+            "data-sheet-keyboard-open",
+          );
+        }
         if (!(event.target instanceof HTMLDialogElement)) return;
-        // The package focuses its dialog after showModal. Focus the existing
-        // form's requested field, or the first menu item, without page panning.
+        // Touch/mouse openings keep focus on the named dialog, not a menu row.
+        // Requested form fields and keyboard/assistive openings still get a
+        // useful initial control, without panning the native modal viewport.
         event.target
           .querySelector<HTMLElement>(
-            '[data-sheet-autofocus], [autofocus], button[role^="menuitem"]:not(:disabled)',
+            keyboardOpen.current
+              ? '[data-sheet-autofocus], [autofocus], button[role^="menuitem"]:not(:disabled)'
+              : "[data-sheet-autofocus], [autofocus]",
           )
           ?.focus({ preventScroll: true });
       }}
