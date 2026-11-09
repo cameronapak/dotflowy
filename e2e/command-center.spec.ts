@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  type SeedNode,
+} from "./fixtures";
 
 // A small nested tree: alpha has a subtree (for "Collapse all"), bravo is a
 // sibling to indent under alpha, zephyr is a distinctive leaf whose text matches
@@ -37,6 +42,98 @@ async function openPalette(page: Page) {
   await page.keyboard.press("ControlOrMeta+k");
   await expect(page.getByPlaceholder(/Search nodes and actions/)).toBeVisible();
 }
+
+test("Spotlight commands preserve the zoomed child's source caret", async ({
+  page,
+}) => {
+  await seedOutline(
+    page,
+    TREE.map((node) =>
+      node.id === "alpha-1"
+        ? { ...node, text: "Before **bright** after" }
+        : node,
+    ),
+  );
+  await openSeededOutline(page, { path: "/alpha", anchorId: "alpha-1" });
+  const child = text(page, "alpha-1");
+  // Inside a folding token: blur replaces its DOM, so a saved DOM Range is stale.
+  await placeCaret(child, 7);
+  await expect(child).toHaveText("Before **bright** after");
+  await placeCaret(child, 12);
+  for (const enabled of [true, false]) {
+    await openPalette(page);
+    await page.getByPlaceholder(/Search nodes and actions/).fill("spotlight");
+    await page
+      .getByRole("option", {
+        name: enabled ? /^Spotlight mode/ : /^Turn off spotlight mode/,
+      })
+      .click();
+    await expect(
+      page.getByRole("dialog", { name: "Command center" }),
+    ).toHaveCount(0);
+    await expect(child).toBeFocused();
+    await expect(
+      page.getByRole("button", { name: "Turn off spotlight mode" }),
+    ).toHaveCount(enabled ? 1 : 0);
+    // Typing immediately must insert at the saved source offset, not start/end.
+    await page.keyboard.type("!");
+    await expect(child).toHaveText("Before **bri!ght** after");
+    await page.keyboard.press("Backspace");
+    await expect(child).toHaveText("Before **bright** after");
+  }
+});
+
+test("Spotlight commands preserve title carets and retain no-editor fallbacks", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  await openSeededOutline(page, { path: "/alpha", anchorId: "alpha-1" });
+  const title = page.locator("h2.zoomed-title .node-text");
+  const indicator = page.getByRole("button", {
+    name: "Turn off spotlight mode",
+  });
+  const toggle = async () => {
+    await openPalette(page);
+    await page.getByPlaceholder(/Search nodes and actions/).fill("spotlight");
+    await page.getByRole("option", { name: /spotlight mode/i }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Command center" }),
+    ).toHaveCount(0);
+  };
+  await placeCaret(title, 2);
+  for (const enabled of [true, false]) {
+    await toggle();
+    await expect(title).toBeFocused();
+    await expect(indicator).toHaveCount(enabled ? 1 : 0);
+    await page.keyboard.type("!");
+    await expect(title).toHaveText("Al!pha");
+    await page.keyboard.press("Backspace");
+  }
+  // Cancellation must not leave a queued toggle for the next palette close.
+  await openPalette(page);
+  await page.getByPlaceholder(/Search nodes and actions/).fill("spotlight");
+  await page.keyboard.press("Escape");
+  await expect(indicator).toHaveCount(0);
+  await expect(title).toBeFocused();
+  await title.evaluate((el: HTMLElement) => el.blur());
+  await toggle();
+  await expect(indicator).toBeVisible();
+  await expect(title).toBeFocused();
+  await page.keyboard.type("!");
+  await expect(title).toHaveText("!Alpha");
+  await toggle();
+  await expect(indicator).toHaveCount(0);
+
+  await openSeededOutline(page, { anchorId: "alpha" });
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) active.blur();
+  });
+  await toggle();
+  await expect(text(page, "alpha")).toBeFocused();
+  await page.keyboard.type("?");
+  await expect(text(page, "alpha")).toHaveText("?!Alpha");
+});
 
 test("View bookmarks the current page on desktop and removes it in the narrow sheet", async ({
   page,

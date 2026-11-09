@@ -37,12 +37,14 @@ function CommandDialog({
   children,
   className,
   showCloseButton = false,
+  finalFocus,
   ...props
 }: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
   title?: string;
   description?: string;
   className?: string;
   showCloseButton?: boolean;
+  finalFocus?: React.ComponentProps<typeof DialogContent>["finalFocus"];
   children: React.ReactNode;
 }) {
   const { height, offsetTop } = useKeyboardViewport();
@@ -64,6 +66,7 @@ function CommandDialog({
         }}
         showCloseButton={showCloseButton}
         animate={false}
+        finalFocus={finalFocus}
       >
         {children}
       </DialogContent>

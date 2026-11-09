@@ -46,6 +46,12 @@ status: accepted
    scroll delta uses the same align for whatever landed. Mounting with the
    mode already on (page load) skips the animation and snaps to the steady
    state — an initial render does not transition.
+   Cmd+K captures the original editable instance and its source caret offset
+   before the palette takes focus. Only the Spotlight command waits for the
+   dialog's final-focus phase, restores that editor and caret, then toggles the
+   mode. This keeps the fallback from mistaking palette focus for an abandoned
+   editor. Source offsets survive token folding on blur; saved DOM ranges do
+   not. With no captured editor, the title/first-row fallback still applies.
 5. **Disabling with no lit line scrolls to the top.** The menu path leaves no
    node in focus, and the collapsed padding would strand the viewport deep in
    the page — which reads as "lost": the breath tween collapses the pad and
