@@ -20,7 +20,7 @@ export interface NodeCommands {
   onMoveDown: (id: string) => void;
   // Delete a bullet and its entire subtree, then focus a neighbor.
   onDeleteNode: (id: string) => void;
-  // Backspace at the start of a bullet that HAS text: merge it into the row
+  // Backspace at the start of a paragraph that HAS text: merge it into the row
   // visibly above (the inverse of onEnter's mid-split). Takes the INSTANCE id,
   // like onDeleteNode -- the row disappears, and position is local to where it
   // sits (ADR 0022); the text lands on the TARGET's content id. Bullet-only:

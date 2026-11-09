@@ -151,10 +151,10 @@ export default definePlugin({
   // FIELDS remain the storage (ADR 0044: markdown is the interchange format for
   // node state, never its storage).
   input: {
-    autoformat: ({ text, node }) => {
+    autoformat: ({ text, node, caret }) => {
       if (node.isTask) return null;
-      const marker = text.match(/^\[( |x|X)?\] ?/);
-      if (!marker) return null;
+      const marker = text.match(/^\[( |x|X)?\]/);
+      if (!marker || caret !== marker[0].length) return null;
       const done = marker[1]?.toLowerCase() === "x";
       return {
         text: text.slice(marker[0].length),

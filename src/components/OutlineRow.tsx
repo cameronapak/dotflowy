@@ -31,7 +31,12 @@ import {
   useStoredTextDecoration,
 } from "./editor-decoration";
 import { flashRow } from "./flash-node";
-import { decorate, readSource, setCaretOffset } from "./inline-code";
+import {
+  decorate,
+  getCaretOffset,
+  readSource,
+  setCaretOffset,
+} from "./inline-code";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
 import { NodeBody } from "./node-body";
@@ -478,8 +483,25 @@ function RowChrome({
             onInput={(e) => {
               const el = e.currentTarget;
               const text = readSource(el);
-              if (!composingRef.current) {
-                const af = autoformat({ text, node: content });
+              if (
+                !composingRef.current &&
+                e.nativeEvent instanceof InputEvent &&
+                e.nativeEvent.inputType === "insertText"
+              ) {
+                const caret = getCaretOffset(el);
+                if (
+                  content.kind === "paragraph" &&
+                  text.startsWith("- ") &&
+                  caret === 2
+                ) {
+                  const nextText = text.slice(2);
+                  commands.onSetKind(content.id, null, nextText);
+                  decorate(el, nextText, 0, false);
+                  syncedRef.current = nextText;
+                  setCaretOffset(el, 0);
+                  return;
+                }
+                const af = autoformat({ text, node: content, caret });
                 if (af) {
                   af.before?.(pluginCtx());
                   commands.onTextChange(content.id, af.text);

@@ -8,11 +8,13 @@ import type { NodeCommands } from "./node-commands";
 import { selectSingle } from "../data/selection-state";
 import { dispatchClick, keymapSpecs } from "../plugins/registry";
 import {
+  decorate,
   getCaretOffset,
   getSelectedAtom,
   getSelectionRange,
   readSource,
   selectAdjacentAtom,
+  setCaretOffset,
 } from "./inline-code";
 import { openInlineTargetAtCaret } from "./link-keymap";
 import { nodeZoomShortcuts } from "./node-zoom-shortcut";
@@ -111,8 +113,8 @@ export function useBulletKeymap({
   // Software keyboards can send either Backspace or beforeinput deletion
   // intent. The iPhone trace has no beforeinput on an empty contentEditable.
   // Bind the whole Backspace-at-start decision directly, without waiting for
-  // focus-gated hotkeys to register: task demotion, empty-node deletion, and
-  // non-empty joining must all survive that Safari event sequence.
+  // focus-gated hotkeys to register: task/bullet demotion, empty-node deletion,
+  // and non-empty joining must all survive that Safari event sequence.
   useLayoutEffect(() => {
     const el = textRef.current;
     if (!el || !enabled) return;
@@ -120,14 +122,21 @@ export function useBulletKeymap({
       if (
         e.defaultPrevented ||
         !e.cancelable ||
+        !el.isContentEditable ||
         document.activeElement !== el ||
         !isCaretAtStart(el)
       )
         return;
       e.preventDefault();
       e.stopPropagation();
-      if (node.isTask) {
-        commands.onSetTask(node.id, false);
+      if (node.kind === null) {
+        // Delete only the final Markdown marker character: `]` from a task,
+        // or the space from `- `. The rest becomes editable source text.
+        const prefix = node.isTask ? (node.completed ? "[x" : "[ ") : "-";
+        const text = prefix + readSource(el);
+        commands.onSetKind(node.id, node.isTask ? null : "paragraph", text);
+        decorate(el, text, prefix.length, false);
+        setCaretOffset(el, prefix.length);
       } else if (readSource(el) === "") {
         // Source, not textContent: a folded token can render as an empty atom.
         // INSTANCE, not content: mirrors pass the source as `node` (ADR 0022).
@@ -159,7 +168,16 @@ export function useBulletKeymap({
       el.removeEventListener("keydown", onKeyDown, true);
       el.removeEventListener("beforeinput", onBeforeInput);
     };
-  }, [textRef, enabled, node.isTask, node.id, instanceId, commands]);
+  }, [
+    textRef,
+    enabled,
+    node.isTask,
+    node.completed,
+    node.kind,
+    node.id,
+    instanceId,
+    commands,
+  ]);
 
   useHotkeys(
     focused

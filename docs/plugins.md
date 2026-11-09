@@ -74,7 +74,7 @@ beside its `editor-feature:focus` switch; turning it off ends a running session.
 Document PiP opens only by a click in desktop
 Chrome and is unavailable in Safari and on phones.
 
-**Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace-on-the-checkbox demotion still read `completed`/`isTask` in `OutlineRow`; the bullet-vs-paragraph glyph reads `kind` there too (core's own field, ADR 0045); the `/` palette still runs `useSlashMenu` (only its command _list_ is registry-driven).
+**Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace kind demotion still read `completed`/`isTask`/`kind` in the row and its keymap; the bullet-vs-paragraph glyph and paragraph-to-bullet `- ` autoformat read `kind` there too (core's own field, ADR 0045); the `/` palette still runs `useSlashMenu` (only its command _list_ is registry-driven).
 
 **Constraints when touching this:** keep token `render` output byte-stable (the `decorate` cache compares strings) and allocation-light (runs per keystroke); never hand the core raw HTML (return `El`/`WidgetEl`); don't reintroduce N separate token scans. **Shared token helpers live in `src/plugins/token-kit.ts`** (`isRevealed` fold/reveal predicate, verbatim-match-or-drop write-back, `spliceToken` re-export) — use them, don't re-copy the predicate; `spliceToken` itself lives in the dependency-free `token-splice.ts` so worker-reachable data modules can import it without dragging DOM types into the Workers tsconfig. **Plugin UI comes from `src/plugins/kit.ts`** — the curated shadcn surface a Lane-A plugin may use (ADR 0031); a plugin importing `@/components/ui/*` directly is an oxlint error (`no-restricted-imports` override on `src/plugins/**`). Add a component to the kit when a plugin needs it; there is no plugin `styles` seam (style via Tailwind utilities on your `El`/JSX).
 
@@ -134,7 +134,10 @@ DOM, mutations, history, or keymaps:
 - `useInputDecoration` pauses input decoration during composition, then reads
   source, writes it through the surface's callback, and decorates on composition
   end. Input writes and menu updates still happen during composition. Only rows
-  run autoformat. All source/range math stays in `inline-code.ts`; decoration
+  run autoformat, only on text insertion; the input includes the source caret
+  offset so plugins can require a just-completed marker. Deletion and edits
+  elsewhere must leave literal markers alone. Task markers strip no following
+  source whitespace. All source/range math stays in `inline-code.ts`; decoration
   preserves both selection endpoints and forward/backward direction.
 - `useCaretReveal` replaces the previous watcher on focus and disposes it on
   blur or unmount, including disconnects without blur. Deferred focus reveal

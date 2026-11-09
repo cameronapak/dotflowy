@@ -242,7 +242,12 @@ test("backspacing an empty bullet away focuses the row ABOVE, not below", async 
   await text(page, "mid").click();
   await expect(text(page, "mid")).toBeFocused();
 
-  // Backspace at the start of the now-empty bullet deletes it.
+  // Remove the bullet's space, its remaining hyphen, then the empty paragraph.
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "mid")).toHaveAttribute("data-kind", "paragraph");
+  await expect(text(page, "mid")).toHaveText("-");
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "mid")).toHaveText("");
   await page.keyboard.press("Backspace");
 
   // It's gone, and focus moved UP to "above" -- not down to "below".
@@ -264,7 +269,7 @@ test.describe("software-keyboard Backspace", () => {
     viewport: { width: 390, height: 844 },
   });
 
-  test("deletes an empty plain node immediately on focus without beforeinput", async ({
+  test("demotes an empty bullet immediately on focus without beforeinput", async ({
     page,
   }) => {
     await load(page, [
@@ -295,6 +300,12 @@ test.describe("software-keyboard Backspace", () => {
     });
 
     expect(prevented).toBe(true);
+    await expect(text(page, "empty")).toHaveAttribute("data-kind", "paragraph");
+    await expect(text(page, "empty")).toHaveText("-");
+    await expect(text(page, "empty")).toBeFocused();
+    await page.keyboard.press("Backspace");
+    await expect(text(page, "empty")).toHaveText("");
+    await page.keyboard.press("Backspace");
     await expect(text(page, "empty")).toHaveCount(0);
     await expect(text(page, "above")).toBeFocused();
     await expect(text(page, "above")).toHaveText("above");

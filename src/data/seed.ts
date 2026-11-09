@@ -121,7 +121,7 @@ async function seedIfEmpty(): Promise<boolean> {
       id: cId,
       parentId: null,
       prevSiblingId: bId,
-      text: "Tab indents, Shift+Tab outdents, Backspace on empty deletes",
+      text: "Tab indents, Shift+Tab outdents. Backspace at the start removes the bullet.",
     }),
   );
 

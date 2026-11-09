@@ -2,6 +2,21 @@
 
 Status: accepted (2026-07-27)
 
+## November 9 amendment: delete marker characters before joining
+
+Backspace at source offset 0 now deletes the final character of the implied
+Markdown marker. A task becomes a bullet with `[ ` (or `[x`) prepended to its
+text and the caret after that prefix. A bullet becomes a paragraph with `-`
+prepended and the caret after it. Further presses delete those literal characters
+normally, without joining or deleting the node. Only after the caret reaches the
+start of a paragraph does Backspace run the join or empty-node deletion below.
+Typing the missing characters restores the kind through the existing Markdown
+shortcuts. See [ADR 0045](./0045-paragraph-node-kind.md).
+The planner, visibility checks, identity rules, and refusal guards below are
+unchanged; they run after the row has no kind marker left to remove.
+
+## Original decision
+
 Enter splits a bullet at the caret (`splitNode`); Backspace had no inverse. At
 the start of a bullet that **has text** the keymap fell through to native contentEditable — and native
 has nothing to do there, because every bullet is its own editing host, so the deletion cannot cross the

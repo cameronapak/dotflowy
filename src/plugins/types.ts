@@ -333,6 +333,8 @@ export interface AfterPasteInput {
 export interface AutoformatInput {
   text: string;
   node: Node;
+  /** Source offset after the inserted text, so markers only trigger at their end. */
+  caret: number;
 }
 
 /** The rewrite an autoformat performs. The core writes `text` back to the

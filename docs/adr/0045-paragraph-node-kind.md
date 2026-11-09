@@ -54,6 +54,32 @@ paragraph is indistinguishable from a zoomed bullet and the toggle command has n
 
 ## Editing semantics
 
+- **Markdown typing in outline rows:** typing `- ` at source offset 0 in a paragraph
+  converts it to a bullet and removes the marker. Existing text, children, identity,
+  completion, and focus stay intact; the caret stays at the start of the text.
+  A hyphen without the following space, or a marker elsewhere, stays literal.
+  Existing task markers (`[]`, `[ ]`, `[x]`) still convert paragraphs or bullets
+  to tasks, so typing `- [ ]` in a paragraph also works.
+  Autoformat runs only for text insertion at the marker's end, never for deletion
+  or an edit elsewhere. Task conversion strips only the bracket marker, not a
+  following source space: restoring `]` after demotion must preserve the original
+  text exactly. The existing input seam receives the source caret offset so the
+  todos plugin owns that boundary check without task syntax in the row.
+- **Backspace removes one Markdown marker character at a time:** at the start
+  of a task, it removes the implied `]`, converts to a bullet, and prepends the
+  remaining `[ ` (or `[x` for a completed task) to the text. The caret lands after
+  that prefix, so the next two presses delete its characters normally. At the
+  start of a bullet, Backspace removes the implied space from `- `, converts to
+  a paragraph, and prepends `-` with the caret after it. The next press deletes
+  the hyphen, not the node. The original text, completion, children, and identity
+  stay intact. Kind and revealed text change in one field PATCH and undo step.
+  Once the markers are gone, Backspace at the start of the paragraph uses the
+  existing empty-node deletion or previous-row join (ADR 0059), with its guards.
+  A text selection, a caret inside the text, or IME composition does not trigger
+  kind conversion. Remaining marker characters are ordinary stored source text,
+  so they survive reloads and work with the existing typing conversions.
+  These typing gestures remain row-only, like existing task autoformat; zoomed
+  titles and quick-add keep their existing keymaps.
 - **Enter inherits kind** — at end of a paragraph the new sibling is a paragraph; a mid-text split
   leaves two paragraphs. Byte-for-byte the existing `isTask` carry-forward in `insertNodeAfter`.
 - **The todos autoformat converts** — typing `[]`/`[ ] ` at the start of a paragraph makes it a

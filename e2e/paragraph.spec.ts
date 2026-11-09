@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, text, type SeedNode } from "./fixtures";
+import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
 
 // Paragraph nodes (ADR 0045): a third kind alongside bullet and task, signified
 // by a paragraph glyph standing exactly where the bullet dot would -- same button, same
@@ -93,17 +93,120 @@ test("slash commands cycle bullet, paragraph, and task kinds exclusively", async
   await expect(checkbox(page, "et")).toHaveCount(0);
 });
 
-test("the `[]` autoformat converts a paragraph into a task", async ({
+test("Markdown markers and Backspace cycle kinds without losing text or children", async ({
   page,
 }) => {
-  await load(page);
-  await text(page, "e").click();
-  await runSlash(page, "paragraph");
-  await expect(paragraphGlyph(page, "e")).toBeVisible();
+  await seedOutline(page, [
+    {
+      id: "p",
+      parentId: null,
+      prevSiblingId: null,
+      text: "prose",
+      kind: "paragraph",
+    },
+    { id: "child", parentId: "p", prevSiblingId: null, text: "keep child" },
+    {
+      id: "literal",
+      parentId: null,
+      prevSiblingId: "p",
+      text: "-  literal",
+      kind: "paragraph",
+    },
+  ]);
+  await page.goto("/");
+  await text(page, "p").waitFor({ state: "visible" });
 
+  // A marker away from the beginning is ordinary prose.
+  await placeCaret(text(page, "p"), "end");
+  await page.keyboard.type("- ");
+  await expect(paragraphGlyph(page, "p")).toBeVisible();
+  await expect(text(page, "p")).toHaveText("prose- ");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+
+  await placeCaret(text(page, "p"), 0);
+  await page.keyboard.type("-");
+  await expect(paragraphGlyph(page, "p")).toBeVisible();
+  await page.keyboard.type(" ");
+  await expect(dot(page, "p")).toBeVisible();
+  await expect(paragraphGlyph(page, "p")).toHaveCount(0);
+  await expect(text(page, "p")).toHaveText("prose");
+  await page.keyboard.type("X");
+  await expect(text(page, "p")).toHaveText("Xprose");
+
+  // Backspace within text deletes text, not its kind.
+  await page.keyboard.press("Backspace");
+  await expect(dot(page, "p")).toBeVisible();
+  await page.keyboard.press("Backspace");
+  await expect(paragraphGlyph(page, "p")).toBeVisible();
+  await expect(text(page, "p")).toHaveText("-prose");
+  await expect(text(page, "p")).toBeFocused();
+  await expect(row(page, "child")).toHaveAttribute("data-parent-id", "p");
+
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(dot(page, "p")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = "/src/data/history.ts";
+        return (await import(path)).getHistoryState().busy;
+      }),
+    )
+    .toBe(false);
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(paragraphGlyph(page, "p")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = "/src/data/history.ts";
+        return (await import(path)).getHistoryState().busy;
+      }),
+    )
+    .toBe(false);
+
+  // The hyphen remains editable after redo; removing it keeps a paragraph.
+  await page.keyboard.type(" ");
+  await expect(dot(page, "p")).toBeVisible();
+  await expect(text(page, "p")).toHaveText("prose");
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "p")).toHaveText("-prose");
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "p")).toHaveText("prose");
   await page.keyboard.type("[]");
-  await expect(checkbox(page, "e")).toBeVisible();
-  await expect(paragraphGlyph(page, "e")).toHaveCount(0);
+  await expect(checkbox(page, "p")).toBeVisible();
+  await expect(paragraphGlyph(page, "p")).toHaveCount(0);
+  await expect(text(page, "p")).toHaveText("prose");
+  await page.keyboard.press("Backspace");
+  await expect(checkbox(page, "p")).toHaveCount(0);
+  await expect(dot(page, "p")).toBeVisible();
+  await expect(text(page, "p")).toHaveText("[ prose");
+  await page.keyboard.type("]");
+  await expect(checkbox(page, "p")).toBeVisible();
+  await expect(text(page, "p")).toHaveText("prose");
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "p")).toHaveText("[ prose");
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "p")).toHaveText("[prose");
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "p")).toHaveText("prose");
+  await page.keyboard.press("Backspace");
+  await expect(paragraphGlyph(page, "p")).toBeVisible();
+  await expect(text(page, "p")).toHaveText("-prose");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("- [ ]");
+  await expect(checkbox(page, "p")).toBeVisible();
+  await expect(text(page, "p")).toHaveText("prose");
+  await expect(row(page, "child")).toHaveAttribute("data-parent-id", "p");
+  await page.reload();
+  await text(page, "p").waitFor({ state: "visible" });
+  await expect(checkbox(page, "p")).toBeVisible();
+  await expect(text(page, "p")).toHaveText("prose");
+
+  // Deleting into a pasted literal marker must not act like typing one.
+  await placeCaret(text(page, "literal"), 3);
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "literal")).toHaveText("- literal");
+  await expect(paragraphGlyph(page, "literal")).toBeVisible();
 });
 
 test("Enter at the end of a paragraph makes another paragraph", async ({

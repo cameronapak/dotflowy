@@ -129,24 +129,74 @@ test("`/todo` makes a task and `/bullet` reverts it (Seam C)", async ({
   await expect(checkbox(page, "b")).toHaveCount(0);
 });
 
-test("desktop Backspace removes the checkbox before deleting an empty task", async ({
+test("desktop Backspace deletes task and bullet markers one character at a time", async ({
   page,
 }) => {
   await load(
     page,
-    TREE.map((n) => (n.id === "c" ? { ...n, text: "" } : n)),
+    TREE.map((n) =>
+      n.id === "c"
+        ? { ...n, text: " TASK" }
+        : n.id === "b"
+          ? { ...n, text: "] TASK", isTask: true }
+          : n,
+    ),
   );
   await placeCaret(text(page, "c"), 0);
 
+  // Restoring the missing bracket must preserve the original leading space.
   await page.keyboard.press("Backspace");
-  await expect(checkbox(page, "c")).toHaveCount(0);
-  await expect(text(page, "c")).toBeFocused();
-  await expect(text(page, "c")).toHaveText("");
+  await expect
+    .poll(() => text(page, "c").allTextContents())
+    .toEqual(["[  TASK"]);
+  await page.keyboard.type("]");
+  await expect(checkbox(page, "c")).toBeVisible();
+  await expect.poll(() => text(page, "c").allTextContents()).toEqual([" TASK"]);
 
-  // The prevented keydown must not also run the mobile deletion path and
-  // delete the newly-demoted node. A SECOND press retains normal deletion.
+  for (const state of [
+    { source: "[  TASK", caret: 2, kind: null },
+    { source: "[ TASK", caret: 1, kind: null },
+    { source: " TASK", caret: 0, kind: null },
+    { source: "- TASK", caret: 1, kind: "paragraph" },
+    { source: " TASK", caret: 0, kind: "paragraph" },
+  ]) {
+    await page.keyboard.press("Backspace");
+    await expect(checkbox(page, "c")).toHaveCount(0);
+    await expect(text(page, "c")).toBeFocused();
+    await expect
+      .poll(() => text(page, "c").allTextContents())
+      .toEqual([state.source]);
+    if (state.kind)
+      await expect(text(page, "c")).toHaveAttribute("data-kind", state.kind);
+    else await expect(text(page, "c")).not.toHaveAttribute("data-kind");
+    await expect
+      .poll(() =>
+        text(page, "c").evaluate((el) => {
+          const selection = window.getSelection()!;
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          range.setEnd(selection.anchorNode!, selection.anchorOffset);
+          return range.toString().length;
+        }),
+      )
+      .toBe(state.caret);
+  }
+  await page.reload();
+  await text(page, "c").waitFor({ state: "visible" });
+  await expect(text(page, "c")).toHaveAttribute("data-kind", "paragraph");
+  await expect.poll(() => text(page, "c").allTextContents()).toEqual([" TASK"]);
+
+  // A literal closing bracket can resemble a complete marker after demotion.
+  await placeCaret(text(page, "b"), 0);
   await page.keyboard.press("Backspace");
-  await expect(text(page, "c")).toHaveCount(0);
+  await expect(text(page, "b")).toHaveText("[ ] TASK");
+  await page.keyboard.press("Backspace");
+  await expect(checkbox(page, "b")).toHaveCount(0);
+  await expect(text(page, "b")).toHaveText("[] TASK");
+  await placeCaret(text(page, "b"), "end");
+  await page.keyboard.type("!");
+  await expect(checkbox(page, "b")).toHaveCount(0);
+  await expect(text(page, "b")).toHaveText("[] TASK!");
 });
 
 test.describe("software-keyboard deletion", () => {
@@ -198,6 +248,9 @@ test.describe("software-keyboard deletion", () => {
     page,
   }) => {
     await load(page);
+    await text(page, "c").click();
+    await page.keyboard.press("ControlOrMeta+Enter");
+    await expect(text(page, "c")).toHaveAttribute("data-completed", "true");
     await placeCaret(text(page, "c"), 0);
     const prevented = await text(page, "c").evaluate((el) =>
       [
@@ -221,7 +274,8 @@ test.describe("software-keyboard deletion", () => {
 
     await page.keyboard.press("Shift+Backspace");
     await expect(checkbox(page, "c")).toHaveCount(0);
-    await expect(text(page, "c")).toHaveText("buy milk");
+    await expect(text(page, "c")).toHaveText("[xbuy milk");
+    await expect(text(page, "c")).toHaveAttribute("data-completed", "true");
     await expect(text(page, "c")).toBeFocused();
     await page.keyboard.press("ControlOrMeta+z");
     await expect(checkbox(page, "c")).toBeVisible();
@@ -240,7 +294,7 @@ test.describe("software-keyboard deletion", () => {
     expect(await deleteBackward(page)).toBe(true);
     await expect(checkbox(page, "c")).toHaveCount(0);
     await expect(text(page, "c")).toBeFocused();
-    await expect(text(page, "c")).toHaveText("");
+    await expect.poll(() => text(page, "c").allTextContents()).toEqual(["[ "]);
 
     await page.keyboard.press("ControlOrMeta+z");
     await expect(checkbox(page, "c")).toBeVisible();
@@ -269,7 +323,7 @@ test.describe("software-keyboard deletion", () => {
     await page.locator(".outline-list").waitFor({ state: "visible" });
     await expect(text(page, "c")).toBeVisible();
     await expect(checkbox(page, "c")).toHaveCount(0);
-    await expect(text(page, "c")).toHaveText("");
+    await expect.poll(() => text(page, "c").allTextContents()).toEqual(["[ "]);
   });
 
   test("only a collapsed caret at the start converts, never a selection or composition", async ({
@@ -298,7 +352,7 @@ test.describe("software-keyboard deletion", () => {
     // remains intact, rather than joining this row into its predecessor.
     expect(await deleteBackward(page)).toBe(true);
     await expect(checkbox(page, "c")).toHaveCount(0);
-    await expect(text(page, "c")).toHaveText("buy milk");
+    await expect(text(page, "c")).toHaveText("[ buy milk");
     await expect(text(page, "c")).toBeFocused();
   });
 });

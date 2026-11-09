@@ -339,12 +339,11 @@ test("split is a single undo step that restores the original bullet", async ({
   await expect.poll(() => orderedTexts(page)).toEqual(["alphabravo"]);
 });
 
-test("Enter mid-text then Backspace returns the line to its pre-Enter state", async ({
+test("Enter mid-text then three Backspaces remove the marker and join the split", async ({
   page,
 }) => {
-  // The round trip no test drove before: BOTH presses go through the real
-  // keyboard with no `evaluate` in between, so the caret state a second
-  // keystroke actually finds is the one under test.
+  // All presses go through the real keyboard with no `evaluate` in between,
+  // so the caret after demotion is the one the join actually finds.
   await load(page, [
     { id: "n", parentId: null, prevSiblingId: null, text: "alphabravo" },
   ]);
@@ -353,6 +352,11 @@ test("Enter mid-text then Backspace returns the line to its pre-Enter state", as
   await page.keyboard.press("Enter");
   await expect(focused(page)).toHaveText("bravo");
 
+  await page.keyboard.press("Backspace");
+  await expect(focused(page)).toHaveAttribute("data-kind", "paragraph");
+  await expect(focused(page)).toHaveText("-bravo");
+  await page.keyboard.press("Backspace");
+  await expect(focused(page)).toHaveText("bravo");
   await page.keyboard.press("Backspace");
 
   await expect(text(page, "n")).toHaveText("alphabravo");
@@ -365,7 +369,7 @@ test("Enter mid-text then Backspace returns the line to its pre-Enter state", as
 });
 
 for (const collapsed of [undefined, false, true]) {
-  test(`Enter at the START then Backspace preserves identity (${collapsed === undefined ? "leaf" : collapsed ? "collapsed parent" : "expanded parent"})`, async ({
+  test(`Enter at the START then three Backspaces preserve identity (${collapsed === undefined ? "leaf" : collapsed ? "collapsed parent" : "expanded parent"})`, async ({
     page,
   }) => {
     // Enter at offset 0 inserts a blank ABOVE and leaves focus put (#326), so
@@ -398,6 +402,14 @@ for (const collapsed of [undefined, false, true]) {
     await page.keyboard.press("Enter");
     await expect.poll(() => orderedTexts(page)).toEqual(["", ...visible]);
 
+    await page.keyboard.press("Backspace");
+    await expect(text(page, "keepme")).toHaveAttribute(
+      "data-kind",
+      "paragraph",
+    );
+    await expect(text(page, "keepme")).toHaveText("-alpha");
+    await page.keyboard.press("Backspace");
+    await expect(text(page, "keepme")).toHaveText("alpha");
     await page.keyboard.press("Backspace");
 
     await expect.poll(() => orderedTexts(page)).toEqual(visible);
@@ -481,6 +493,11 @@ test("a seeded bullet joins into its previous sibling, caret at the seam", async
 
   await caretAt(page, "two", 0);
   await page.keyboard.press("Backspace");
+  await expect(text(page, "two")).toHaveAttribute("data-kind", "paragraph");
+  await expect(text(page, "two")).toHaveText("-bravo");
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "two")).toHaveText("bravo");
+  await page.keyboard.press("Backspace");
 
   await expect(text(page, "one")).toHaveText("alphabravo");
   await expect(page.locator('li[data-node-id="two"]')).toHaveCount(0);
@@ -498,6 +515,11 @@ test("the join is a single undo step that restores both the text and the node", 
 
   await caretAt(page, "n", 5);
   await page.keyboard.press("Enter");
+  await expect(focused(page)).toHaveText("bravo");
+  await page.keyboard.press("Backspace");
+  await expect(focused(page)).toHaveAttribute("data-kind", "paragraph");
+  await expect(focused(page)).toHaveText("-bravo");
+  await page.keyboard.press("Backspace");
   await expect(focused(page)).toHaveText("bravo");
   await page.keyboard.press("Backspace");
   await expect(text(page, "n")).toHaveText("alphabravo");
@@ -524,6 +546,11 @@ test("a bullet with children refuses with a bare shake; its own first child stil
 
   await caretAt(page, "par", 0);
   await page.keyboard.press("Backspace");
+  await expect(text(page, "par")).toHaveAttribute("data-kind", "paragraph");
+  await expect(text(page, "par")).toHaveText("-parent");
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "par")).toHaveText("parent");
+  await page.keyboard.press("Backspace");
   await expect(outlineRow(page, "par")).toHaveClass(/node-rejected/);
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   await expect(text(page, "top")).toHaveText("alpha");
@@ -539,6 +566,11 @@ test("a bullet with children refuses with a bare shake; its own first child stil
   // ...and the first child DOES merge into its parent (a different depth), so
   // the refusal above isn't just a dead keymap.
   await caretAt(page, "kid", 0);
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "kid")).toHaveAttribute("data-kind", "paragraph");
+  await expect(text(page, "kid")).toHaveText("-kid");
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "kid")).toHaveText("kid");
   await page.keyboard.press("Backspace");
   await expect(text(page, "par")).toHaveText("parentkid");
   await expect.poll(() => orderedTexts(page)).toEqual(["alpha", "parentkid"]);
@@ -572,6 +604,11 @@ test("a bullet hidden between the two rows refuses with a shake AND a toast", as
   await expect(text(page, "mid")).toHaveCount(0);
 
   await caretAt(page, "two", 0);
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "two")).toHaveAttribute("data-kind", "paragraph");
+  await expect(text(page, "two")).toHaveText("-bravo");
+  await page.keyboard.press("Backspace");
+  await expect(text(page, "two")).toHaveText("bravo");
   await page.keyboard.press("Backspace");
 
   await expect(outlineRow(page, "two")).toHaveClass(/node-rejected/);
