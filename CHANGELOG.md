@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.33.7
+
+### Patch Changes
+
+- 0864634: The mobile node actions bar now uses Liquid Glass to match the header and navigation, with an opaque accessibility fallback. Editing and formatting actions stay available while navigation fades during writing.
+
 ## 1.33.6
 
 ### Patch Changes
