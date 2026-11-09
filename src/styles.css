@@ -864,15 +864,17 @@ h2 span.protection-indicator {
 
 /*
  * Node mirrors (ADR 0022, slice 1d). A mirror INSTANCE and its SOURCE each wear a
- * thin colored left edge, revealed only on row hover or while the caret is within
+ * thin colored ring, revealed only while the caret is within
  * (:focus-within) -- so a mirror-free outline, and an idle mirror, look exactly as
  * before. Source hue vs instance hue tells the original apart from its live
  * copies; a capped row (a cycle) reuses the instance hue. Pure CSS keyed off the
- * row's `data-mirror`, zero JS -- the tag-color ethos (ADR 0007). The edge sits on
+ * row's `data-mirror`, zero JS -- the tag-color ethos (ADR 0007). The ring sits on
  * `.outline-row` (the flex line), so depth indentation already offsets it.
  */
 .outline-node[data-mirror] > .outline-row {
   outline: 2px solid transparent;
+  /* Keep the full ring inside the row at the canvas's clipped edges. */
+  outline-offset: -2px;
   transition: outline-color 0.12s ease;
 }
 /*.outline-node[data-mirror="source"]:hover > .outline-row,*/
