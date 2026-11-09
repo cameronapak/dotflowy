@@ -77,6 +77,17 @@ per OS version; chasing them would rot). Two de-duplications keep it from readin
 right below it. On platforms without an accessory bar (Android, desktop-touch) the same floating capsule still
 reads well — it assumes no system bar beneath it, unlike a flat full-width edge bar.
 
+**Liquid Glass material.** The capsule uses the pinned `@onlymoein/liquidglass`
+`Glass` surface and the header's app-theme palette (ADR 0076), loaded only while
+editing on a coarse pointer. Keep the material separate from the horizontally
+scrolling controls so the rim stays intact. Native buttons retain their existing
+tap, selection, focus, and history behavior. The shared `useOpaqueChrome` check
+unmounts glass for reduced motion or transparency, increased contrast, forced
+colors, or missing backdrop-filter support. Its bordered opaque fallback has
+the same geometry, including while the glass chunk loads. Reduced motion also
+disables button transitions. The editing toolbar stays visible while navigation
+fades during writing (ADR 0078).
+
 **Why the `/` button inserts a literal `/` instead of toggling a menu.** The button runs
 `document.execCommand("insertText", false, "/")` at the caret, faithfully simulating the keystroke so the
 row's own `useSlashMenu`/`detectSlash` opens the palette — the bar reuses the exact path a typed `/` takes,

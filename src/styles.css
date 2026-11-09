@@ -293,7 +293,8 @@ body:has(.outline-shell) {
 
 /* ADR 0076: the narrow-screen glass toolbar. Theme values only, as the dock
    does; the package draws its own glass, lens and scroll edge. */
-.mobile-glass-header {
+.mobile-glass-header,
+.mobile-actions-bar {
   --lg-foreground: var(--foreground);
   --lg-ring: var(--foreground);
   --lg-fill: var(--primary);
@@ -311,6 +312,9 @@ body:has(.outline-shell) {
   --lg-drop-strength: 1;
   --lg-fill-shade: 11%;
   --lg-fill-alpha: 100%;
+}
+
+.mobile-glass-header {
   gap: 8px;
   min-height: 60px;
   padding: 8px max(12px, env(safe-area-inset-right)) 8px
@@ -318,7 +322,8 @@ body:has(.outline-shell) {
   color: var(--foreground);
 }
 
-.dark .mobile-glass-header {
+.dark .mobile-glass-header,
+.dark .mobile-actions-bar {
   --lg-dark: opacity(1);
   --lg-glass-tinted: #1e1e20f2;
   --lg-glass-active: #ffffff4d;
@@ -331,6 +336,26 @@ body:has(.outline-shell) {
   --lg-drop-strength: 1.6;
   --lg-fill-shade: 0%;
   --lg-fill-alpha: 95%;
+}
+
+/* Keep glass outside the horizontal scroller so its rim stays intact and the
+   material does not move with overflowing formatting controls. */
+.mobile-actions-bar > :is(.lg-glass, .mobile-actions-solid) {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.mobile-actions-solid {
+  background: var(--background);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-actions-bar button {
+    transition: none;
+  }
 }
 
 .mobile-glass-header-leading,
