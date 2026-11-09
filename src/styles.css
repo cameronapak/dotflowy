@@ -1602,18 +1602,9 @@ body.dragging-active * {
   gap: 4px;
   font-size: 12px;
   min-width: 0;
-  /* When the trail is wider than its (narrow, mobile) container, scroll it
-     horizontally instead of squishing each crumb to a single letter. The trail
-     is still capped by the "…" collapse, so this scroll is always short.
-     `overscroll-behavior-x: contain` stops a horizontal swipe from triggering
-     the browser's back-navigation gesture. */
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
-}
-
-.breadcrumb::-webkit-scrollbar {
-  display: none;
+  /* A glanceable trail, never a scroll surface. Labels share the available
+     space and ellipsize; Home, separators, and the ancestor menu stay fixed. */
+  overflow: clip;
 }
 
 .breadcrumb .crumb {
@@ -1621,9 +1612,13 @@ body.dragging-active * {
   align-items: center;
   gap: 4px;
   min-width: 0;
-  /* Never shrink below the crumb's own (already ellipsis-capped) width -- the
-     container scrolls instead. This is what stops the single-letter squish. */
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+}
+
+/* Preserve the top-level context rather than shrinking a short name such as
+   Daily to only an ellipsis when later labels are long. */
+.breadcrumb > .crumb:first-of-type {
+  flex-shrink: 0;
 }
 
 .breadcrumb .sep {
@@ -1638,6 +1633,7 @@ body.dragging-active * {
   /* Cap each crumb so one long title can't dominate; the `42vw` clamp keeps a
      single crumb from eating a narrow viewport, while desktop keeps the 220px. */
   max-width: min(220px, 42vw);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1660,9 +1656,8 @@ body.dragging-active * {
   @apply text-primary underline;
 }
 
-/* Nothing shrinks -- the row scrolls instead (see .breadcrumb). Long crumb
-   *text* still ellipsis-truncates via the max-width above. */
-.breadcrumb > .crumb-link {
+/* Keep Home reachable even when every label needs truncation. */
+.breadcrumb > button {
   flex: 0 0 auto;
 }
 

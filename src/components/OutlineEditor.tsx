@@ -3734,14 +3734,6 @@ function BreadcrumbTrail({
   const hidden = collapse ? trail.slice(LEADING, trail.length - TRAILING) : [];
   const tail = collapse ? trail.slice(trail.length - TRAILING) : [];
 
-  // Safety net: if a narrowed window still overflows, the row scrolls
-  // horizontally (rather than squishing crumbs) and lands on the deepest crumb.
-  const navRef = useRef<HTMLElement>(null);
-  useLayoutEffect(() => {
-    const el = navRef.current;
-    if (el) el.scrollLeft = el.scrollWidth;
-  }, [rootId, trail.length]);
-
   // Narrow screens (ADR 0076): nothing at Home, where the dock owns navigation;
   // otherwise Back to the direct parent plus a menu of every other ancestor.
   // The focused node itself is the page title right below, so it is dropped.
@@ -3766,11 +3758,7 @@ function BreadcrumbTrail({
   }
 
   return (
-    <nav
-      ref={navRef}
-      className="breadcrumb scroll-fade-x"
-      aria-label="Breadcrumb"
-    >
+    <nav className="breadcrumb" aria-label="Breadcrumb">
       {/* Zooming out: the current root is the pivot (title -> list item). */}
       <Button
         type="button"
