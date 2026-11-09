@@ -8,7 +8,9 @@ status: accepted
 **except the single focused bullet**, which stays full — so the line you're on stands out. Toggled from
 the header More menu ("Spotlight mode"), default OFF, persisted per-browser in `localStorage`. Dimming is
 live only while a bullet holds the caret; the moment nothing is focused, the whole outline returns to full
-opacity. The header and subheader never dim (they are chrome, not content). When **zoomed**, the root
+opacity. Spotlight itself never dims the header or subheader (they are chrome, not content).
+The [writing-chrome behavior](./0078-writing-chrome.md) fades them independently while typing.
+When **zoomed**, the root
 renders as the `.zoomed-title` (an `h2`, not an `.outline-row`); it dims like any parent while a child
 bullet is focused and stays full only when the title itself holds the caret — so zooming in and editing a
 child spotlights the child, not the whole page header.

@@ -167,6 +167,37 @@ body:has(.outline-shell) {
 .outline-chrome {
   flex: none;
   z-index: 10;
+  transition-property: opacity;
+}
+
+.outline-chrome,
+[data-outline-add] {
+  transition-duration: 600ms;
+  transition-timing-function: ease-in-out;
+}
+
+/* Keep the reserved space and caret still while navigation fades away.
+ * Keyboard focus always wins, including assistive-technology navigation. */
+.outline-chrome[data-writing]:not(:focus-within),
+.outline-chrome[data-writing]:not(:focus-within)
+  ~ .outline-scroll
+  [data-outline-add]:not(:focus) {
+  opacity: 0;
+}
+
+.outline-chrome[data-writing]:not(:focus-within),
+.outline-chrome[data-writing]:not(:focus-within) *,
+.outline-chrome[data-writing]:not(:focus-within)
+  ~ .outline-scroll
+  [data-outline-add]:not(:focus) {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .outline-chrome,
+  [data-outline-add] {
+    transition: none;
+  }
 }
 
 .outline-scroll {

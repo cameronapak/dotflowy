@@ -55,6 +55,12 @@ export default defineConfig({
       testMatch: "mobile-navigation.spec.ts",
       use: { ...devices["iPhone 13"] },
     },
+    {
+      name: "writing-chrome-webkit",
+      testMatch: "writing-chrome.spec.ts",
+      grep: /touch writing/,
+      use: { ...devices["iPhone 13"] },
+    },
   ],
   // Always boot our own Vite server, NEVER adopt one already on the port.
   // `dev`/`dev:web` serve :3000, so the only thing that ever answers on this
