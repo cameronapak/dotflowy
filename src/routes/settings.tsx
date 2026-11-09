@@ -40,8 +40,6 @@ import {
 } from "../components/ui/accordion";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
-import { localDateKey } from "../data/date-links";
-import { downloadTextFile } from "../data/download";
 import {
   retryEditorFeatures,
   setDailyToggle,
@@ -58,9 +56,11 @@ import {
   setExperimentalCaptureEnabled,
   useExperimentalCaptureEnabled,
 } from "../data/flags";
-import { outlineToMarkdown } from "../data/markdown";
 import { useNodeCount } from "../data/node-count";
-import { exportOpml } from "../data/opml-export";
+import {
+  copyOutlineAsMarkdown,
+  exportOutlineAsOpml,
+} from "../data/outline-actions";
 import { FREE_NODE_LIMIT, PLAN_LABELS, type PlanName } from "../data/plans";
 import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
@@ -77,25 +77,12 @@ export const Route = createFileRoute("/settings")({
   component: SettingsPage,
 });
 
-// --- Whole-outline data actions ----------------------------------------------
-// On /settings there is NO zoom view, so these are explicit WHOLE-outline
-// operations (rootId = null), unlike the header More menu's contextual variants
-// that read `getViewRootId()`.
-
 async function copyWholeOutlineMarkdown() {
-  const index = getTreeIndex();
-  const rootIds = childrenOf(index, null).map((n) => n.id);
-  const markdown = outlineToMarkdown(index, rootIds);
-  if (!markdown) {
+  if (childrenOf(getTreeIndex(), null).length === 0) {
     toast("Nothing to copy yet");
     return;
   }
-  try {
-    await navigator.clipboard.writeText(markdown);
-    toast.success("Copied as Markdown");
-  } catch {
-    toast.error("Couldn't copy to clipboard");
-  }
+  await copyOutlineAsMarkdown(null);
 }
 
 function exportWholeOutlineOpml() {
@@ -104,12 +91,7 @@ function exportWholeOutlineOpml() {
     toast("Nothing to export yet");
     return;
   }
-  const opml = exportOpml(index, null, { title: "dotflowy export" });
-  downloadTextFile(
-    `dotflowy-export-${localDateKey()}.opml`,
-    "text/x-opml;charset=utf-8",
-    opml,
-  );
+  exportOutlineAsOpml(null);
 }
 
 // --- Small presentational primitives -----------------------------------------

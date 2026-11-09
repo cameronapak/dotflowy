@@ -4,9 +4,8 @@
 // adjacent to the run -- the same reveal-on-proximity model emphasis and links
 // use (ADR 0025 / ADR 0005). Dogfoods Seam A's fold, no interaction.
 
-import { mdPunct } from "../../components/inline-code";
 import { CODE_RUN_PATTERN } from "../../data/code";
-import { isRevealed } from "../token-kit";
+import { isRevealed, mdPunct } from "../token-kit";
 import { definePlugin, type El } from "../types";
 
 // Single-line, non-empty, no nested backtick. The shape lives in the pure layer

@@ -48,7 +48,7 @@ export function localDateKey(d = new Date()): string {
 /** Parse a `YYYY-MM-DD` key to a *local* Date at noon (a TZ-safe midpoint that
  *  never slips a day under DST). Null on a malformed OR non-calendar key --
  *  the constructor round-trip rejects `2026-13-45` (Date would roll it over). */
-function parseDateKey(key: string): Date | null {
+export function parseDateKey(key: string): Date | null {
   const m = KEY_RE.exec(key);
   if (!m) return null;
   const y = Number(m[1]);

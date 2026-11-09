@@ -29,3 +29,14 @@ rides the sync path).
 todo plugin's concept — because hide-completed and fade-inheritance read them every render, and a
 side-collection join on the hottest path isn't worth it. Core declares the column; exactly one
 plugin reads it. Don't generalize this into "plugins can add fields."
+
+## Structural cleanup, November 2026
+
+Seam G exposes per-node `hidesNode` only. The unused whole-tree `buildFilter`
+extension is removed: DQL filtering belongs to the core, with feature predicates
+registered through Seam K. No plugin implements a second whole-tree filter.
+
+Pure token descriptor helpers live in `token-kit.ts`, below the decorator that
+invokes plugin renderers. Plugins need not import the registry-consuming decorator
+to construct punctuation spans. Runtime cycles required by deferred protection
+lookups remain; removing every cycle is not a goal.

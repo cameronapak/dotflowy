@@ -15,8 +15,10 @@ export function MenuList({
   style,
   ref,
   inDock = false,
+  label = "Suggestions",
+  className,
 }: {
-  entries: MenuEntry[];
+  entries: readonly Pick<MenuEntry, "key" | "render">[];
   activeIndex: number;
   emptyLabel?: string;
   onHover: (index: number) => void;
@@ -26,6 +28,8 @@ export function MenuList({
   style?: CSSProperties;
   ref?: Ref<HTMLDivElement>;
   inDock?: boolean;
+  label?: string;
+  className?: string;
 }) {
   const { itemRef, onItemPointerMove } = useMenuActiveItem({
     activeIndex,
@@ -37,11 +41,12 @@ export function MenuList({
     <div
       ref={ref}
       role="listbox"
-      aria-label="Suggestions"
+      aria-label={label}
       className={cn(
         inDock
           ? "w-full"
           : "z-50 w-64 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md",
+        className,
       )}
       style={style}
     >
@@ -64,7 +69,7 @@ export function MenuList({
               role="option"
               aria-selected={i === activeIndex}
               className={cn(
-                // scroll-my-10 clears the scroll-fade mask -- see SlashMenuList.
+                // Clear the scroll-fade mask when scrolling the active option.
                 "flex w-full scroll-my-10 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
                 inDock && "h-11 py-2",
                 i === activeIndex && "bg-accent text-accent-foreground",

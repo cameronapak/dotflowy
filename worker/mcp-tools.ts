@@ -37,6 +37,7 @@ import {
 } from "../src/data/opml-import";
 import { redactSpoilers } from "../src/data/spoiler";
 import { childrenOf, createId } from "../src/data/tree";
+import { WeekStartPreferenceSchema } from "../src/data/wire-schema";
 import {
   type NodeFieldChanges,
   DAILY_CONTAINER_TEXT,
@@ -85,17 +86,7 @@ export interface OutlineStore {
     key: string,
     value: KvClaim,
   ): KvClaim | Promise<KvClaim>;
-  migrateWeekStart?(
-    weekStart: WeekStart,
-    limit: number | null,
-  ):
-    | { weekStart: WeekStart; seq: number }
-    | { error: "node_limit" | "locked" }
-    | Promise<
-        | { weekStart: WeekStart; seq: number }
-        | { error: "node_limit" | "locked" }
-      >;
-  canonicalizeWeekStart?(
+  canonicalizeWeekStart(
     limit: number | null,
   ):
     | { weekStart: WeekStart; seq: number }
@@ -332,12 +323,10 @@ const loadWeekStart = (
           ? toolErrorFrom(error)
           : new ToolError({ reason: String(error) }),
     });
-    const schema = Schema.Struct({
-      key: Schema.Literal("daily:week-start"),
-      weekStart: Schema.Literals(["sunday", "monday"]),
-    });
     for (const raw of rows) {
-      const decoded = Schema.decodeUnknownOption(schema)(raw);
+      const decoded = Schema.decodeUnknownOption(WeekStartPreferenceSchema)(
+        raw,
+      );
       if (decoded._tag === "Some") return decoded.value.weekStart;
     }
     return DEFAULT_WEEK_START;
@@ -353,24 +342,22 @@ const claimDailyScaffold = (
   dateKey: string,
 ): Effect.Effect<DailyScaffold & { index: TreeIndex }, ToolError> =>
   Effect.gen(function* () {
-    if (store.canonicalizeWeekStart) {
-      const migrated = yield* Effect.tryPromise({
-        try: () => Promise.resolve(store.canonicalizeWeekStart!(null)),
-        catch: (error) =>
-          error instanceof Error
-            ? toolErrorFrom(error)
-            : new ToolError({ reason: String(error) }),
-      });
-      if ("error" in migrated) {
-        return yield* Effect.fail(
-          new ToolError({
-            reason:
-              migrated.error === "locked"
-                ? "calendar migration is blocked by a locked node"
-                : "calendar migration exceeds the node limit",
-          }),
-        );
-      }
+    const migrated = yield* Effect.tryPromise({
+      try: () => Promise.resolve(store.canonicalizeWeekStart(null)),
+      catch: (error) =>
+        error instanceof Error
+          ? toolErrorFrom(error)
+          : new ToolError({ reason: String(error) }),
+    });
+    if ("error" in migrated) {
+      return yield* Effect.fail(
+        new ToolError({
+          reason:
+            migrated.error === "locked"
+              ? "calendar migration is blocked by a locked node"
+              : "calendar migration exceeds the node limit",
+        }),
+      );
     }
     const weekStart = yield* loadWeekStart(store);
     const chain = dayKeyToScaffoldChain(dateKey, weekStart);

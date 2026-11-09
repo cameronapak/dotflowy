@@ -3,11 +3,9 @@
     "files": [
       "repos/**",
       "src/components/ui/sheet.tsx",
-      "src/components/ui/sidebar.tsx",
       "src/components/ui/skeleton.tsx",
       "src/components/ui/tooltip.tsx",
-      "src/hooks/use-mobile.ts",
-      "src/components/ui/input-group-text.tsx"
+      "src/hooks/use-mobile.ts"
     ],
     "overrides": [
       {

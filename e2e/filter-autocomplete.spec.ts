@@ -38,6 +38,34 @@ async function summon(page: Page) {
   await expect(input(page)).toBeFocused();
 }
 
+test("browser autocomplete and Worker search register the same operator metadata", async ({
+  page,
+}) => {
+  await load(page);
+  const metadata = await page.evaluate(async () => {
+    const registryPath = "/src/plugins/registry.ts";
+    const workerPath = "/src/plugins/filter-operators.ts";
+    const queryPath = "/src/data/filter-query.ts";
+    const { filterOperatorInfos } = await import(registryPath);
+    const { queryOperators } = await import(workerPath);
+    const { collectOperatorKeyInfos } = await import(queryPath);
+    return {
+      browser: filterOperatorInfos,
+      worker: collectOperatorKeyInfos([...new Set(queryOperators.values())]),
+    };
+  });
+  expect(metadata.browser).toEqual(metadata.worker);
+  expect(metadata.browser.map((info: { key: string }) => info.key)).toEqual([
+    "is",
+    "has",
+    "highlight",
+  ]);
+  await summon(page);
+  await input(page).fill("highlight:");
+  await expect(option(page, "highlight:red")).toBeVisible();
+  await expect(option(page, "highlight:blue")).toBeVisible();
+});
+
 test("typing `is:` lists its values incl. todo; click inserts + filters", async ({
   page,
 }) => {
@@ -77,8 +105,7 @@ test("keyboard: ArrowDown highlights a row, Enter inserts it", async ({
     "true",
   );
 
-  // Settling the initial subheader animation must not clear a choice made
-  // while it was opening. Advance past its deferred popover reveal.
+  // Expansion must not clear a keyboard choice made before the band settles.
   await page.clock.runFor(250);
   await expect(option(page, "is:todo")).toHaveAttribute(
     "aria-selected",

@@ -28,8 +28,12 @@ import {
 } from "./account-deletion";
 import { revokeCaptureKeys } from "./capture-keys";
 import { sendEmail } from "./email";
-import { isSignupOpen, matchesSharedInviteCode } from "./identity";
-import { isRedeemableInvite, normalizeEmail, redeemInvite } from "./invites";
+import {
+  isSignupOpen,
+  matchesSharedInviteCode,
+  normalizeEmail,
+} from "./identity";
+import { isRedeemableInvite, redeemInvite } from "./invites";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
 
 /** Any undecoded JSON request-body field as the auth hooks see it (Better Auth

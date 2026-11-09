@@ -2,6 +2,11 @@ import type { Locator, Page, Route, WebSocketRoute } from "@playwright/test";
 
 import { Schema } from "effect";
 
+import type {
+  Node as ApiNode,
+  ChangeOp as ApiChangeOp,
+} from "../src/data/wire-schema";
+
 import {
   KvClaimBody,
   KvDeleteBody,
@@ -158,31 +163,7 @@ export interface SeedNode {
   updatedAt?: number;
 }
 
-/** A full node row as the /api/nodes Worker speaks it -- real booleans, all
- *  fields present. Mirrors the client `Node` type (src/data/schema.ts). */
-export interface ApiNode {
-  id: string;
-  parentId: string | null;
-  prevSiblingId: string | null;
-  text: string;
-  isTask: boolean;
-  completed: boolean;
-  collapsed: boolean;
-  bookmarkedAt: number | null;
-  locked: boolean;
-  mirrorOf: string | null;
-  createdAt: number;
-  updatedAt: number;
-  origin: string | null;
-  kind: "paragraph" | "embed" | null;
-}
-
-/** One op in a change frame, as the DO broadcasts and the batch POST carries.
- *  Mirrors `ChangeOp` in src/data/realtime.ts. */
-export type ApiChangeOp =
-  | { op: "insert"; value: ApiNode }
-  | { op: "update"; value: ApiNode }
-  | { op: "delete"; key: string };
+export type { ApiNode, ApiChangeOp };
 
 function toNode(n: SeedNode): ApiNode {
   return {
@@ -198,13 +179,7 @@ function toNode(n: SeedNode): ApiNode {
     mirrorOf: n.mirrorOf ?? null,
     createdAt: 0,
     updatedAt: n.updatedAt ?? 0,
-    // Every seeded node is "human" (null) — the origin marker only lights up for
-    // MCP-created nodes, which the e2e mock never produces. Required by the wire
-    // schema the client decodes inbound frames against, so it must be present.
     origin: n.origin ?? null,
-    // A seeded node is a bullet-or-task unless the spec says otherwise. Required
-    // by the wire schema the client decodes inbound frames against (ADR 0045),
-    // so it must be present on every row the mock emits.
     kind: n.kind ?? null,
   };
 }
@@ -231,8 +206,8 @@ export interface SeedOutlineController {
  *   - GET/POST/PATCH/DELETE `/api/nodes` — mutation path (unchanged)
  *   - WS `/api/sync` — `hello` → `snapshot` from the seeded store
  * so the real `collection.ts` → `api.ts` + `realtime.ts` path is exercised end
- * to end; only the DO is swapped for a Map. The Worker's own SQL is covered by
- * `typecheck:worker` plus manual verification (docs/adr/0008-sync-via-a-per-user-durable-object.md), not here.
+ * to end; only the DO is swapped for a Map. Real-Worker SQL and HTTP workflows
+ * live in `worker/capture-real.test.ts`, not this browser fixture.
  *
  * The store is scoped to this test's `page`. Playwright gives each test its own
  * page/context, so two tests never share state. Register before `page.goto(...)`

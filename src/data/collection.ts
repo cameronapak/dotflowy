@@ -13,7 +13,6 @@ import { noteServerVersion } from "./app-version";
 import { publishCalendarSync } from "./calendar-sync";
 import { isMirrorsEnabled } from "./flags";
 import { clearHistory, sameAuthoring } from "./history";
-import { runPromise } from "./nodes-client-effect";
 import { createSyncStream } from "./realtime";
 import { appRuntime } from "./runtime";
 import { persistOrNotify } from "./save-failure";
@@ -228,50 +227,6 @@ export function waitForSeqStrictE(
       seqWaiters.delete(waiter);
     });
   }).pipe(Effect.timeout(Duration.millis(timeoutMs)));
-}
-
-/**
- * Complete once `id` is present in the collection (live delta or snapshot); on
- * timeout it FAILS (the opposite of `waitForSeqE` — the daily claim loser-path
- * wants to know the node never replicated, then materializes locally instead).
- * `Effect.callback` over `subscribeChanges`, time-bounded by `Effect.timeout`.
- */
-export function waitForNodeE(
-  id: string,
-  timeoutMs = 8000,
-): Effect.Effect<void, Cause.TimeoutError> {
-  return Effect.callback<void>((resume) => {
-    const present = () => nodesCollection.toArray.some((n) => n.id === id);
-    if (present()) {
-      resume(Effect.void);
-      return;
-    }
-    // `Effect.callback`'s returned finalizer runs ONLY on interruption (the
-    // timeout path), NOT on a successful `resume` — so the success paths must
-    // unsubscribe themselves or the listener leaks (it would keep running
-    // `present()` on every future collection change). `unsubscribe` is
-    // idempotent, so a later finalizer call after success is harmless.
-    const sub = nodesCollection.subscribeChanges(() => {
-      if (present()) {
-        sub.unsubscribe();
-        resume(Effect.void);
-      }
-    });
-    // Guard the registration gap (a delta applied between the check and subscribe).
-    if (present()) {
-      sub.unsubscribe();
-      resume(Effect.void);
-    }
-    return Effect.sync(() => {
-      sub.unsubscribe();
-    });
-  }).pipe(Effect.timeout(Duration.millis(timeoutMs)));
-}
-
-/** Promise form of {@link waitForNodeE} for the daily claim loser-path (rejects
- *  on timeout; the caller `.catch`es it and materializes locally). */
-export function waitForNode(id: string, timeoutMs = 8000): Promise<void> {
-  return runPromise(waitForNodeE(id, timeoutMs));
 }
 
 /**

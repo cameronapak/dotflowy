@@ -44,6 +44,9 @@ popover, centered below the pencil and clamped to the viewport. Its entrance
 scales from the pencil's position; reduced motion skips the animation.
 Both presentations share one draft, including across width changes.
 Close, Escape, an outside tap, and a swipe discard the draft like Cancel.
+Desktop keyboard dismissal is ready when the form commits, including immediately
+after autofocus. Only the outside-pointer listener is deferred so the opening
+click or context-menu event cannot dismiss its own popover.
 The sheet does not focus an input on opening; tap a field to bring up the
 keyboard. Done waits for the native sheet exit before applying the draft and
 opening any external-content permission dialog. Dismissal returns focus to the

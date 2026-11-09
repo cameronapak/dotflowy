@@ -18,8 +18,8 @@ import {
   type OsisBookCode,
 } from "grab-bcv";
 
+import { CODE_RUN_PATTERN } from "../../data/code";
 import { LINK_PATTERN, encodeUrlForMarkdown } from "../../data/links";
-import { spliceToken } from "../token-splice";
 
 // The Seam-A token fragment: detection PROPOSES, the parser DISPOSES. Mirrors
 // grab-bcv's own (internal, unexported) natural-text reference pattern, plus a
@@ -105,16 +105,6 @@ export function formatStructuredBibleRef(args: {
   return `${base}:${args.startVerse}`;
 }
 
-export function replaceBibleRefToken(
-  text: string,
-  oldToken: string,
-  newToken: string,
-): string | null {
-  // Delegates to the shared spliceToken (src/plugins/token-splice.ts).
-  return spliceToken(text, oldToken, newToken);
-}
-
-const CODE_RUN_PATTERN = "`[^`\\n]+`";
 const MARKDOWN_LINK_OR_CODE_RE = () =>
   new RegExp(`${LINK_PATTERN}|${CODE_RUN_PATTERN}`, "g");
 

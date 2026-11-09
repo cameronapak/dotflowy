@@ -1,3 +1,4 @@
+import { autoUpdate } from "@floating-ui/react-dom";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { Pencil, Pin, Search, X } from "lucide-react";
 import {
@@ -27,7 +28,6 @@ import {
 import { normalizeQuery } from "../data/saved-queries-core";
 import { collectTagCorpus } from "../data/tags";
 import { getTreeIndex } from "../data/tree-store";
-import { hasWindow } from "../env";
 import { filterOperatorInfos } from "../plugins/registry";
 import {
   addTermToFilter,
@@ -39,7 +39,6 @@ import {
   toggleFilterInput,
   writeQuery,
 } from "./query-filter-nav";
-import { SUBHEADER_EXPAND_MS } from "./subheader-expand";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -360,24 +359,22 @@ function SuggestionPopover({
   const [rect, setRect] = useState<DOMRect | null>(
     () => anchorRef.current?.getBoundingClientRect() ?? null,
   );
+  const popoverRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const popover = popoverRef.current;
+    if (!anchor || !popover) return;
     const measure = () => {
-      const el = anchorRef.current;
-      if (el) setRect(el.getBoundingClientRect());
+      setRect(anchor.getBoundingClientRect());
     };
-    measure();
-    window.addEventListener("resize", measure);
-    // Capture-phase: the sticky header sits in a scroll container.
-    window.addEventListener("scroll", measure, true);
-    return () => {
-      window.removeEventListener("resize", measure);
-      window.removeEventListener("scroll", measure, true);
-    };
+    // The input can move while its ancestor expands, without resizing itself.
+    return autoUpdate(anchor, popover, measure, { animationFrame: true });
   }, [anchorRef]);
 
   if (!rect) return null;
   return createPortal(
     <div
+      ref={popoverRef}
       data-filter-popover
       className="fixed z-50 origin-top overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md"
       style={{ left: rect.left, top: rect.bottom + 4, width: rect.width }}
@@ -446,21 +443,6 @@ export function QueryFilterBar() {
   // Live raw query, read at open time without re-binding the mount-once opener.
   const rawRef = useRef(rawQuery);
   rawRef.current = rawQuery;
-  // While the subheader expands on a fresh summon, the reveal that opens the
-  // popover once the band settles is deferred behind this timer. A pending timer
-  // (ref non-null) is also the "still deferring" flag onFocus reads. Any EXPLICIT
-  // close (Escape stage 1, clear, collapse, blur) must cancel it, or it fires
-  // after the close and silently re-opens `popoverOpen` — which desyncs the
-  // Escape ladder (stage 2 re-closes a popover the user already closed instead
-  // of clearing the text).
-  const revealTimerRef = useRef<number | null>(null);
-  const cancelDeferredReveal = useCallback(() => {
-    if (revealTimerRef.current != null) {
-      window.clearTimeout(revealTimerRef.current);
-      revealTimerRef.current = null;
-    }
-  }, []);
-
   // Pin pressed-state (ADR 0048): filled when the current (trimmed) query is
   // already saved. Reads `draft` so it tracks the input even while composing.
   const isSaved = useIsQuerySaved(draft);
@@ -583,7 +565,6 @@ export function QueryFilterBar() {
       window.clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
-    cancelDeferredReveal();
     draftRef.current = "";
     setDraft("");
     writeQuery("", { replace: true });
@@ -591,7 +572,7 @@ export function QueryFilterBar() {
     setPopoverOpen(false);
     setFocused(false);
     inputRef.current?.blur();
-  }, [cancelDeferredReveal]);
+  }, []);
 
   // Live open-probe for the header toggle -- `showInput` itself isn't stable
   // across the mount-once registration, so the probe reads refs/state live.
@@ -625,14 +606,9 @@ export function QueryFilterBar() {
 
   // Focus + caret-to-end when the input is SUMMONED (not merely resident from a
   // URL query -- a page load with `?q=` must not steal the caret). Deferred a
-  // frame so it wins the focus race against Radix restoring focus when the
-  // Cmd+K dialog closes. The suggestion popover waits for the subheader expand
-  // animation when the band was collapsed -- opening it mid-slide pins it to a
-  // stale input rect (portaled, fixed).
+  // frame so it wins the focus race when the Cmd+K dialog closes.
   useEffect(() => {
     if (!summoned) return;
-    // Collapsed → expand animates; already-resident (active `?q=`) does not.
-    const needsExpandWait = rawRef.current.trim().length === 0;
     const id = requestAnimationFrame(() => {
       const el = inputRef.current;
       if (!el) return;
@@ -640,28 +616,12 @@ export function QueryFilterBar() {
       const end = el.value.length;
       el.setSelectionRange(end, end);
       recompute();
-      const reduceMotion =
-        hasWindow() &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (needsExpandWait && !reduceMotion) {
-        // onFocus would open immediately; hold until the band settles.
-        setPopoverOpen(false);
-        revealTimerRef.current = window.setTimeout(() => {
-          revealTimerRef.current = null;
-          if (document.activeElement === inputRef.current) {
-            setPopoverOpen(true);
-            recompute();
-          }
-        }, SUBHEADER_EXPAND_MS);
-      } else {
-        setPopoverOpen(true);
-      }
+      setPopoverOpen(true);
     });
     return () => {
       cancelAnimationFrame(id);
-      cancelDeferredReveal();
     };
-  }, [summoned, recompute, cancelDeferredReveal]);
+  }, [summoned, recompute]);
 
   if (!showInput) return null;
 
@@ -676,7 +636,6 @@ export function QueryFilterBar() {
   // resident (blurred), showing the raw string.
   const collapse = () => {
     flush(draftRef.current);
-    cancelDeferredReveal();
     setSummoned(false);
     setPopoverOpen(false);
     inputRef.current?.blur();
@@ -684,7 +643,6 @@ export function QueryFilterBar() {
 
   // The clear X (and Escape stage 2): wipe the text AND `?q=`, keeping focus.
   const clearText = (reopenCheatSheet: boolean) => {
-    cancelDeferredReveal();
     draftRef.current = "";
     setDraft("");
     flush("");
@@ -700,9 +658,6 @@ export function QueryFilterBar() {
   };
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Typing already opens and recomputes the popover. Its deferred initial
-    // reveal must not later reset a suggestion the user has highlighted.
-    cancelDeferredReveal();
     const value = e.target.value;
     draftRef.current = value;
     setDraft(value);
@@ -714,9 +669,6 @@ export function QueryFilterBar() {
   const onFocus = () => {
     setFocused(true);
     recompute();
-    // Fresh summon: the summon effect's reveal timer (still pending) opens the
-    // popover after the expand anim; don't pre-empt it here.
-    if (revealTimerRef.current != null) return;
     setPopoverOpen(true);
   };
 
@@ -733,7 +685,6 @@ export function QueryFilterBar() {
     // Read the live draft (not the render closure) so a close()+blur in the
     // same tick can't resurrect a just-cleared query.
     flush(draftRef.current);
-    cancelDeferredReveal();
     setSummoned(false);
     setPopoverOpen(false);
   };
@@ -784,7 +735,6 @@ export function QueryFilterBar() {
       // Ladder (ADR 0047 §6): (1) an open popover closes first; (2) else text is
       // cleared, focus kept; (3) else the row collapses.
       if (showPopover) {
-        cancelDeferredReveal();
         setPopoverOpen(false);
         return;
       }

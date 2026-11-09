@@ -11,10 +11,16 @@ import {
   isPlausibleEmail,
   isSignupOpen,
   matchesSharedInviteCode,
+  normalizeEmail,
   resolveUserId,
 } from "./identity";
 
 const session = (id: string, email: string) => ({ user: { id, email } });
+
+test("email identity trims and lowercases across workflows", () => {
+  expect(normalizeEmail("  Foo@Bar.COM ")).toBe("foo@bar.com");
+  expect(normalizeEmail("a@b.com")).toBe("a@b.com");
+});
 
 test("resolveUserId keys each user's DO by user.id and bridges ONLY the exact OWNER_USER_ID to 'default'", () => {
   expect(resolveUserId("user_abc", {})).toBe("user_abc");

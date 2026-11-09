@@ -17,6 +17,7 @@
  */
 
 import { sendEmail } from "./email";
+import { normalizeEmail } from "./identity";
 
 /** The env slice the invite flow needs: D1 (the `invites` + `waitlist` tables)
  *  and the email seam. */
@@ -53,12 +54,6 @@ export function generateInviteCode(): string {
     out += CODE_ALPHABET[bytes[i]! % CODE_ALPHABET.length];
   }
   return out;
-}
-
-/** Normalize an email the same way the waitlist + admin allowlist do, so the
- *  bound `email` compares identically at mint time and redeem time. */
-export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
 }
 
 /** The invite email (HTML + text; both always sent). Email-bound, so it tells

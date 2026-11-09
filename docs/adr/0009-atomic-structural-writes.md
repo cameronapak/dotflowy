@@ -18,7 +18,7 @@ corrupted; the damage clustered in create/delete-heavy areas.)
 **The cure — `runStructural` (`structural.ts`), two properties, both required:**
 
 - **P1 (atomic):** wrap every tree-shape edit so all its `nodesCollection.insert/update/delete`
-  calls join ONE `createTransaction`, whose `mutationFn` ships them as a single `persistBatch` →
+  calls join ONE `createTransaction`, whose `mutationFn` ships them as a single `persistBatchE` →
   POST `/api/nodes {ops}` → the DO's `applyBatch` → one `commitChange` → one frame. All-or-nothing.
 - **P2 (hold-until-echo):** the transaction's `mutationFn` awaits `waitForSeq(seq)` — it does not
   resolve until the batch's own change frame echoes back. This is **load-bearing, not belt-and-
@@ -26,7 +26,7 @@ corrupted; the damage clustered in create/delete-heavy areas.)
   marks a _direct_ transaction and retains after completion) has its optimistic overlay **dropped on
   completion unless its echo has already landed** (`recomputeOptimisticState`, `state.js`). Without
   the wait the view would briefly revert to pre-op, and a fast follow-up edit would re-create a fan.
-- **P3 (serialize on the wire):** `persistBatch` (`api.ts`) chains every batch POST off the previous
+- **P3 (serialize on the wire):** `persistBatchE` (`api.ts`) chains every batch POST off the previous
   one's response (`batchTail`) so the DO receives rapid batches in client-call order. P1/P2 keep the
   _local_ state consistent, but two quick edits open independent transactions whose `mutationFn`s
   fire **concurrent** fetches — and separate requests have no ordering guarantee (HTTP/2 muxing). The
@@ -58,7 +58,7 @@ parent's chain broken.
 
 **Don't:** route field edits through `runStructural` (per-keystroke echo-await = janky typing);
 remove the `waitForSeq` ("the POST already returned 200") — that reintroduces the revert window;
-unserialize `persistBatch` ("each batch is atomic, so order doesn't matter") — concurrent batches
+unserialize `persistBatchE` ("each batch is atomic, so order doesn't matter") — concurrent batches
 can reach the DO out of order and persist a fan (P3); split a structural op's writes back into
 per-type handler calls (the original tear); or drop `healSiblingChains` until the tripwire has been
 silent in prod for weeks.

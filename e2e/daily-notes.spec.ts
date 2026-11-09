@@ -601,6 +601,64 @@ test("Cmd+K creates and reopens an ISO day, then creates a prose date", async ({
   await expect(title).toContainText("12");
 });
 
+for (const failedClaim of ["container", "scaffold"] as const) {
+  test(`a failed ${failedClaim} claim reports failure without creating a phantom Daily note, then allows retry`, async ({
+    page,
+  }) => {
+    await load(page);
+    let failClaims = true;
+    const ordinaryWrites: string[] = [];
+    const nodeWrites: string[] = [];
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() !== "POST") return;
+      if (url.pathname === "/api/nodes")
+        nodeWrites.push(request.postData() ?? "");
+      if (
+        url.pathname === "/api/kv" &&
+        url.searchParams.get("collection") === "daily-index" &&
+        url.searchParams.get("op") !== "claim"
+      )
+        ordinaryWrites.push(request.postData() ?? "");
+    });
+    await page.route(
+      (url) =>
+        url.pathname === "/api/kv" && url.searchParams.get("op") === "claim",
+      async (route) => {
+        const { key } = Schema.decodeUnknownSync(KvClaimBody)(
+          route.request().postDataJSON(),
+        );
+        if (
+          failClaims &&
+          (failedClaim === "container"
+            ? key === "container"
+            : /^(year|month|week):/.test(key))
+        )
+          return route.fulfill({ status: 503, body: "Unavailable" });
+        return route.fallback();
+      },
+    );
+    await todayButton(page).click();
+    await expect(
+      page.getByText("Couldn't open today's daily note"),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    expect(nodeWrites).toEqual([]);
+    expect(ordinaryWrites).toEqual([]);
+    expect(errors).toEqual([]);
+    failClaims = false;
+    await todayButton(page).click();
+    await expect(page.locator("h2.zoomed-title .node-text")).toContainText(
+      String(new Date().getFullYear()),
+    );
+    await expect(page).not.toHaveURL(/\/$/);
+    expect(ordinaryWrites).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+}
+
 test("a lost claim adopts the winner's note (no duplicate on a race)", async ({
   page,
 }) => {

@@ -616,9 +616,8 @@ export function updateQueryFilter(
 }
 
 /**
- * The precomputed visible-set a `?q=` filter produces -- the shape the render
- * path (`buildVisibleRows`, the row's dimming derivation) and the plugin Seam-G
- * `ViewFilter` both consume. Generalizes the old `TagFilter`.
+ * The precomputed visible-set consumed by the render path (`buildVisibleRows`
+ * and the row's dimming derivation).
  *
  * These sets store render keys (bare node IDs until a mirror is crossed).
  * - `visibleIds`: every row that renders (matches + ancestor context + a

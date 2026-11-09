@@ -1,6 +1,7 @@
-import { expect, mock, test } from "bun:test";
+import { expect, mock, spyOn, test } from "bun:test";
 import { Effect } from "effect";
 import { createHash } from "node:crypto";
+import * as fs from "node:fs/promises";
 import {
   mkdir,
   mkdtemp,
@@ -69,6 +70,37 @@ mock.module("@napi-rs/keyring", () => ({
 
 const recordPath = (directory: string, server: string) =>
   join(directory, `${createHash("sha256").update(server).digest("hex")}.json`);
+
+test("a permanent credential-lock failure returns immediately with a secret-safe diagnostic", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dotflowy-lock-error-"));
+  const originalMkdir = fs.mkdir;
+  const denied = spyOn(fs, "mkdir").mockImplementation(
+    (path, options): Promise<undefined> => {
+      if (String(path).endsWith(".lock"))
+        return Promise.reject(
+          Object.assign(new Error("sensitive native details"), {
+            code: "EACCES",
+          }),
+        );
+      return originalMkdir(path, options).then<undefined>(() => undefined);
+    },
+  );
+  try {
+    const error = await Effect.runPromise(
+      credentialStore(dir, "https://example.test")
+        .load()
+        .pipe(Effect.timeout("1 second"), Effect.flip),
+    );
+    expect(error.message).toContain("[EACCES]");
+    expect(error.message).not.toContain("sensitive native details");
+    expect(
+      denied.mock.calls.filter(([path]) => String(path).endsWith(".lock")),
+    ).toHaveLength(1);
+  } finally {
+    denied.mockRestore();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 test("credential locks are released on failure and interruption", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dotflowy-lock-"));

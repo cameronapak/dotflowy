@@ -397,6 +397,87 @@ test("persisted cutover receipts still prevent replacing a recovered outline", a
   }
 });
 
+test("HTTP PATCH rejects an invalid batch without partial writes, then clears nullable fields without changing identity", async () => {
+  const userId = randomUUID();
+  const password = "disposable-patch-password";
+  await fixture("seed", { userId, password: await hashPassword(password) });
+  const capture = await fixture<CaptureResult>("capture", {
+    userId,
+    attemptId: randomUUID(),
+    date: "2026-11-07",
+    text: "Original content",
+  });
+  if ("error" in capture)
+    throw new Error(`fixture capture failed: ${capture.error}`);
+  const { nodeId } = capture.receipt;
+  const signin = await mf.dispatchFetch(
+    "http://fixture/api/auth/sign-in/email",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://fixture" },
+      body: JSON.stringify({ email: `${userId}@capture.test`, password }),
+    },
+  );
+  expect(signin.status).toBe(200);
+  const cookie = signin.headers
+    .getSetCookie()
+    .map((value) => value.split(";")[0])
+    .join("; ");
+  const patch = (updates: unknown[]) =>
+    mf.dispatchFetch("http://fixture/api/nodes", {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://fixture",
+        cookie,
+      },
+      body: JSON.stringify({ updates }),
+    });
+  const before = (await fixture<Inspection>("inspect", { userId })).snapshot;
+  const rejected = await patch([
+    { id: nodeId, changes: { text: "Must not land" } },
+    { id: nodeId, changes: { completed: "false" } },
+  ]);
+  expect(rejected.status).toBe(400);
+  expect(
+    (await fixture<Inspection>("inspect", { userId })).snapshot.nodes,
+  ).toEqual(before.nodes);
+  const updated = await patch([
+    {
+      id: nodeId,
+      changes: {
+        text: "Updated content",
+        kind: "paragraph",
+        bookmarkedAt: 123,
+      },
+    },
+  ]);
+  expect(updated.status).toBe(200);
+  const cleared = await patch([
+    {
+      id: nodeId,
+      changes: {
+        kind: null,
+        bookmarkedAt: null,
+        completed: false,
+        id: "forged-id",
+        origin: "forged-agent",
+      },
+    },
+  ]);
+  expect(cleared.status).toBe(200);
+  const after = (await fixture<Inspection>("inspect", { userId })).snapshot
+    .nodes;
+  expect(after.find((node) => node.id === nodeId)).toMatchObject({
+    text: "Updated content",
+    kind: null,
+    bookmarkedAt: null,
+    completed: false,
+    origin: null,
+  });
+  expect(after.some((node) => node.id === "forged-id")).toBe(false);
+});
+
 test("feedback widget config requires the pinned real session, not email, admin status or a claimed identity", async () => {
   const password = "disposable-feedback-password";
   const cookies: string[] = [];

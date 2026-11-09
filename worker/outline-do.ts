@@ -30,12 +30,14 @@ import {
   planWeekStartMigration,
   type DailyIndexRow,
 } from "../src/data/week-start-migration";
+import { WeekStartPreferenceSchema } from "../src/data/wire-schema";
 import { SNAPSHOT_VERSION } from "./backup";
 import { canResumeChangelog, planChangeFrames } from "./changelog";
 import { validateLockedPatches, validateLockedWrite } from "./lock-policy";
 import { planAddToDaily } from "./outline-ops";
 import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
 import { APP_VERSION } from "./version";
+import { NodeChangesSchema } from "./wire";
 
 // The wire types (`Node`, `ChangeOp`, `ChangeFrame`, `ServerMessage`) come from
 // the shared wire module — the one leaf the client and the Worker both derive
@@ -88,27 +90,13 @@ type SqlVal = string | number | null;
  *  writable-column allowlist at the write). */
 type PatchUpdate = (typeof NodesPatchBody.Type)["updates"][number];
 /** One value from a PATCH changes record, still uncoerced. */
-type FieldChangeValue = PatchUpdate["changes"][string];
+type FieldChangeValue = PatchUpdate["changes"][keyof PatchUpdate["changes"]];
 
 /** Columns a client may write, and which of them are stored as 0/1 booleans.
  *  The dynamic PATCH builds its SQL only from this allowlist, so it can't be
  *  injected. */
 const BOOL_COLUMNS = new Set(["isTask", "completed", "collapsed", "locked"]);
-const WRITABLE_COLUMNS = new Set([
-  "parentId",
-  "prevSiblingId",
-  "text",
-  "isTask",
-  "completed",
-  "collapsed",
-  "bookmarkedAt",
-  "locked",
-  "mirrorOf",
-  "createdAt",
-  "updatedAt",
-  // `setKind` is a field edit (a PATCH), so the column must be writable here.
-  "kind",
-]);
+const WRITABLE_COLUMNS = new Set(Object.keys(NodeChangesSchema.fields));
 
 // --- Realtime sync protocol -------------------------------------------------
 // `ChangeFrame` (the unit recordChange returns to broadcastChange — the SQL
@@ -605,12 +593,9 @@ export class UserOutlineDO extends DurableObject<Env> {
       .toArray()[0];
     if (!row) return DEFAULT_WEEK_START;
     try {
-      const decoded = Schema.decodeUnknownOption(
-        Schema.Struct({
-          key: Schema.Literal("daily:week-start"),
-          weekStart: Schema.Literals(["sunday", "monday"]),
-        }),
-      )(JSON.parse(row.value));
+      const decoded = Schema.decodeUnknownOption(WeekStartPreferenceSchema)(
+        JSON.parse(row.value),
+      );
       return decoded._tag === "Some"
         ? decoded.value.weekStart
         : DEFAULT_WEEK_START;
@@ -934,21 +919,7 @@ export class UserOutlineDO extends DurableObject<Env> {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
       const current = this.getNodes();
-      const planned: Array<{ id: string; changes: Partial<Node> }> = [];
-      for (const u of updates) {
-        const changes = Object.fromEntries(
-          Object.entries(u.changes).filter(([key]) =>
-            WRITABLE_COLUMNS.has(key),
-          ),
-        );
-        if (Object.keys(changes).length === 0) continue;
-        planned.push({
-          id: u.id,
-          // SAFETY: changes contains only WRITABLE_COLUMNS and the wire schema has already validated each corresponding Node field value.
-          changes: changes as Partial<Node>,
-        });
-      }
-      if (validateLockedPatches(current, planned, allowLockChanges))
+      if (validateLockedPatches(current, updates, allowLockChanges))
         return "locked" as const;
       const ops: ChangeOp[] = [];
       for (const u of updates) {

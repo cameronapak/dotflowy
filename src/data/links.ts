@@ -97,22 +97,6 @@ export function sanitizeLinkLabel(title: string): string {
   return title.replace(/]/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** Verbatim-match-or-drop token replacement. Find the FIRST occurrence of the
- *  exact `oldToken` in `text` and replace it with `newToken`, returning the new
- *  text. Returns null when the token is gone (the user edited the line, or the
- *  bullet changed) -- the signal to keep whatever is there now. No parsing, no
- *  fuzzy match: we only ever touch a token that is still byte-for-byte present.
- *  Shared by the unfurl label swap (ADR 0016) and the Edit Link popover's
- *  write-back (ADR 0005). */
-export function replaceLinkToken(
-  text: string,
-  oldToken: string,
-  newToken: string,
-): string | null {
-  // Delegates to the shared spliceToken (src/plugins/token-splice.ts).
-  return spliceToken(text, oldToken, newToken);
-}
-
 /** Verbatim-match-or-drop label swap (ADR 0016): replace the FIRST occurrence
  *  of the placeholder `[oldLabel](encodedUrl)` with `[newLabel](encodedUrl)`,
  *  or null when the placeholder is gone. */
@@ -122,7 +106,7 @@ export function swapLinkLabel(
   oldLabel: string,
   newLabel: string,
 ): string | null {
-  return replaceLinkToken(
+  return spliceToken(
     text,
     `[${oldLabel}](${encodedUrl})`,
     `[${newLabel}](${encodedUrl})`,

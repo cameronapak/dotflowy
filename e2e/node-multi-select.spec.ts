@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { Schema } from "effect";
 
+import { NodesPostBody } from "../worker/wire";
 import {
   openSeededOutline,
   seedOutline,
@@ -889,24 +891,77 @@ test("actions menu: Move relocates the whole run under one destination", async (
   ).toHaveCount(2);
 });
 
-test("actions menu: To-do converts every selected root in one step", async ({
+test("actions menu: To-do converts eligible sources once, skips locks, and undoes in one step", async ({
   page,
 }) => {
-  await load(page);
+  await load(page, [
+    FLAT[0]!,
+    { ...FLAT[1]!, locked: true },
+    FLAT[2]!,
+    { ...FLAT[3]!, mirrorOf: "a" },
+  ]);
   await focus(page, "a");
-  await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
-  await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press(`${MOD}+a`);
 
-  // The actions menu auto-appears anchored to the active (focus) edge.
   const menu = page.getByRole("menu", { name: "Selection actions" });
   await expect(menu).toBeVisible();
+  const writes: Array<{ method: string; body: string }> = [];
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).pathname === "/api/nodes" &&
+      request.method() !== "GET"
+    )
+      writes.push({ method: request.method(), body: request.postData() ?? "" });
+  });
+  const saved = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/nodes" &&
+      response.request().method() === "POST",
+  );
   await menu.getByRole("menuitem", { name: "To-do" }).click();
 
-  // Both selected roots are now tasks (a checkbox appears on each).
   await expect(li(page, "a").locator(".checkbox")).toBeVisible();
+  await expect(li(page, "b").locator(".checkbox")).toHaveCount(0);
+  await expect(li(page, "c").locator(".checkbox")).toBeVisible();
+  await expect(li(page, "d").locator(".checkbox")).toBeVisible();
+  expect((await saved).ok()).toBe(true);
+  expect(writes.map((write) => write.method)).toEqual(["POST"]);
+  const batch = Schema.decodeUnknownSync(NodesPostBody)(
+    JSON.parse(writes[0]!.body),
+  );
+  expect(
+    batch.ops?.map((op) => (op.op === "delete" ? op.key : op.value.id)).sort(),
+  ).toEqual(["a", "c"]);
+  await page.keyboard.press("Escape");
+  await text(page, "a").click();
+  await page.keyboard.press(`${MOD}+z`);
+  await expect(page.locator(".outline-row .checkbox")).toHaveCount(0);
+});
+
+test("mirrors-off Kind conversions change the visible ordinary row, not its former source", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("dotflowy:flag:mirrors", "off"),
+  );
+  await load(page, [
+    { ...FLAT[0]!, isTask: true },
+    { ...FLAT[1]!, mirrorOf: "a" },
+  ]);
+  await expect(li(page, "b").locator(".checkbox")).toHaveCount(0);
+  await focus(page, "b");
+  await page.keyboard.type(" /todo");
+  await page.getByRole("option", { name: /^To-do/ }).click();
   await expect(li(page, "b").locator(".checkbox")).toBeVisible();
-  // The untouched siblings stay plain bullets.
-  await expect(li(page, "c").locator(".checkbox")).toHaveCount(0);
+  await focus(page, "b");
+  await page.keyboard.press("End");
+  await page.keyboard.type(" /paragraph");
+  await page.getByRole("option", { name: /^Paragraph/ }).click();
+  await expect(li(page, "b").locator(".bullet-paragraph")).toBeVisible();
+  await expect(li(page, "b").locator(".checkbox")).toHaveCount(0);
+  await expect(li(page, "a").locator(".checkbox")).toBeVisible();
+  await expect(li(page, "a").locator(".bullet-paragraph")).toHaveCount(0);
 });
 
 test("actions menu follows the active edge DOWN, anchored below the newest node", async ({

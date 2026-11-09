@@ -14,6 +14,7 @@ import {
 } from "./focus-settings";
 import { kvFetch, kvPut, toKvRows } from "./kv-api";
 import { queryClient } from "./query-client";
+import { WeekStartPreferenceSchema, WeekStartSchema } from "./wire-schema";
 
 const KEYS = {
   bible: "editor-feature:bible",
@@ -44,10 +45,6 @@ const featureRowSchema = Schema.Struct({
   ]),
   enabled: Schema.Boolean,
 });
-const weekStartRowSchema = Schema.Struct({
-  key: Schema.Literal(KEYS.weekStart),
-  weekStart: Schema.Literals(["sunday", "monday"]),
-});
 const dailyToggleRowSchema = Schema.Struct({
   key: Schema.Literals([KEYS.dayStream, KEYS.weekStrip]),
   enabled: Schema.Boolean,
@@ -58,7 +55,7 @@ const emptyDaysRowSchema = Schema.Struct({
 });
 const rowSchema = Schema.Union([
   featureRowSchema,
-  weekStartRowSchema,
+  WeekStartPreferenceSchema,
   dailyToggleRowSchema,
   emptyDaysRowSchema,
   Schema.Struct({
@@ -425,7 +422,7 @@ export class WeekStartMigrationError extends Data.TaggedError(
 }
 
 const weekStartResponseSchema = Schema.Struct({
-  weekStart: Schema.Literals(["sunday", "monday"]),
+  weekStart: WeekStartSchema,
   seq: Schema.Number,
 });
 

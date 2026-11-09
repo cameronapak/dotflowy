@@ -13,7 +13,6 @@ import type { PluginContext } from "../plugins/types";
 
 import { usePluginChrome } from "../plugins/registry";
 import { QueryFilterBar } from "./query-filter";
-import { SUBHEADER_EXPAND_MS } from "./subheader-expand";
 
 /**
  * Contextual chrome band below the main header. Plugin subheader slots render
@@ -108,7 +107,7 @@ export function Subheader({ getCtx }: { getCtx?: () => PluginContext }) {
       }
       transition={
         !snapOpen && !reduceMotion
-          ? { duration: SUBHEADER_EXPAND_MS / 1000, ease: "easeOut" }
+          ? { duration: 0.15, ease: "easeOut" }
           : { duration: 0 }
       }
       onAnimationComplete={() => {

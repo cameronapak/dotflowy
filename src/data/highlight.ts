@@ -20,8 +20,6 @@
 // This module is DOM-free and side-effect-free; the decoration half lives in
 // src/plugins/highlight.
 
-import { spliceToken } from "../plugins/token-splice";
-
 export type HighlightColor =
   | "red"
   | "orange"
@@ -102,17 +100,4 @@ export function buildHighlightRun(
 export function stripHighlights(text: string): string {
   if (!text.includes("==")) return text;
   return text.replace(highlightRegex(), (run) => parseHighlight(run).interior);
-}
-
-/** Replace the FIRST occurrence of `oldRun` with `newRun`, or null when the
- *  text no longer contains it -- verbatim-match-or-drop, the same recolor
- *  contract as `replaceLinkToken` (a stale token drops the edit instead of
- *  corrupting the line). */
-export function spliceHighlightRun(
-  text: string,
-  oldRun: string,
-  newRun: string,
-): string | null {
-  // Delegates to the shared spliceToken (src/plugins/token-splice.ts).
-  return spliceToken(text, oldRun, newRun);
 }

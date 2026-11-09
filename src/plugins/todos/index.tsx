@@ -17,11 +17,7 @@ import { ListIcon, SquareCheckIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/plugins/kit";
 
-import { capture } from "../../data/history";
-import { setIsTask } from "../../data/mutations";
-import { runStructural } from "../../data/structural";
 import { type Node } from "../../data/tree";
-import { isProtected } from "../registry";
 import { definePlugin, type PluginContext } from "../types";
 import { TODO_FILTER_OPERATORS } from "./filter-operators";
 
@@ -127,22 +123,7 @@ export default definePlugin({
       keywords: ["todo", "task", "checkbox", "check", "done", "into"],
       available: (node) => !node.isTask,
       run: (id, ctx) => ctx.mutations.onSetTask(id, true),
-      // Node multi-selection (ADR 0018): turn every selected root into a task in
-      // ONE batch -- a single undo step, one DO frame (runStructural). Skips
-      // nodes already a task (a redundant write) and protected ones (the daily
-      // container can't become a to-do, mirroring the single-node guard); if
-      // nothing qualifies it's a clean no-op.
-      runMany: (ids, ctx) => {
-        const targets = ids.filter((id) => {
-          const n = ctx.tree.byId.get(id);
-          return !!n && !n.isTask && !isProtected(id);
-        });
-        if (targets.length === 0) return;
-        runStructural(() => {
-          capture(ctx.tree, targets[0]!);
-          for (const id of targets) setIsTask(id, true);
-        });
-      },
+      runMany: (ids, ctx) => ctx.mutations.onSetTask(ids, true),
     },
     {
       id: "bullet",

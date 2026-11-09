@@ -1,6 +1,6 @@
 {
   "name": "Dotflowy",
-  "install": "export PATH=\"$HOME/.bun/bin:$PATH\"; command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.com/install | bash -s \"bun-v1.3.14\"; export PATH=\"$HOME/.bun/bin:$PATH\"; bun install --frozen-lockfile && bun run setup",
+  "install": "export PATH=\"$HOME/.bun/bin:$PATH\"; command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.com/install | bash -s \"bun-v$(node -p 'require(\"./package.json\").engines.bun')\"; export PATH=\"$HOME/.bun/bin:$PATH\"; bun run bootstrap",
   "terminals": [
     {
       "name": "cf:dev",

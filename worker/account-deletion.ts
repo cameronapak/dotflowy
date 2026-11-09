@@ -9,7 +9,7 @@
 
 import Stripe from "stripe";
 
-import { normalizeEmail } from "./invites";
+import { normalizeEmail } from "./identity";
 
 /**
  * The owner-continuity account (OWNER_USER_ID) maps to the constant 'default'

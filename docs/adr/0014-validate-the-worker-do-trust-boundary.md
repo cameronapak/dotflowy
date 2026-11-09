@@ -87,3 +87,17 @@ behavior the docs don't promise.
 - **The happy path is unchanged.** Valid requests behave identically; `applyBatch` still returns the
   committed seq for the client's echo-hold (ADR 0009). The hardening is invisible until a body is
   malformed or a write genuinely faults.
+
+## Canonical partial updates, November 2026
+
+`src/data/wire-schema.ts` owns the Node schema for both the collection and the
+Worker. `schema.ts` preserves the collection-facing import names without a second
+definition. PATCH derives optional writable fields from that schema, excluding
+identity and write-once provenance. Unknown fields remain ignored; malformed
+known fields reject the entire request before any storage write. In particular,
+the string `"false"` is not a boolean and must not become true through SQL coercion.
+The DO's writable-column list derives from the same partial-update schema.
+
+Ordinary DO methods keep explicit synchronous transaction and post-commit
+broadcast boundaries. Their quota, lock, sequence, calendar, and return contracts
+differ; a generic commit-options helper would obscure those differences.

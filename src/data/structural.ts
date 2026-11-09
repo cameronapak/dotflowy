@@ -60,7 +60,7 @@ async function persistStructuralBatch(
  *
  *  - **P1 (atomic):** every `nodesCollection.insert/update/delete` the body runs
  *    joins ONE transaction whose `mutationFn` ships them as a single
- *    `persistBatch` request → one DO frame → one broadcast. An insert-and-repoint
+ *    `persistBatchE` request → one DO frame → one broadcast. An insert-and-repoint
  *    can no longer tear into a POST + a PATCH that land (or fail) separately.
  *  - **P2 (hold-until-echo):** the transaction doesn't resolve until its own
  *    change frame echoes back (`waitForSeq`). Because TanStack DB holds optimistic

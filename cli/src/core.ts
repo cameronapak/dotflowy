@@ -36,6 +36,17 @@ const safeErrorCode = (cause: unknown) => {
 
 // Never include native exception messages: they can contain tokens, URLs, or bodies.
 // Callers may name a safe operation, and Node-style error codes are safe to expose.
+export const ioFailure = (
+  message: string,
+  cause: unknown,
+  operation?: string,
+) => {
+  const details = [operation, safeErrorCode(cause)]
+    .filter((value) => value !== undefined)
+    .join(": ");
+  return fail(details ? `${message} [${details}]` : message);
+};
+
 export const io = <A>(
   message: string,
   run: (signal: AbortSignal) => Promise<A>,
@@ -43,12 +54,7 @@ export const io = <A>(
 ) =>
   Effect.tryPromise({
     try: run,
-    catch: (error) => {
-      const details = [operation, safeErrorCode(error)]
-        .filter((value) => value !== undefined)
-        .join(": ");
-      return fail(details ? `${message} [${details}]` : message);
-    },
+    catch: (error) => ioFailure(message, error, operation),
   });
 
 export const decode = <

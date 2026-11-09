@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { generateInviteCode, inviteEmail, normalizeEmail } from "./invites";
+import { generateInviteCode, inviteEmail } from "./invites";
 
 describe("generateInviteCode", () => {
   it("generates fresh 12-character codes without ambiguous characters", () => {
@@ -9,13 +9,6 @@ describe("generateInviteCode", () => {
     expect(first).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/);
     expect(second).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/);
     expect(second).not.toBe(first);
-  });
-});
-
-describe("normalizeEmail", () => {
-  it("trims and lowercases so mint- and redeem-time comparisons match", () => {
-    expect(normalizeEmail("  Foo@Bar.COM ")).toBe("foo@bar.com");
-    expect(normalizeEmail("a@b.com")).toBe("a@b.com");
   });
 });
 

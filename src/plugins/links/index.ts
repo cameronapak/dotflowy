@@ -10,7 +10,6 @@ import { LinkIcon } from "lucide-react";
 
 import {
   getSelectionRange,
-  mdPunct,
   readSource,
   sourceOffsetUpTo,
 } from "../../components/inline-code";
@@ -25,7 +24,7 @@ import {
   LINK_PATTERN,
 } from "../../data/links";
 import { getTreeIndex } from "../../data/tree-store";
-import { isRevealed, resolveNodeId } from "../token-kit";
+import { isRevealed, mdPunct, resolveNodeId } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
 import { LINK_FILTER_OPERATORS } from "./filter-operators";
 import {

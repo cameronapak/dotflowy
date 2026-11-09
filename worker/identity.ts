@@ -37,6 +37,10 @@ export interface IdentityEnv {
  *  import. */
 export const OWNER_DO_ID = "default";
 
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 /**
  * The Durable Object name for a signed-in user's outline.
  *

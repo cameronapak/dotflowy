@@ -30,7 +30,6 @@ if (!existsSync(NODE_MODULES)) {
   process.exit(1);
 }
 
-// 1. Ensure .dev.vars exists.
 if (!existsSync(DEV_VARS)) {
   copyFileSync(DEV_VARS_EXAMPLE, DEV_VARS);
   log("created .dev.vars from .dev.vars.example");
@@ -38,8 +37,7 @@ if (!existsSync(DEV_VARS)) {
   log(".dev.vars already present - leaving it");
 }
 
-// 2. Ensure BETTER_AUTH_SECRET is set (line-oriented rewrite so commented
-// optional keys stay untouched).
+// Preserve commented optional keys and never rotate an existing secret.
 const lines = readFileSync(DEV_VARS, "utf8").split("\n");
 const idx = lines.findIndex((l) => l.startsWith("BETTER_AUTH_SECRET="));
 const current = idx >= 0 ? lines[idx].slice("BETTER_AUTH_SECRET=".length) : "";
@@ -51,7 +49,6 @@ if (idx >= 0 && (current === "replace-me" || current.trim() === "")) {
   log("BETTER_AUTH_SECRET already set - leaving it");
 }
 
-// 3. Apply local D1 schema.
 log("applying local D1 schema (db:migrate:local)...");
 const migrate = Bun.spawn(["bun", "run", "db:migrate:local"], {
   cwd: ROOT,
@@ -63,7 +60,6 @@ if (code !== 0) {
   process.exit(1);
 }
 
-// 4. Warm the opensrc cache with the Effect v4 source (non-fatal).
 log("warming the Effect v4 source cache (opensrc)...");
 const warm = Bun.spawn(["bunx", "opensrc", "fetch", "Effect-TS/effect-smol"], {
   cwd: ROOT,
@@ -74,5 +70,5 @@ if ((await warm.exited) !== 0) {
 }
 
 log("Setup complete. Next:");
-log("  bun run dev          # start the app (http://localhost:3000)");
+log("  bun run cf:dev       # start the app (http://localhost:8787)");
 log("  Sign up with invite code: dev-invite");

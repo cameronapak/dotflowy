@@ -49,7 +49,6 @@ import {
   backupPrefix,
   backupTargets,
   isBackupDateKey,
-  isSupportedSnapshotVersion,
 } from "./backup";
 import { handleCaptureKeys, handleCaptureRequest } from "./capture";
 import { lookupEmbedE } from "./embeds";
@@ -59,11 +58,11 @@ import {
   isAdminSession,
   isPlausibleEmail,
   isSignupOpen,
+  normalizeEmail,
   resolveUserId,
 } from "./identity";
 import {
   mintInvites,
-  normalizeEmail,
   pendingWaitlistEmails,
   type InviteBatchResult,
 } from "./invites";
@@ -1046,13 +1045,6 @@ function handleApiRequest(
             new BadRequest({ reason: `snapshot rejected: ${issue.message}` }),
         ),
       );
-      if (!isSupportedSnapshotVersion(snapshot.version)) {
-        return yield* Effect.fail(
-          new BadRequest({
-            reason: `unknown snapshot version ${snapshot.version}`,
-          }),
-        );
-      }
       const snapshotStub = env.USER_OUTLINE.get(
         env.USER_OUTLINE.idFromName(doName),
       );
