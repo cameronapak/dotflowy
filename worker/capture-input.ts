@@ -43,7 +43,8 @@ export interface CaptureInput {
 }
 
 export type CaptureResult =
-  | { receipt: CaptureReceipt; replayed: boolean }
+  | { receipt: CaptureReceipt; replayed: true }
+  | { receipt: CaptureReceipt; replayed: false; nodeIds: string[] }
   | { error: "node_limit" | "attempt_conflict" };
 
 /** Preserve Markdown structure for intake; only standalone URLs are rewritten. */

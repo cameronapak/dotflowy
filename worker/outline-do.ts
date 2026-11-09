@@ -800,6 +800,7 @@ export class UserOutlineDO extends DurableObject<Env> {
             monthId: claim(chain.monthKey),
             weekId: claim(chain.weekKey),
           };
+      const nodeIds: string[] = [];
       const plan = planAddSubtreeToDaily(index, {
         dateKey: input.date,
         weekStart,
@@ -808,7 +809,11 @@ export class UserOutlineDO extends DurableObject<Env> {
         ...levels,
         keyByNodeId: new Map([...ids].map(([key, id]) => [id, key])),
         nodes: parseMarkdownForest(input.text),
-        newId: () => crypto.randomUUID(),
+        newId: () => {
+          const id = crypto.randomUUID();
+          nodeIds.push(id);
+          return id;
+        },
         maxNodes: PASTE_MAX_NODES,
         origin: null,
         timestamp: now,
@@ -861,27 +866,30 @@ export class UserOutlineDO extends DurableObject<Env> {
         input.date,
         now,
       );
-      const result: CaptureResult = { receipt, replayed: false };
+      const result: CaptureResult = { receipt, replayed: false, nodeIds };
       return { result, frames };
     });
     this.broadcastChange(committed.frames);
     return committed.result;
   }
 
-  /** Only the untouched node created by this receipt may receive enrichment.
+  /** Only untouched nodes created with this receipt may receive enrichment.
    *  Replays/deletion never recreate it; the compare and patch are atomic. */
   upgradeCaptureText(
     attemptId: string,
     expected: string,
     text: string,
+    nodeId?: string,
   ): boolean {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
       const row = this.sql
         .exec<NodeRow & Record<string, SqlStorageValue>>(
-          `SELECT n.* FROM nodes n JOIN capture_receipt r ON n.id = r.nodeId
-         WHERE r.attemptId = ? AND n.text = ? AND n.updatedAt = r.createdAt`,
+          `SELECT n.* FROM nodes n JOIN capture_receipt r ON n.createdAt = r.createdAt
+         WHERE r.attemptId = ? AND n.id = COALESCE(?, r.nodeId)
+         AND n.text = ? AND n.updatedAt = r.createdAt`,
           attemptId,
+          nodeId ?? null,
           expected,
         )
         .toArray()[0];

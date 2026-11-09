@@ -220,28 +220,34 @@ export const handleCaptureRequest = Effect.fn("Capture.request")(
           ctx.waitUntil(
             Effect.runPromise(
               Effect.gen(function* () {
-                const first = parseMarkdownForest(normalized.text)[0];
-                if (!first || first.literal) return;
-                // A supplied title only labels a standalone URL, never prose.
-                const before =
-                  input.title?.trim() && bareHttpUrl(input.text)
-                    ? first.text
-                    : "";
-                const text = yield* unfurlTextE(before, first.text, (url) =>
-                  rateLimitedTitleE(
-                    url,
-                    env.UNFURL_LIMIT,
-                    resolveUserId(key.userId, env),
-                  ),
-                );
-                if (text === first.text) return;
-                const liveKey = yield* Effect.promise(() =>
-                  authenticateCaptureKey(env.DB, authorization, Date.now()),
-                );
-                if (!liveKey) return;
-                yield* Effect.promise(() =>
-                  stub.upgradeCaptureText(attemptId, first.text, text),
-                );
+                // The planner mints ids in depth-first preorder, matching this
+                // walk. Keep literal lines in the walk, but never enrich them.
+                const stack = parseMarkdownForest(normalized.text).reverse();
+                for (const nodeId of result.nodeIds) {
+                  const node = stack.pop()!;
+                  stack.push(...[...node.children].reverse());
+                  if (node.literal) continue;
+                  // A supplied title only labels a standalone URL, never prose.
+                  const before =
+                    input.title?.trim() && bareHttpUrl(input.text)
+                      ? node.text
+                      : "";
+                  const text = yield* unfurlTextE(before, node.text, (url) =>
+                    rateLimitedTitleE(
+                      url,
+                      env.UNFURL_LIMIT,
+                      resolveUserId(key.userId, env),
+                    ),
+                  );
+                  if (text === node.text) continue;
+                  const liveKey = yield* Effect.promise(() =>
+                    authenticateCaptureKey(env.DB, authorization, Date.now()),
+                  );
+                  if (!liveKey) return;
+                  yield* Effect.promise(() =>
+                    stub.upgradeCaptureText(attemptId, node.text, text, nodeId),
+                  );
+                }
               }),
             ).catch(() => {
               console.warn("capture title lookup failed");

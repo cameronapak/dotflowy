@@ -153,7 +153,7 @@ beforeAll(async () => {
             UNFURL_LIMIT: {
               type: "rate-limit",
               namespace: "1004",
-              simple: { limit: 1, period: 60 },
+              simple: { limit: 30, period: 60 },
             },
             BETTER_AUTH_SECRET: {
               type: "text",
@@ -637,6 +637,36 @@ test("Markdown capture creates typed nodes atomically and replays the whole fore
   ]);
   expect(snapshot.nodes).toHaveLength(13);
   assertSiblingChains(snapshot.nodes);
+});
+
+test("Markdown capture enriches later roots and children but skips literal and authored labels", async () => {
+  const { userId, key } = await account();
+  const prefix = `https://fixture.unfurl.test/${randomUUID()}`;
+  const payload = {
+    attemptId: randomUUID(),
+    date: "2026-11-09",
+    text: `- Notes\n  - [ ] Read ${prefix}/child\n- Later ${prefix}/later\n\`\`\`\n${prefix}/literal\n\`\`\`\n[Authored](${prefix}/authored)\nAfter ${prefix}/after`,
+  };
+  const saved = await api("/api/capture", key, payload);
+  expect(saved.response.status).toBe(200);
+  let texts: string[] = [];
+  const deadline = performance.now() + 3_000;
+  do {
+    const { snapshot } = await fixture<Inspection>("inspect", { userId });
+    texts = snapshot.nodes.map((node) => node.text);
+    if (texts.includes(`After [Ordinary page](${prefix}/after)`)) break;
+  } while (performance.now() < deadline);
+  expect(texts).toContain(`Read [Ordinary page](${prefix}/child)`);
+  expect(texts).toContain(`Later [Ordinary page](${prefix}/later)`);
+  expect(texts).toContain(`After [Ordinary page](${prefix}/after)`);
+  expect(texts).toContain(`${prefix}/literal`);
+  expect(texts).toContain(`[Authored](${prefix}/authored)`);
+  expect(outboundUrls.filter((url) => url.startsWith(prefix))).toEqual([
+    `${prefix}/child`,
+    `${prefix}/later`,
+    `${prefix}/after`,
+  ]);
+  expect((await api("/api/capture", key, payload)).body!.replayed).toBe(true);
 });
 
 test("concurrent distinct captures make one scaffold and a valid sibling chain", async () => {

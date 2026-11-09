@@ -67,6 +67,8 @@ and import. End-to-end real-device testing remains a general-release requirement
   The unchanged receipt's `nodeId` identifies the first root; retries replay the
   whole capture without reinserting any nodes. No task chooser or attachment
   conversion is added. Existing captures are not converted retroactively.
+  Preserve background title enrichment across every new nonliteral node, using
+  the existing guarded lookup and untouched-node check; custom labels stay intact.
 - **Device-local Today.** Use the phone's local date at submission, not its date
   when composition began or a saved home timezone. Keep that date unchanged
   throughout retries. No date picker or silent UTC fallback. The endpoint permits
