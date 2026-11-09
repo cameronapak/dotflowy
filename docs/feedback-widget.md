@@ -52,6 +52,17 @@ configured, the script loads for the owner even when the button is hidden;
 other accounts' ordinary app sessions never load it. This controls the app's
 automatic loading, not what someone can execute manually in their own browser.
 
+### Keyboard shortcut priority
+
+Amp uses Cmd+Period on macOS and Ctrl+Period elsewhere to show or hide its
+button. Its window-capture listener stops the event before node keymaps run.
+The loader installs an earlier capture listener so an enabled, focused node
+editor keeps that chord for zooming into its node. It invokes the node keymap's
+registered zoom action, preserving mirror targets and menu gating. Other keys
+and non-node surfaces retain Amp's behavior. You can still click the review
+button or right-click it and choose **Hide Review Button**. Open `?amp` to show
+it again without using the shortcut.
+
 ## Public configuration and secrets
 
 The client ID in Amp's script tag and the allowed app origin are public

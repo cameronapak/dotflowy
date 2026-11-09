@@ -93,7 +93,18 @@ test("owner feedback loads once and session loss destroys its document without a
     scriptLoads++;
     return route.fulfill({
       contentType: "text/javascript",
-      body: "window.__feedbackTestLoaded = true;",
+      body: `
+        window.__feedbackTestLoaded = true;
+        window.__feedbackToggles = 0;
+        window.addEventListener("keydown", (event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === "." &&
+              !event.altKey && !event.shiftKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            window.__feedbackToggles++;
+          }
+        }, true);
+      `,
     });
   });
   await page.route("**/api/feedback-widget", (route) =>
@@ -109,10 +120,26 @@ test("owner feedback loads once and session loss destroys its document without a
   await expect
     .poll(() => page.evaluate(() => "__feedbackTestLoaded" in window))
     .toBe(true);
+  // Amp's real widget consumes Mod+. in window capture, even when hidden.
+  // Node zoom must win there without disabling feedback in other surfaces.
+  await text(page, "alpha").click();
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(page).toHaveURL(/\/alpha$/);
+  expect(
+    await page.evaluate(() =>
+      "__feedbackToggles" in window ? window.__feedbackToggles : null,
+    ),
+  ).toBe(0);
   // Ordinary SPA navigation must not request the script again.
   await page.getByRole("button", { name: /Account and help/ }).click();
   await page.getByRole("menuitem", { name: /^settings/i }).click();
   await expect(page).toHaveURL(/\/settings/);
+  await page.keyboard.press("ControlOrMeta+.");
+  expect(
+    await page.evaluate(() =>
+      "__feedbackToggles" in window ? window.__feedbackToggles : null,
+    ),
+  ).toBe(1);
   expect(scriptLoads).toBe(1);
   await page.route("**/api/auth/get-session", (route) =>
     route.fulfill({ json: null }),
