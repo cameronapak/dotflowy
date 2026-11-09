@@ -15,6 +15,7 @@ import {
   selectAdjacentAtom,
 } from "./inline-code";
 import { openInlineTargetAtCaret } from "./link-keymap";
+import { nodeZoomShortcuts } from "./node-zoom-shortcut";
 
 interface BulletKeymapArgs {
   node: Node;
@@ -95,6 +96,17 @@ export function useBulletKeymap({
       el.removeEventListener("blur", onBlur);
     };
   }, [textRef]);
+
+  // Let the feedback gate invoke the SAME node action before Amp consumes
+  // Mod+. in window capture. Keep the ordinary keymap for sessions without Amp.
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el || !enabled) return;
+    nodeZoomShortcuts.set(el, () => commands.onZoom(node.id));
+    return () => {
+      nodeZoomShortcuts.delete(el);
+    };
+  }, [textRef, enabled, commands, node.id]);
 
   // Software keyboards can send either Backspace or beforeinput deletion
   // intent. The iPhone trace has no beforeinput on an empty contentEditable.
