@@ -48,3 +48,60 @@ test("a #tag chip filters to matches; Clear restores the view and closes the sub
   const subheader = page.locator('[aria-label="Active filters"]');
   await expect(subheader).toBeHidden();
 });
+
+test("inline tags fit their text in zoomed titles and regular nodes at every reading size", async ({
+  page,
+}) => {
+  await seedOutline(page, [
+    {
+      id: "project",
+      parentId: null,
+      prevSiblingId: null,
+      text: "Project #important",
+    },
+    {
+      id: "child",
+      parentId: "project",
+      prevSiblingId: null,
+      text: "A regular node #important",
+    },
+  ]);
+  await openSeededOutline(page, { path: "/project", anchorId: "child" });
+  const chips = page.locator('.node-text .tag[data-tag="important"]');
+  await expect(chips).toHaveCount(2);
+  await page.evaluate(() => document.fonts.ready);
+
+  for (const size of ["small", "default", "large"]) {
+    await page.evaluate((size) => {
+      document.documentElement.dataset.textSize = size;
+    }, size);
+    const boxes = await chips.evaluateAll((els) =>
+      els.map((el) => {
+        const pill = el.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const text = range.getBoundingClientRect();
+        return {
+          title: !!el.closest(".zoomed-title"),
+          height: pill.height,
+          topSpace: text.top - pill.top,
+          bottomSpace: pill.bottom - text.bottom,
+        };
+      }),
+    );
+    for (const box of boxes) {
+      // Text must fit inside the pill, not be cropped by its overflow mask.
+      expect(
+        box.topSpace,
+        `${size}: space above tag text`,
+      ).toBeGreaterThanOrEqual(0);
+      expect(
+        box.bottomSpace,
+        `${size}: space below tag text`,
+      ).toBeGreaterThanOrEqual(0);
+    }
+    expect(boxes.find((box) => box.title)!.height).toBeGreaterThan(
+      boxes.find((box) => !box.title)!.height,
+    );
+  }
+});
