@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.33.9
+
+### Patch Changes
+
+- 71f9674: Interpret Markdown on external capture intake so task checkboxes, lists, and nested notes become real nodes without updating installed Apple Shortcuts.
+
 ## 1.33.8
 
 ### Patch Changes
