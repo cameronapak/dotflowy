@@ -32,7 +32,6 @@ test("Cmd+K plugin settings stay reachable when disabled and share Settings pref
   await expect(page.locator("[data-bible-ref]")).toHaveCount(0);
   await action("Bible references", "Turn on Bible references");
   await expect(page.locator("[data-bible-ref]")).toBeVisible();
-  await action("Day stream", "Turn off Day stream");
   await action("Week strip", "Turn off Week strip");
   await action("Daily notes", "Turn off Daily notes");
   await action("Daily notes", "Turn on Daily notes");
@@ -98,7 +97,7 @@ test("feature switches default on and save independently across reloads", async 
   await page.getByRole("button", { name: "Daily notes options" }).click();
   await expect(
     page.getByRole("switch", { name: "Day stream", exact: true }),
-  ).toBeEnabled();
+  ).toBeDisabled();
   await daily.click();
   await expect(daily).toBeEnabled();
   await page.reload();
@@ -106,6 +105,110 @@ test("feature switches default on and save independently across reloads", async 
   await expect(daily).toBeEnabled();
   await expect(bible).not.toBeChecked();
   await expect(daily).not.toBeChecked();
+});
+
+for (const enabled of [undefined, true, false]) {
+  test(`Day stream stays unavailable with saved preference ${enabled}`, async ({
+    page,
+  }) => {
+    const stored =
+      enabled === undefined
+        ? []
+        : [
+            {
+              key: "daily:day-stream",
+              value: { key: "daily:day-stream", enabled },
+            },
+          ];
+    await page.route("**/api/auth/subscription/list", (route) =>
+      route.fulfill({ json: [] }),
+    );
+    await seedOutline(page, TREE, { kv: { "account-prefs": stored } });
+    await page.goto("/settings#daily");
+    const stream = page.getByRole("switch", {
+      name: "Day stream",
+      exact: true,
+    });
+    // Route mounting uses the test deadline, not an assertion's 5s budget.
+    await stream.waitFor({ state: "visible" });
+    await expect(
+      page.getByRole("switch", { name: "Week strip", exact: true }),
+    ).toBeEnabled();
+    await expect(stream).toBeDisabled();
+    await expect(stream).not.toBeChecked();
+    await expect(stream).toHaveAccessibleDescription(
+      /We're working to bring it back/,
+    );
+    await expect(
+      page.getByRole("radio", { name: "Fold", exact: true }),
+    ).toBeDisabled();
+    // Refreshes and reloads cannot restore a prior opt-in.
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.reload();
+    await stream.waitFor({ state: "visible" });
+    await expect(stream).toBeDisabled();
+    await expect(stream).not.toBeChecked();
+    await page.keyboard.press("ControlOrMeta+k");
+    await page.getByPlaceholder(/Search nodes and actions/).fill("Day stream");
+    await expect(
+      page.getByRole("option", { name: /Turn (on|off) Day stream/ }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    const prefs = await page.evaluate(() =>
+      fetch("/api/kv?collection=account-prefs").then((r) => r.json()),
+    );
+    expect(
+      prefs.filter((row: { key: string }) => row.key === "daily:day-stream"),
+    ).toEqual(stored.map((row) => row.value));
+  });
+}
+
+test("old stream links and calendar navigation stay single-day with a saved opt-in", async ({
+  page,
+}) => {
+  const nextKey = "2030-04-13";
+  await seedOutline(
+    page,
+    [
+      { id: "day", parentId: null, prevSiblingId: null, text: "April 12" },
+      {
+        id: "entry",
+        parentId: "day",
+        prevSiblingId: null,
+        text: "Keep this note",
+      },
+      { id: "next", parentId: null, prevSiblingId: "day", text: "April 13" },
+    ],
+    {
+      kv: {
+        "account-prefs": [
+          {
+            key: "daily:day-stream",
+            value: { key: "daily:day-stream", enabled: true },
+          },
+        ],
+        "daily-index": [
+          { key: "2030-04-12", value: { key: "2030-04-12", nodeId: "day" } },
+          { key: nextKey, value: { key: nextKey, nodeId: "next" } },
+        ],
+      },
+    },
+  );
+  // The path's anchor wins over the old stream's neighboring-day query.
+  await page.goto(`/day?day=${nextKey}`);
+  await page.locator("h2.zoomed-title").waitFor({ state: "visible" });
+  await expect(page.locator("h2.zoomed-title")).toContainText("April 12");
+  await expect(page.locator('li[data-node-id="entry"] .node-text')).toHaveText(
+    "Keep this note",
+  );
+  await expect(page.locator("[data-stream-item]")).toHaveCount(0);
+  await page
+    .getByRole("navigation", { name: "Week calendar" })
+    .locator(`[data-day-key="${nextKey}"]`)
+    .click();
+  await expect(page).toHaveURL(/\/next$/);
+  await expect(page.locator("h2.zoomed-title")).toContainText("April 13");
+  await expect(page.locator("[data-stream-item]")).toHaveCount(0);
 });
 
 test("Week start remains available while Daily is off and activates after migration", async ({

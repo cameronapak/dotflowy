@@ -9,10 +9,10 @@ test("navigation waits for the lazy editor before checking saved content", async
     { id: "a", parentId: null, prevSiblingId: null, text: "Anchor" },
     { id: "b", parentId: null, prevSiblingId: "a", text: "Before" },
   ]);
-  await openSeededOutline(page, { anchorId: "a" });
-  const nodes: ApiNode[] = await page.evaluate(async () =>
-    (await fetch("/api/nodes")).json(),
-  );
+  // Arrange a saved backend change without booting the editor twice. The app
+  // must read it after bootstrap; no earlier editor state can satisfy the check.
+  const response = await page.goto("/api/nodes");
+  const nodes: ApiNode[] = await response!.json();
   await store.injectExternalChange([
     {
       op: "update",
@@ -32,7 +32,7 @@ test("navigation waits for the lazy editor before checking saved content", async
     markEntered = resolve;
   });
   let held = false;
-  // Install after the initial mount; hold only this test's next lazy bootstrap.
+  // Hold this test's first lazy editor bootstrap, not the outline API read.
   await page.route(
     (url) => url.pathname === "/src/components/OutlineEditor.tsx",
     async (route) => {
@@ -45,7 +45,7 @@ test("navigation waits for the lazy editor before checking saved content", async
     { times: 1 },
   );
   let ready = false;
-  const reopening = openSeededOutline(page, { anchorId: "a" }).then(() => {
+  const opening = openSeededOutline(page, { anchorId: "a" }).then(() => {
     ready = true;
   });
   try {
@@ -60,7 +60,7 @@ test("navigation waits for the lazy editor before checking saved content", async
     expect(ready).toBe(false);
   } finally {
     release();
-    await reopening;
+    await opening;
   }
   await expect(text(page, "b")).toHaveText("Saved change");
 });

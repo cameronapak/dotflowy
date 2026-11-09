@@ -10,6 +10,9 @@ import {
   type ApiNode,
 } from "./fixtures";
 
+// Keep the stream journeys for its return, but do not enable a test-only bypass.
+test.skip(true, "Day stream is temporarily unavailable (ADR 0070)");
+
 // ADR 0070: a zoomed day note continues into the days around it. Fixed days far
 // from "now", so the stream around them is all Empty days but these two.
 const DAY = "2030-06-12";

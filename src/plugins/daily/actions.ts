@@ -19,11 +19,6 @@ export function dailyGlobalActions(): GlobalActionSpec[] {
   const prefs = peekEditorFeatures();
   const toggles: { key: DailyToggle; label: string; description: string }[] = [
     {
-      key: "dayStream",
-      label: "Day stream",
-      description: "Scroll from one day to the next",
-    },
-    {
       key: "weekStrip",
       label: "Week strip",
       description: "Show the week's days above a daily note",

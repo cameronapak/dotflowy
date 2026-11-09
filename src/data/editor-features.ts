@@ -138,7 +138,7 @@ const INITIAL: FeatureSnapshot = {
   externalEmbedsSaving: false,
   weekStart: DEFAULT_WEEK_START,
   weekStartSaving: false,
-  dayStream: true,
+  dayStream: false,
   weekStrip: true,
   emptyDays: "show",
   focus: DEFAULT_FOCUS_SETTINGS,
@@ -163,15 +163,15 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
   const focusSessionsRow = rows.find((r) => r.key === KEYS.focusSessions);
   const externalEmbedsRow = rows.find((r) => r.key === KEYS.externalEmbeds);
   const weekStartRow = rows.find((r) => r.key === KEYS.weekStart);
-  const dayStreamRow = rows.find((r) => r.key === KEYS.dayStream);
   const weekStripRow = rows.find((r) => r.key === KEYS.weekStrip);
   const emptyDaysRow = rows.find((r) => r.key === KEYS.emptyDays);
   const focusRow = rows.find((r) => r.key === KEYS.focus);
   const focus =
     focusRow?.key === KEYS.focus ? focusRow.settings : DEFAULT_FOCUS_SETTINGS;
+  // Temporarily suspend the stream, including saved opt-ins, without changing
+  // account data. Keep the preference schema for its eventual return (ADR 0070).
+  const dayStream = false;
   // Missing rows mean the defaults (ADR 0070).
-  const dayStream =
-    dayStreamRow && "enabled" in dayStreamRow ? dayStreamRow.enabled : true;
   const weekStrip =
     weekStripRow && "enabled" in weekStripRow ? weekStripRow.enabled : true;
   const emptyDays =
@@ -347,6 +347,8 @@ export async function setDailyToggle(
   option: DailyToggle,
   enabled: boolean,
 ): Promise<void> {
+  // Stale actions must not overwrite the retained stream preference either.
+  if (option === "dayStream") return;
   await loadEditorFeatures();
   const key = KEYS[option];
   const transaction = collection.has(key)
