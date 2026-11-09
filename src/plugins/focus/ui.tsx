@@ -91,7 +91,9 @@ async function popOut() {
       popup.document.head.append(style.cloneNode(true));
     // Share loaded faces with the floating document rather than reloading them.
     for (const face of document.fonts) popup.document.fonts.add(face);
-    popup.document.body.className = "bg-background text-foreground";
+    // A floating window sits on the desktop, not the page, so the whole window
+    // is the primary fill in every state rather than the page surface (ADR 0074).
+    popup.document.body.className = "bg-primary text-primary-foreground";
     const root = createRoot(popup.document.body);
     root.render(<FocusSurface card />);
     publishPip();
@@ -135,6 +137,23 @@ function timer(ms: number) {
   return `${ms < 0 ? "+" : ""}${clock}`;
 }
 
+// Controls on the primary fill. A ring tinted like the resting border reads as
+// no change on the fill, so focus draws an offset outline in the text color.
+const fillFocus =
+  "focus-visible:ring-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-primary-foreground";
+const fillGhost = cn(
+  fillFocus,
+  "text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground dark:hover:bg-primary-foreground/15",
+);
+const fillOutline = cn(
+  fillFocus,
+  "border-primary-foreground/40 bg-transparent text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground dark:border-primary-foreground/40 dark:bg-transparent dark:hover:bg-primary-foreground/15",
+);
+const fillPrimary = cn(
+  fillFocus,
+  "bg-primary-foreground text-primary hover:bg-primary-foreground/85",
+);
+
 function Reflection({
   session,
   card,
@@ -176,7 +195,14 @@ function Reflection({
         </FieldLabel>
         <Input
           id={card ? "focus-reflect-pip" : "focus-reflect"}
-          className={cn(!card && "flex-1")}
+          className={
+            card
+              ? cn(
+                  fillFocus,
+                  "border-primary-foreground/60 bg-transparent text-primary-foreground placeholder:text-primary-foreground/70 dark:bg-transparent",
+                )
+              : "flex-1"
+          }
           placeholder="Add a reflection…"
           value={text}
           disabled={saving}
@@ -187,12 +213,18 @@ function Reflection({
           }}
         />
       </Field>
-      <Button size="sm" type="submit" disabled={saving || !text.trim()}>
+      <Button
+        size="sm"
+        type="submit"
+        className={card ? fillPrimary : undefined}
+        disabled={saving || !text.trim()}
+      >
         Save
       </Button>
       <Button
         size="sm"
         variant="ghost"
+        className={card ? fillGhost : undefined}
         disabled={saving}
         onClick={() =>
           updateSession((current) =>
@@ -276,39 +308,21 @@ function FocusSurface({
 
   if (!session)
     return card ? (
-      <p className="p-4 text-sm text-muted-foreground">No focus session</p>
+      <p className="p-4 text-sm opacity-75">No focus session</p>
     ) : null;
   const ms = remaining(session, now);
   const up = session.phase === "focus" && ms <= 0;
   const breaking = session.phase === "break" || session.phase === "ready";
-  const progress = Math.max(0, Math.min(1, ms / session.duration));
+  // Overtime fills the bar: time is up without adding a hue.
+  const progress = up ? 1 : Math.max(0, Math.min(1, ms / session.duration));
   const task = node?.isTask && node.kind === null;
-  // The running band is a solid primary fill, so it stands out against the
-  // page in both themes without adding a hue (ADR 0074). The floating card and
-  // the reflection field keep the page surface.
-  const fill = !card && session.phase !== "reflect";
-  // A ring tinted like the resting border reads as no change on the fill, so
-  // focus draws an offset outline in the text color instead.
-  const fillFocus =
-    "focus-visible:ring-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-primary-foreground";
-  const ghost = fill
-    ? cn(
-        fillFocus,
-        "text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground dark:hover:bg-primary-foreground/15",
-      )
-    : undefined;
-  const outline = fill
-    ? cn(
-        fillFocus,
-        "border-primary-foreground/40 bg-transparent text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground dark:border-primary-foreground/40 dark:bg-transparent dark:hover:bg-primary-foreground/15",
-      )
-    : undefined;
-  const primary = fill
-    ? cn(
-        fillFocus,
-        "bg-primary-foreground text-primary hover:bg-primary-foreground/85",
-      )
-    : undefined;
+  // The running band and the whole PiP window are a solid primary fill, so they
+  // stand out against the page and the desktop in both themes without adding a
+  // hue (ADR 0074). Only the in-page reflection field keeps the page surface.
+  const fill = card || session.phase !== "reflect";
+  const ghost = fill ? fillGhost : undefined;
+  const outline = fill ? fillOutline : undefined;
+  const primary = fill ? fillPrimary : undefined;
   const controls =
     session.phase === "reflect" ? (
       <Reflection key={session.id} session={session} card={card} />
@@ -449,7 +463,7 @@ function FocusSurface({
         )}
       >
         {card && (
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="truncate text-xs opacity-75">
             {breaking ? "Break · " : up ? "Time is up · " : ""}
             {parent ? display(parent.text) : "Home"}
           </p>
@@ -511,12 +525,8 @@ function FocusSurface({
                     className={cn(
                       "size-1.5 rounded-full",
                       i < ((session.round - 1) % session.settings.rounds) + 1
-                        ? card
-                          ? "bg-foreground"
-                          : "bg-primary-foreground"
-                        : card
-                          ? "bg-foreground/20"
-                          : "bg-primary-foreground/25",
+                        ? "bg-primary-foreground"
+                        : "bg-primary-foreground/25",
                     )}
                   />
                 ))}
@@ -531,22 +541,17 @@ function FocusSurface({
             >
               {session.phase === "ready" ? "Ready when you are" : timer(ms)}
               {session.pausedAt !== null && (
-                <span
-                  className={cn(
-                    "ml-2 text-xs",
-                    card ? "text-muted-foreground" : "opacity-75",
-                  )}
-                >
-                  Paused
-                </span>
+                <span className="ml-2 text-xs opacity-75">Paused</span>
               )}
             </span>
             {card && (
-              <div className="h-[3px] w-full bg-muted">
+              <div className="h-[3px] w-full bg-primary-foreground/20">
                 <div
                   className={cn(
                     "h-full",
-                    breaking ? "bg-muted-foreground" : "bg-foreground",
+                    breaking
+                      ? "bg-primary-foreground/50"
+                      : "bg-primary-foreground",
                   )}
                   style={{ width: `${progress * 100}%` }}
                 />
@@ -575,14 +580,19 @@ function FocusSurface({
             !up &&
             session.phase !== "ready" &&
             session.phase !== "reflect" && (
-              <Button variant="outline" size="sm" onClick={returnToFocus}>
+              <Button
+                variant="outline"
+                size="sm"
+                className={outline}
+                onClick={returnToFocus}
+              >
                 Back to focus
               </Button>
             )}
           {controls}
         </div>
       </div>
-      {fill && (
+      {fill && !card && (
         <>
           <div className="absolute bottom-0 left-0 h-1 w-full bg-primary-foreground/20" />
           <div
@@ -590,8 +600,7 @@ function FocusSurface({
               "absolute bottom-0 left-0 h-1",
               breaking ? "bg-primary-foreground/50" : "bg-primary-foreground",
             )}
-            // Overtime fills the bar: time is up without adding a hue.
-            style={{ width: `${(up ? 1 : progress) * 100}%` }}
+            style={{ width: `${progress * 100}%` }}
           />
         </>
       )}
