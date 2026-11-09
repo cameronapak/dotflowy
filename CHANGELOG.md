@@ -1,5 +1,13 @@
 # dotflowy
 
+## 1.33.0
+
+### Minor Changes
+
+- 20a98c7: Use Liquidglass bottom sheets on narrow screens, with half-height opening,
+  handle expansion, keyboard-aware sizing, and corrected dismissal and focus
+  handoffs. Desktop menus stay unchanged.
+
 ## 1.32.3
 
 ### Patch Changes
