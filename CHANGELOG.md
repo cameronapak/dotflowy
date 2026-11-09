@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.33.2
+
+### Patch Changes
+
+- a4fe420: Bottom sheets stay anchored to the bottom while opening on iOS. Tapping a menu no longer highlights its first item; keyboard opening and form focus still work.
+
 ## 1.33.1
 
 ### Patch Changes
