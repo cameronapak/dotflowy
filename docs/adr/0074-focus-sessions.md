@@ -32,8 +32,8 @@ a session never dims the outline.
   near-white, so the band reads as a bright bar, like a primary button. Time
   is up fills the line across the band; the label goes full strength and Done
   becomes the filled button. Focused controls on the fill draw a 2px offset
-  outline in the text color. The reflection field and the PiP card keep the
-  page surface. The title keeps at least 18rem, so crowded controls wrap below
+  outline in the text color. The in-page reflection field keeps the page
+  surface. The title keeps at least 18rem, so crowded controls wrap below
   it instead of truncating it, and it uses `dir="auto"` with a `title`
   tooltip. Timers past an hour read `h:mm:ss`.
 - **Wandering off.** When the node is not visible in the current view, the band
@@ -89,6 +89,14 @@ optional focus sound could therefore enable automatic pop-out honestly, but it
 is an experiment, not v1. The window never outlives the tab and is absent in
 Safari and on phones.
 
+The whole window is the same `primary` fill as the running band, with the
+band's on-fill controls, focus outline, and full progress line at time is up,
+in every state: running, paused, time is up, break, reflection, and no session. A floating window sits on the
+desktop and over other apps, not on the page, so the page surface blended in;
+switching to the page surface for reflection would hide the window exactly when
+it asks for input. The reflection field's border is `primary-foreground` at
+60%, so the field boundary stays above 3:1 on the near-white dark-mode fill.
+
 ## Session state stays in this browser
 
 A running session is browser-local, shared across this browser's tabs, like
@@ -112,6 +120,9 @@ ordinary nodes.
   stood out, but they introduce a chromatic accent into a grayscale product.
   Orange stays the one free hue if Time is up ever needs color; blue, purple,
   red, and green already carry meaning. Rejected for now.
+- **A page-surface PiP window.** The v1 window used `background`, the same
+  surface as most light or dark desktop windows, so it blended into the
+  desktop. Replaced by the primary fill.
 - **Zoom in on start.** Jarring without an explicit request. Only Return zooms.
 - **Auto-open the PiP window on tab leave.** Not possible for a silent page; see
   above.
