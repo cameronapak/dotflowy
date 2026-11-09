@@ -38,6 +38,12 @@ import {
   searchAnnotation,
 } from "../plugins/registry";
 import { useGlobalActions } from "./command-actions";
+import {
+  decorate,
+  getCaretOffset,
+  readSource,
+  setCaretOffset,
+} from "./inline-code";
 import { McpConnectDialog } from "./mcp-connect-dialog";
 import {
   setNodeSwitcherOpener,
@@ -169,10 +175,24 @@ export function NodeSwitcher() {
   // target-less, render and the React Compiler freezes that empty list.)
   const openRef = useRef(open);
   openRef.current = open;
+  const restoreEditor = useRef<(() => void) | null>(null);
 
   // Capture the ambient target, THEN open -- both before the dialog steals focus.
   const openWithCapture = useCallback(() => {
     setTargetFocusedId(readFocusedNodeId());
+    const el = document.activeElement;
+    restoreEditor.current = null;
+    if (el instanceof HTMLElement && el.matches(".node-text")) {
+      const offset = getCaretOffset(el);
+      restoreEditor.current = () => {
+        if (!el.isConnected) return;
+        el.focus({ preventScroll: true });
+        // Blur folds tokens and replaces their DOM. Restore a source offset,
+        // revealing its token before placing the caret, never a stale Range.
+        decorate(el, readSource(el), offset, false);
+        setCaretOffset(el, offset);
+      };
+    }
     setOpen(true);
   }, []);
 
@@ -204,15 +224,14 @@ export function NodeSwitcher() {
         if (openRef.current) {
           setOpen(false);
         } else {
-          setTargetFocusedId(readFocusedNodeId());
-          setOpen(true);
+          openWithCapture();
         }
       }
     }
     window.addEventListener("keydown", onKey, { capture: true });
     return () =>
       window.removeEventListener("keydown", onKey, { capture: true });
-  }, []);
+  }, [openWithCapture]);
 
   if (!mounted) return null;
 
@@ -227,6 +246,7 @@ export function NodeSwitcher() {
         query={query}
         setQuery={setQuery}
         targetFocusedId={targetFocusedId}
+        restoreEditor={() => restoreEditor.current?.()}
         onOpenConnect={onOpenConnect}
         onPicked={() => {
           setOpen(false);
@@ -244,6 +264,7 @@ function SwitcherDialog({
   query,
   setQuery,
   targetFocusedId,
+  restoreEditor,
   onOpenConnect,
   onPicked,
 }: {
@@ -252,6 +273,7 @@ function SwitcherDialog({
   query: string;
   setQuery: (q: string) => void;
   targetFocusedId: string | null;
+  restoreEditor: () => void;
   onOpenConnect: () => void;
   onPicked: () => void;
 }) {
@@ -264,6 +286,7 @@ function SwitcherDialog({
   const { aliasProviders } = usePluginChrome();
   const navigate = useNavigate();
   const bridge = getNodeActionBridge();
+  const afterClose = useRef<(() => void) | null>(null);
 
   // A closed command center must not scan the outline on every keystroke.
   // Opening it reads the current index, including edits made while closed.
@@ -350,6 +373,16 @@ function SwitcherDialog({
 
   function runAction(action: CommandCenterAction) {
     if (action.disabled) return;
+    if (action.id === "g:spotlight") {
+      // Spotlight must see the original editor focused when it turns on.
+      // Wait for the modal focus trap to release before restoring and toggling.
+      afterClose.current = () => {
+        restoreEditor();
+        action.run();
+      };
+      close();
+      return;
+    }
     // Run BEFORE close: verbs like Delete prefer `findFocusedId() ?? id`, and
     // closing the dialog first can restore focus onto an unrelated row,
     // deleting the wrong node.
@@ -425,6 +458,13 @@ function SwitcherDialog({
       }}
       title="Command center"
       description="Search nodes and run actions"
+      finalFocus={() => {
+        const run = afterClose.current;
+        afterClose.current = null;
+        if (!run) return true;
+        run();
+        return false;
+      }}
     >
       {/* onKeyDown rides a display:contents wrapper (bubble phase), NOT the
           Command prop -- cmdk overrides its root onKeyDown, so a prop handler is
