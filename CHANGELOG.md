@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.33.3
+
+### Patch Changes
+
+- 5ad11cf: Keep the focused mirror ring visible at the outline canvas edges.
+
 ## 1.33.2
 
 ### Patch Changes
