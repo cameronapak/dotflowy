@@ -30,6 +30,7 @@ import {
   indentManyNodes,
   outdentManyNodes,
   removeManyNodes,
+  reorderManyNodes,
 } from "../data/mutations";
 import {
   clearSelection,
@@ -100,6 +101,7 @@ export interface SelectionOps {
   mirror: () => void;
   indent: () => void;
   outdent: () => void;
+  reorder: (direction: "up" | "down") => void;
   caretAbove: () => void;
   caretBelow: () => void;
   exitToCaret: () => void;
@@ -272,6 +274,34 @@ function makeSelectionOps({
     });
   };
 
+  const reorder = (direction: "up" | "down") => {
+    const state = getSelectionState();
+    if (!state) return;
+    const index = getTreeIndex();
+    const visible = new Set(
+      buildVisibleRows(
+        index,
+        getViewRootId(),
+        getViewIsHidden(),
+        getViewFilter(),
+        isMirrorsEnabled(),
+      ).map((row) => row.key),
+    );
+    const prefix = parentKeyOf(state.anchorId);
+    runStructural(() => {
+      const drop = capture(index, state.anchorId, null, { label: "move" });
+      if (
+        reorderManyNodes(state.rootIds, direction, {
+          isVisible: (node) => visible.has(rowKeyFor(prefix, node.id)),
+          rootId: getViewRootId(),
+          resolveMirror: isMirrorsEnabled(),
+        })
+      )
+        refreshSelection();
+      else drop();
+    });
+  };
+
   // Plain Up: drop the caret onto the visible row just ABOVE the top of the
   // selection (visual motion, even though selection is sibling-scoped).
   const caretAbove = () => {
@@ -336,6 +366,7 @@ function makeSelectionOps({
     mirror,
     indent,
     outdent,
+    reorder,
     caretAbove,
     caretBelow,
     exitToCaret,
@@ -382,6 +413,7 @@ export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
       const selectionKey =
         e.key === "Escape" ||
         (mod && ["a", "c"].includes(e.key.toLowerCase())) ||
+        (mod && e.shiftKey && ["ArrowDown", "ArrowUp"].includes(e.key)) ||
         (!mod &&
           (e.key === "Backspace" ||
             e.key === "Delete" ||
@@ -405,6 +437,11 @@ export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
       if (mod && e.key.toLowerCase() === "c") {
         e.preventDefault();
         ops.copy();
+        return;
+      }
+      if (mod && e.shiftKey && ["ArrowDown", "ArrowUp"].includes(e.key)) {
+        e.preventDefault();
+        ops.reorder(e.key === "ArrowUp" ? "up" : "down");
         return;
       }
       // Let other Cmd/Ctrl chords (undo, reload, ...) through untouched.
