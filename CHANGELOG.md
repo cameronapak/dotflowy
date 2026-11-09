@@ -1,5 +1,15 @@
 # dotflowy
 
+## 1.33.6
+
+### Patch Changes
+
+- 636d65a: Truncate desktop breadcrumbs with ellipsis instead of horizontal scrolling, keeping ancestor navigation visible.
+- 10d8e92: Keep Cmd/Ctrl+Period available for node zoom when the owner-only Amp feedback widget is loaded.
+- a220849: Fade navigation and the Add node button while typing in a node, and restore them when you move the pointer, tap, scroll, or use Escape or Tab.
+- 80ae12d: Cmd+K now opens the URL popover when text is selected inside a node. Without a text selection, it still opens the command menu.
+- a699d67: Keep the focused node and exact caret position when toggling Spotlight mode from Cmd+K.
+
 ## 1.33.5
 
 ### Patch Changes
