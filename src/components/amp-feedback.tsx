@@ -3,6 +3,7 @@ import { useEffect } from "react";
 
 import { AmpFeedbackConfig } from "../data/amp-feedback";
 import { hardReset } from "../lib/auth-client";
+import { captureNodeZoomShortcut } from "./node-zoom-shortcut";
 
 /** Owner-only, server-authorized exception to ADR 0031. Removing a script tag
  * cannot unload its code: tear down the document when this gate unmounts. */
@@ -28,6 +29,8 @@ export function AmpFeedback({ userId }: Readonly<{ userId: string }>) {
         const script = document.createElement("script");
         script.src = `https://ampcode.com/w/${config.clientId}.js`;
         script.async = true;
+        // Install first: Amp captures Mod+. on window before node keymaps.
+        window.addEventListener("keydown", captureNodeZoomShortcut, true);
         loaded = true;
         document.head.appendChild(script);
       }).pipe(
@@ -39,6 +42,7 @@ export function AmpFeedback({ userId }: Readonly<{ userId: string }>) {
     return () => {
       active = false;
       Effect.runFork(Fiber.interrupt(fiber));
+      window.removeEventListener("keydown", captureNodeZoomShortcut, true);
       if (loaded) hardReset(window.location.href);
     };
   }, [userId]);
