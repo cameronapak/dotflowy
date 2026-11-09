@@ -1,5 +1,11 @@
 # dotflowy
 
+## 1.34.0
+
+### Minor Changes
+
+- 622e3a8: Type `- ` at the start of a paragraph to turn it into a bullet. Backspace removes task and bullet markers one character at a time, revealing the remaining prefix as editable text and keeping your text and children intact.
+
 ## 1.33.10
 
 ### Patch Changes
