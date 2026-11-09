@@ -455,6 +455,9 @@ body:has(.outline-shell) {
 }
 
 .lg-sheet-dialog {
+  /* Only the content scrolls. Safari focus panning must not scroll the whole
+     modal while its sheet is entering from below the viewport. */
+  overflow: clip;
   left: env(safe-area-inset-left);
   right: env(safe-area-inset-right);
   width: calc(100% - env(safe-area-inset-left) - env(safe-area-inset-right));

@@ -1,8 +1,13 @@
 diff --git a/dist/index.cjs b/dist/index.cjs
-index 3da8337d298b4472bcd7b4be63f4b39748c7f2c4..a1dd412dde10c0d6da3c7532130b7e5b99c97f8c 100644
+index 3da8337d298b4472bcd7b4be63f4b39748c7f2c4..e89886df987d1b494471621de2c25d5cde77c1be 100644
 --- a/dist/index.cjs
 +++ b/dist/index.cjs
-@@ -3264,28 +3264,37 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+@@ -3260,32 +3260,41 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+ 			phase
+ 		};
+ 	});
+-	(0, react.useEffect)(() => {
++	(0, react.useLayoutEffect)(() => {
  		if (phase === "closed") return;
  		const sheet = sheetRef.current;
  		const scrim = scrimRef.current;
@@ -84,10 +89,15 @@ index 3da8337d298b4472bcd7b4be63f4b39748c7f2c4..a1dd412dde10c0d6da3c7532130b7e5b
  	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("dialog", {
  		ref: dialogRef,
 diff --git a/dist/index.js b/dist/index.js
-index 95b342daf0290f4de810363c5aea81b47c0cec6c..5a181a607b2151422a8fc55e3527c5c262d1d53c 100644
+index 95b342daf0290f4de810363c5aea81b47c0cec6c..0a6ad2a1fe54308d4687c7c7804b7c7b1220a6d9 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -3263,28 +3263,37 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+@@ -3259,32 +3259,41 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+ 			phase
+ 		};
+ 	});
+-	useEffect(() => {
++	useLayoutEffect(() => {
  		if (phase === "closed") return;
  		const sheet = sheetRef.current;
  		const scrim = scrimRef.current;
