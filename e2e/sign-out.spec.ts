@@ -125,6 +125,11 @@ test("owner feedback loads once and session loss destroys its document without a
   await text(page, "alpha").click();
   await page.keyboard.press("ControlOrMeta+.");
   await expect(page).toHaveURL(/\/alpha$/);
+  // The URL changes before the keyed destination editor mounts. Wait for its
+  // focus landing so the account menu belongs to the destination, not the old view.
+  await expect(
+    page.getByRole("textbox", { name: "Title", exact: true }),
+  ).toBeFocused();
   expect(
     await page.evaluate(() =>
       "__feedbackToggles" in window ? window.__feedbackToggles : null,
