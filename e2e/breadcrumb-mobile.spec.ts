@@ -18,6 +18,80 @@ function deepChain(): SeedNode[] {
   return nodes;
 }
 
+test("desktop breadcrumbs truncate without scrolling and keep ancestor navigation reachable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1168, height: 691 });
+  await seedOutline(page, [
+    { id: "daily", parentId: null, prevSiblingId: null, text: "Daily" },
+    {
+      id: "day",
+      parentId: "daily",
+      prevSiblingId: null,
+      text: "Sunday, November 8, 2026",
+    },
+    {
+      id: "conference",
+      parentId: "day",
+      prevSiblingId: null,
+      text: "Builder Conference #reflection #heartwood",
+    },
+    ...deepChain().map((node, i) => ({
+      ...node,
+      parentId: i === 0 ? "conference" : node.parentId,
+    })),
+  ]);
+  await page.goto("/n0");
+  await page.locator(".zoomed-title .node-text").waitFor();
+  const nav = page.getByRole("navigation", { name: "Breadcrumb" });
+
+  for (const path of ["n0", "n7"]) {
+    if (path === "n7") {
+      await page
+        .locator(`li[data-node-id="${path}"] > .outline-row .bullet`)
+        .click();
+      await expect(page).toHaveURL(new RegExp(`/${path}$`));
+      await page.locator(".zoomed-title .node-text").waitFor();
+    }
+    for (const width of [1168, 768]) {
+      await page.setViewportSize({ width, height: 691 });
+      await expect
+        .poll(() =>
+          nav.evaluate((el) => {
+            el.scrollLeft = el.scrollWidth;
+            const bounds = el.getBoundingClientRect();
+            const links = Array.from(el.querySelectorAll(".crumb-link"));
+            return {
+              scrollLeft: el.scrollLeft,
+              labelsVisible: links.every((link) => {
+                const box = link.getBoundingClientRect();
+                return (
+                  box.width > 16 &&
+                  box.left >= bounds.left &&
+                  box.right <= bounds.right + 1
+                );
+              }),
+              truncated: links.some(
+                (link) => link.scrollWidth > link.clientWidth,
+              ),
+            };
+          }),
+        )
+        .toEqual({ scrollLeft: 0, labelsVisible: true, truncated: true });
+    }
+  }
+
+  await nav.getByRole("button", { name: "Show hidden breadcrumbs" }).click();
+  await page
+    .getByRole("menuitem", { name: "Sunday, November 8, 2026" })
+    .click();
+  await expect(page).toHaveURL(/\/day$/);
+  await nav.getByRole("button", { name: "Daily", exact: true }).click();
+  await expect(page).toHaveURL(/\/daily$/);
+  await nav.getByRole("button").first().click();
+  await expect(page).toHaveURL(/\/$/);
+});
+
 // Mobile breadcrumb (ADR 0076): Back to the direct parent, plus a chevron whose
 // sheet lists Home and every other ancestor. The parent's name survives the
 // narrowest supported width.
