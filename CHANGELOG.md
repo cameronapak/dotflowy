@@ -1,5 +1,17 @@
 # dotflowy
 
+## 1.33.5
+
+### Patch Changes
+
+- 636ddfd: Move selected nodes together with Cmd/Ctrl+Shift+Up or Down while preserving their order and selection.
+
+## 1.33.4
+
+### Patch Changes
+
+- 9fdbfdd: Tags in zoomed titles grow with their text instead of clipping inside a short pill.
+
 ## 1.33.3
 
 ### Patch Changes

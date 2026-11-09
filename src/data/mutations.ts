@@ -615,6 +615,59 @@ export function moveDown(
   return moveNode(index, nodeId, node.parentId, vn.id);
 }
 
+/** Move a selected sibling run one step, carrying subtrees and preserving order.
+ * The leading edge uses the single-node boundary behavior; the remaining roots
+ * follow into its destination. Wrap in runStructural for one write and undo. */
+export function reorderManyNodes(
+  rootIds: readonly string[],
+  direction: "up" | "down",
+  opts: MoveOpts = {},
+): boolean {
+  const ids = direction === "up" ? [...rootIds] : [...rootIds].reverse();
+  const edgeId = ids[0];
+  if (!edgeId) return false;
+  const start = buildTreeIndex(getLiveNodes());
+  const edge = start.byId.get(edgeId);
+  if (!edge) return false;
+  // A mirror uncle/aunt can resolve inside another selected root. Check the
+  // whole run before moving its edge, or the cycle guard would split the run.
+  if (opts.resolveMirror && edge.parentId && rootIds.length > 1) {
+    const visible = childrenOf(start, edge.parentId).filter(
+      opts.isVisible ?? (() => true),
+    );
+    const boundary = direction === "up" ? visible[0] : visible.at(-1);
+    const parent = start.byId.get(edge.parentId)!;
+    const peers = childrenOf(start, parent.parentId);
+    const position = peers.findIndex((node) => node.id === parent.id);
+    const target = peers[position + (direction === "up" ? -1 : 1)];
+    if (boundary?.id === edgeId && target?.mirrorOf) {
+      const selected = new Set(rootIds);
+      let cursor: string | null = trueSourceOf(start, target.id);
+      while (cursor) {
+        if (selected.has(cursor)) return false;
+        cursor = start.byId.get(cursor)?.parentId ?? null;
+      }
+    }
+  }
+  const move = direction === "up" ? moveUp : moveDown;
+  if (!move(start, edgeId, opts)) return false;
+
+  let neighborId = edgeId;
+  for (const id of ids.slice(1)) {
+    // Each move relinks siblings, so never reuse the pre-move index.
+    const index = buildTreeIndex(getLiveNodes());
+    const neighbor = index.byId.get(neighborId)!;
+    moveNode(
+      index,
+      id,
+      neighbor.parentId,
+      direction === "up" ? neighborId : neighbor.prevSiblingId,
+    );
+    neighborId = id;
+  }
+  return true;
+}
+
 /**
  * Move `nodeId` to be a child of `newParentId`, positioned immediately after
  * `afterSiblingId` (or as the first child when `afterSiblingId` is null). This
