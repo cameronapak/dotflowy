@@ -22,7 +22,7 @@ closes for structural writes (see [ADR 0009: Atomic structural writes](./0009-at
 
 **The cure — two independent halves, both shipped:**
 
-- **Serialize + coalesce the field PATCH (`api.ts`, `updateNodes`).** Mirrors `persistBatch`'s
+- **Serialize + coalesce the field PATCH (`api.ts`, `updateNodes`).** Mirrors `persistBatchE`'s
   `batchTail`, plus coalescing: while a PATCH is in flight, every later field change MERGES into a
   pending map (field-wise last-write-wins — correct because a PATCH carries only changed columns),
   and when the in-flight request returns the merged latest flushes as ONE ordered PATCH. Order is

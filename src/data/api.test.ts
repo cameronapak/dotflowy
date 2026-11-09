@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import type { ChangeOp } from "./realtime";
 
-import { persistBatch, updateNodes, waitForPendingWrites } from "./api";
+import { persistBatchE, updateNodes, waitForPendingWrites } from "./api";
+import { runPromise } from "./nodes-client-effect";
 import { createNode } from "./tree";
 
 // Pins ordered outline persistence:
@@ -18,13 +19,22 @@ interface Pending {
   resolve: (r: Response) => void;
 }
 let pending: Pending[] = [];
+let arrival = Promise.withResolvers<void>();
+let releaseAll: Response | null = null;
+
+const persistBatch = (ops: ChangeOp[]) => runPromise(persistBatchE(ops));
 
 function installControlledFetch(): void {
   pending = [];
+  arrival = Promise.withResolvers<void>();
+  releaseAll = null;
   // SAFETY: test stub, not a real fetch: the code under test only calls it with (url, init) and reads init.body.
   globalThis.fetch = ((_url: string, init: { body?: unknown }) =>
     new Promise<Response>((resolve) => {
       pending.push({ body: String(init.body), resolve });
+      arrival.resolve();
+      arrival = Promise.withResolvers<void>();
+      if (releaseAll) resolve(releaseAll.clone());
     })) as typeof fetch;
 }
 
@@ -35,8 +45,13 @@ function at(i: number): Pending {
   return p;
 }
 
-/** Let parked writes advance to the controlled server. */
-const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
+// Cross an event-loop turn before asserting that a queued write stays unsent.
+const drain = (): Promise<void> =>
+  new Promise((resolve) => setImmediate(resolve));
+async function requestsArrived(count: number): Promise<void> {
+  while (pending.length < count) await arrival.promise;
+  await drain();
+}
 const ok = (seq: number): Response =>
   new Response(JSON.stringify({ seq }), { status: 200 });
 const op = (key: string): ChangeOp => ({ op: "delete", key });
@@ -49,11 +64,11 @@ test("history's write barrier waits for coalesced fields and structural sends", 
   const barrier = waitForPendingWrites().then(() => {
     settled = true;
   });
-  await tick();
+  await requestsArrived(1);
   expect(pending.length).toBe(1);
   expect(settled).toBe(false);
   at(0).resolve(ok(8));
-  await tick();
+  await requestsArrived(2);
   expect(pending.length).toBe(2);
   expect(settled).toBe(false);
   at(1).resolve(ok(9));
@@ -66,7 +81,7 @@ test.each([false, true])(
   async (holdOlder) => {
     installControlledFetch();
     const older = holdOlder ? persistBatch([op("unrelated")]) : null;
-    if (older) await tick();
+    if (older) await requestsArrived(1);
     const before = [
       updateNodes([{ id: "a", changes: { text: "old" } }]),
       updateNodes([{ id: "a", changes: { text: "Xafter" } }]),
@@ -84,18 +99,18 @@ test.each([false, true])(
     ];
     const writes = [...(older ? [older] : []), ...before, split, ...after];
     try {
-      await tick();
+      await requestsArrived(1);
       expect(pending.length).toBe(1);
       if (older) {
         at(0).resolve(ok(1));
-        await tick();
+        await requestsArrived(2);
       }
       const offset = older ? 1 : 0;
       expect(JSON.parse(at(offset).body).updates).toEqual([
         { id: "a", changes: { text: "Xafter" } },
       ]);
       at(offset).resolve(ok(2));
-      await tick();
+      await requestsArrived(offset + 2);
       expect(pending.length).toBe(offset + 2);
       expect(
         JSON.parse(at(offset + 1).body).ops.map(
@@ -109,7 +124,7 @@ test.each([false, true])(
         ["b", "after"],
       ]);
       at(offset + 1).resolve(ok(3));
-      await tick();
+      await requestsArrived(offset + 3);
       expect(pending.length).toBe(offset + 3);
       expect(JSON.parse(at(offset + 2).body).updates).toEqual([
         { id: "a", changes: { text: "Z" } },
@@ -118,12 +133,8 @@ test.each([false, true])(
       at(offset + 2).resolve(ok(4));
       await Promise.all(writes);
     } finally {
-      // A broken ordering implementation can have several requests in flight.
-      // Release all of them, including successors, before restoring fetch.
-      for (let i = 0; i < 5; i++) {
-        for (const request of pending) request.resolve(ok(5));
-        await tick();
-      }
+      releaseAll = ok(5);
+      for (const request of pending) request.resolve(releaseAll.clone());
       await Promise.allSettled(writes);
     }
   },
@@ -133,19 +144,19 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-describe("persistBatch serialization", () => {
+describe("persistBatchE serialization", () => {
   test("a second batch stays off the wire until the first responds", async () => {
     installControlledFetch();
     const p1 = persistBatch([op("a")]);
     const p2 = persistBatch([op("b")]);
-    await tick();
+    await requestsArrived(1);
 
     // Only batch A is in flight; B is parked on the semaphore.
     expect(pending.length).toBe(1);
     expect(at(0).body).toContain('"a"');
 
     at(0).resolve(ok(1));
-    await tick();
+    await requestsArrived(2);
 
     // A's response lands → B's request now leaves the client, in order.
     expect(pending.length).toBe(2);
@@ -160,13 +171,13 @@ describe("persistBatch serialization", () => {
     installControlledFetch();
     const p1 = persistBatch([op("a")]);
     const p2 = persistBatch([op("b")]);
-    await tick();
+    await requestsArrived(1);
     expect(pending.length).toBe(1);
 
     // A 5xx is a received response (not a transport drop), so it never retries.
     at(0).resolve(new Response("boom", { status: 500 }));
     await expect(p1).rejects.toThrow();
-    await tick();
+    await requestsArrived(2);
 
     // The permit released on failure → B proceeded.
     expect(pending.length).toBe(2);
@@ -187,7 +198,7 @@ describe("updateNodes field coalescer", () => {
     installControlledFetch();
     // Gen 1 = A, sent alone (nothing in flight when it arms).
     const pA = updateNodes([{ id: "a", changes: { text: "a" } }]);
-    await tick();
+    await requestsArrived(1);
     expect(pending.length).toBe(1);
 
     // B and C land while gen 1 is in flight -> they share ONE generation.
@@ -195,7 +206,7 @@ describe("updateNodes field coalescer", () => {
     const pC = updateNodes([{ id: "c", changes: { text: "c" } }]);
 
     at(0).resolve(okField()); // gen 1 ok -> releases the permit
-    await tick();
+    await requestsArrived(2);
     expect(pending.length).toBe(2); // gen 2 (B+C merged) now in flight
     expect(at(1).body).toContain('"b"');
     expect(at(1).body).toContain('"c"');
@@ -209,7 +220,7 @@ describe("updateNodes field coalescer", () => {
   test("coalesces a burst during the in-flight window into one field-wise PATCH", async () => {
     installControlledFetch();
     const pA = updateNodes([{ id: "a", changes: { text: "a1" } }]);
-    await tick();
+    await requestsArrived(1);
     expect(pending.length).toBe(1);
     expect(at(0).body).toContain("a1");
 
@@ -221,11 +232,11 @@ describe("updateNodes field coalescer", () => {
       updateNodes([{ id: "a", changes: { text: "a3" } }]),
       updateNodes([{ id: "b", changes: { text: "b1" } }]),
     ];
-    await tick();
+    await drain();
     expect(pending.length).toBe(1); // gen 2 stays off the wire
 
     at(0).resolve(okField());
-    await tick();
+    await requestsArrived(2);
     // One PATCH for the whole burst; last-write-wins per field on `a`.
     expect(pending.length).toBe(2);
     expect(JSON.parse(at(1).body).updates).toEqual([
@@ -240,12 +251,12 @@ describe("updateNodes field coalescer", () => {
   test("a failed generation does not wedge the next", async () => {
     installControlledFetch();
     const pA = updateNodes([{ id: "a", changes: { text: "a" } }]);
-    await tick();
+    await requestsArrived(1);
     const pB = updateNodes([{ id: "b", changes: { text: "b" } }]); // gen 2
 
     at(0).resolve(new Response("boom", { status: 500 })); // gen 1 fails
     await expect(pA).rejects.toThrow();
-    await tick();
+    await requestsArrived(2);
     expect(pending.length).toBe(2); // permit released -> gen 2 proceeded
 
     at(1).resolve(okField());

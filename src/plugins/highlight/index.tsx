@@ -20,14 +20,14 @@
 
 import { HighlighterIcon } from "lucide-react";
 
-import { mdPunct, readSource } from "../../components/inline-code";
+import { readSource } from "../../components/inline-code";
 import { wrapSelectionOrInsert } from "../../components/wrap";
 import {
   HIGHLIGHT_PATTERN,
   parseHighlight,
   type HighlightColor,
 } from "../../data/highlight";
-import { isRevealed, resolveNodeId } from "../token-kit";
+import { isRevealed, mdPunct, resolveNodeId } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
 import { HIGHLIGHT_FILTER_OPERATORS } from "./filter-operators";
 import { openHighlightColorMenu } from "./highlight-color-menu";

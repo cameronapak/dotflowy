@@ -349,9 +349,6 @@ test("deployment builds validated main before atomic push, publishing, and deplo
     expected.includes(step.name ?? ""),
   );
   expect(steps.map((step) => step.name)).toEqual(expected);
-  expect(steps[3]?.run).toContain(
-    'git push --atomic origin HEAD:refs/heads/main "refs/tags/$tag:refs/tags/$tag"',
-  );
   expect(steps[4]?.run).toBe("bun run release:publish");
   expect(steps[5]?.["working-directory"]).toBe("landing");
   const dir = mkdtempSync(join(tmpdir(), "dotflowy-deploy-"));

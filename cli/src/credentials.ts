@@ -6,7 +6,7 @@ import * as fs from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { decode, fail, io, parseJson } from "./core.js";
+import { decode, fail, io, ioFailure, parseJson } from "./core.js";
 
 const exec = promisify(execFile);
 export const Credential = Schema.Struct({
@@ -40,6 +40,7 @@ const pathFor = (directory: string, server: string) =>
 
 const MissingFile = Schema.Struct({ code: Schema.Literal("ENOENT") });
 const missing = (cause: unknown) => Schema.is(MissingFile)(cause);
+const LockExists = Schema.Struct({ code: Schema.Literal("EEXIST") });
 
 // The native bridge is deliberately small; sequencing and failures stay in Effect.
 const readRecord = Effect.fn("Credentials.readRecord")(function* (
@@ -260,11 +261,24 @@ export const credentialStore = (directory: string, server: string) => {
       yield* prepareDirectory(directory);
       const lock = `${pathFor(directory, server)}.lock`;
       yield* Effect.acquireRelease(
-        io(
-          `Credential lock unavailable: ${lock}. If no Dotflowy processes are running, remove this lock directory and try again.`,
-          () => fs.mkdir(lock, { mode: 0o700 }),
-        ).pipe(
-          Effect.retry({ times: 300, schedule: Schedule.spaced("100 millis") }),
+        Effect.tryPromise({
+          try: () => fs.mkdir(lock, { mode: 0o700 }),
+          catch: (cause) => ({
+            cause,
+            contended: Schema.is(LockExists)(cause),
+          }),
+        }).pipe(
+          Effect.retry({
+            while: (error) => error.contended,
+            times: 300,
+            schedule: Schedule.spaced("100 millis"),
+          }),
+          Effect.mapError(({ cause }) =>
+            ioFailure(
+              `Credential lock unavailable: ${lock}. If no Dotflowy processes are running, remove this lock directory and try again.`,
+              cause,
+            ),
+          ),
         ),
         () =>
           io("Cannot release credential lock.", () => fs.rmdir(lock)).pipe(

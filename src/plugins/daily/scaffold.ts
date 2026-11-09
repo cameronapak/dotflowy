@@ -133,17 +133,13 @@ export function inScaffoldScope(
   return false;
 }
 
-/** Mapped day whose parent link is broken — top-level, or `parentId` points at a
- *  node that is no longer in the tree. These used to fall out of
- *  {@link inScaffoldScope} (dangling parent → walk ends before the container)
- *  so the calendar migration never reattached them after a partial cutover /
- *  scaffold wipe left day nodes stranded. */
+/** A top-level day is a valid relocation. Only a dangling parent is recoverable
+ * into the Daily scaffold (ADR 0068). */
 export function isOrphanMappedDay(
   index: TreeIndex,
   day: { parentId?: string | null },
 ): boolean {
-  if (day.parentId == null) return true;
-  return !index.byId.has(day.parentId);
+  return day.parentId != null && !index.byId.has(day.parentId);
 }
 
 export function planDailyMigration(

@@ -12,8 +12,8 @@
 // Why a barrel and not direct `@/components/ui/*` imports: it names ONE blessed
 // roster (lint-enforced for `src/plugins/**` -- see .oxlintrc.json), so the set
 // a plugin author reaches for is a deliberate, reviewable list rather than "all
-// of components/ui". Deliberately EXCLUDED: app-shell chrome (sidebar), core
-// surfaces (command/cmdk, sonner) -- those are the app's, not a plugin's.
+// of components/ui". Core surfaces (command/cmdk, sonner) remain the app's,
+// not a plugin's.
 //
 // Add a component here only when a plugin needs it; that keeps the surface a
 // decision, not a dumping ground.

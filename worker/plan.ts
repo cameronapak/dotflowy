@@ -1,6 +1,12 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import type { PlanName as Plan } from "../src/data/plans";
 import type { ChangeOp } from "../src/data/wire-schema";
+
+import { FREE_NODE_LIMIT } from "../src/data/plans";
+
+export { FREE_NODE_LIMIT };
+export type { Plan };
 
 /**
  * Plan resolution: the ONE read the entitlement checks consume. Subscription
@@ -11,16 +17,6 @@ import type { ChangeOp } from "../src/data/wire-schema";
  * The free tier is the absence of an active subscription row, so a user with
  * no row — every alpha account today — is `free` with zero backfill.
  */
-
-export type Plan = "free" | "unlimited" | "founding";
-
-/** Plan names as stored by the plugin (it lowercases `plan` on write). */
-export const PAID_PLANS = ["unlimited", "founding"] as const;
-
-/** Free tier ceiling: total LIVE nodes a free outline may hold (#152/#170).
- *  Generous by design — the funnel, not a wall; over-cap never locks (edits,
- *  moves, deletes always apply — see `batchExceedsNodeLimit`). Paid = no cap. */
-export const FREE_NODE_LIMIT = 10000;
 
 /** The node ceiling a plan enforces: free is capped, paid is unlimited (`null`,
  *  which every gate below reads as "never reject"). */
@@ -63,7 +59,6 @@ export function batchExceedsNodeLimit(
  * delete of X (existed) without debiting its reinsert (still present at probe
  * time), under-counting `after` and letting a free user at the cap grow +1.
  */
-/** Net node-count effect of one batch: new inserts vs. real deletes. */
 export interface NetGrowth {
   inserts: number;
   deletes: number;

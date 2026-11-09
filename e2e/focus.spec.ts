@@ -532,15 +532,22 @@ test("a rejected Focus sessions off-save keeps the running session", async ({
     .getByRole("button", { name: "Start focus session", exact: true })
     .click();
   await expect(band(page)).toContainText("Finish the draft");
+  let markSaveSeen!: () => void;
+  const saveSeen = new Promise<void>((resolve) => {
+    markSaveSeen = resolve;
+  });
+  let releaseSave!: () => void;
+  const saveReleased = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
   await page.route(
     (url) =>
       url.pathname === "/api/kv" &&
       url.searchParams.get("collection") === "account-prefs",
     async (route) => {
       if (route.request().method() !== "POST") return route.fallback();
-      // Reject only after the account lookup has had time to resolve, so the
-      // session must wait for the save rather than win a race against it.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      markSaveSeen();
+      await saveReleased;
       await route.fulfill({ status: 400, json: { error: "Rejected save" } });
     },
   );
@@ -549,6 +556,27 @@ test("a rejected Focus sessions off-save keeps the running session", async ({
     .getByPlaceholder(/Search nodes and actions/)
     .fill("Turn off Focus sessions");
   await page.getByRole("option", { name: "Turn off Focus sessions" }).click();
+  await saveSeen;
+  try {
+    // Resolve the same account lookup used when ending a session. The held save,
+    // not an arbitrary delay, must prevent that irreversible operation.
+    expect(
+      await page.evaluate(async () => {
+        const path = "/src/lib/auth-client.ts";
+        const { data } = await (await import(path)).getSession();
+        return data?.user.id;
+      }),
+    ).toBe("test-user");
+    expect(
+      await page.evaluate(() =>
+        Object.keys(localStorage).filter((key) =>
+          key.startsWith("dotflowy:focus:"),
+        ),
+      ),
+    ).toHaveLength(1);
+  } finally {
+    releaseSave();
+  }
   await expect(
     page.getByText("Couldn't save this setting. Try again."),
   ).toBeVisible();

@@ -569,11 +569,7 @@ function validateSignedArtifact(): void {
   if (bytes.subarray(0, 4).toString("ascii") !== "AEA1") {
     throw new Error("public shortcut must be an Apple-signed AEA1 file");
   }
-  for (const marker of [
-    "PASTE_CAPTURE_KEY_DURING_IMPORT",
-    ...FORBIDDEN_MARKERS,
-  ]) {
-    if (marker === "PASTE_CAPTURE_KEY_DURING_IMPORT") continue;
+  for (const marker of FORBIDDEN_MARKERS) {
     if (bytes.includes(Buffer.from(marker))) {
       throw new Error(`signed artifact exposes forbidden marker: ${marker}`);
     }

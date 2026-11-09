@@ -373,7 +373,7 @@ function SwitcherDialog({
 
   function runAction(action: CommandCenterAction) {
     if (action.disabled) return;
-    if (action.id === "g:spotlight") {
+    if (action.executionPhase === "after-editor-restore") {
       // Spotlight must see the original editor focused when it turns on.
       // Wait for the modal focus trap to release before restoring and toggling.
       afterClose.current = () => {

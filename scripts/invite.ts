@@ -26,6 +26,7 @@
  *   bun run invite --all               # invite every pending waitlist row
  *   bun run invite --api http://localhost:8787 --all   # against local dev
  */
+import { resolveAdminCookie } from "./admin-session";
 
 interface Args {
   emails: string[];
@@ -73,52 +74,6 @@ function parseArgs(argv: string[]): Args {
   return { emails, all, limit, api: api.replace(/\/$/, "") };
 }
 
-/** Collapse a fetch Response's Set-Cookie headers into a single Cookie header. */
-function collectCookies(res: Response): string {
-  const setCookies =
-    typeof res.headers.getSetCookie === "function"
-      ? res.headers.getSetCookie()
-      : [res.headers.get("set-cookie")].filter((v): v is string => v != null);
-  return setCookies
-    .map((c) => c.split(";")[0]!.trim())
-    .filter(Boolean)
-    .join("; ");
-}
-
-/** Obtain a Cookie header: an explicit one, else sign in as the admin. */
-async function resolveCookie(api: string): Promise<string> {
-  const explicit = process.env.DOTFLOWY_SESSION_COOKIE;
-  if (explicit) return explicit;
-
-  const email = process.env.DOTFLOWY_ADMIN_EMAIL;
-  const password = process.env.DOTFLOWY_ADMIN_PASSWORD;
-  if (!email || !password) {
-    console.error(
-      "Set DOTFLOWY_ADMIN_EMAIL + DOTFLOWY_ADMIN_PASSWORD (an admin on ADMIN_EMAILS),\n" +
-        "or DOTFLOWY_SESSION_COOKIE with a signed-in session cookie.",
-    );
-    process.exit(1);
-  }
-
-  const res = await fetch(`${api}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) {
-    console.error(
-      `admin sign-in failed (status ${res.status}): ${await res.text()}`,
-    );
-    process.exit(1);
-  }
-  const cookie = collectCookies(res);
-  if (!cookie) {
-    console.error("admin sign-in returned no session cookie");
-    process.exit(1);
-  }
-  return cookie;
-}
-
 interface InviteResponse {
   invited: { email: string; code: string }[];
   skipped: string[];
@@ -127,7 +82,7 @@ interface InviteResponse {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const cookie = await resolveCookie(args.api);
+  const cookie = await resolveAdminCookie(args.api);
 
   const body: { emails?: string[]; all?: boolean; limit?: number } =
     args.emails.length > 0
@@ -146,6 +101,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // SAFETY: the authenticated admin endpoint returns InviteResponse on success.
   const data = (await res.json()) as InviteResponse;
   if (data.invited.length === 0) {
     console.log("No new invites minted (all targets were already invited).");

@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
 
-import { waitForNodeE, waitForSeqE, waitForSeqStrictE } from "./collection";
+import { waitForSeqE, waitForSeqStrictE } from "./collection";
 
 // A committed structural write must stay pending without observed sync.
-// The strict calendar and daily-node barriers still reject a missing echo.
+// Calendar activation separately rejects a missing echo.
 
 describe("echo waiters", () => {
   test("waitForSeqE retains acknowledged writes across repeated echo deadlines", async () => {
@@ -24,12 +24,6 @@ describe("echo waiters", () => {
         expect(settled).toBe(false);
       }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
     );
-  });
-
-  test("waitForNodeE FAILS on timeout", async () => {
-    await expect(
-      Effect.runPromise(waitForNodeE("node-that-never-syncs", 20)),
-    ).rejects.toThrow();
   });
 
   test("waitForSeqStrictE FAILS when calendar activation misses its echo", async () => {

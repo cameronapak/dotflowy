@@ -33,7 +33,6 @@ import type {
   TokenSpec,
   TokenView,
   ViewContext,
-  ViewFilter,
   ViewStream,
   ViewTransform,
   WidgetEl,
@@ -289,22 +288,14 @@ const filterOperatorMap = buildFilterOperatorMap(allFilterOperators);
  *  for free, never hand-maintained. Consumed by `query-filter.tsx`. */
 export const filterOperatorInfos = collectOperatorKeyInfos(allFilterOperators);
 
-/**
- * The active view filter. The `?q=` query grammar is CORE now (ADR 0047), so
- * the query filter runs FIRST (against the composed operator map); only if there
- * is no query do the plugin `buildFilter` transforms get a turn (none contribute
- * one today -- hide-completed is a `hidesNode` prune). Passes the already-
- * composed `isHidden` so a filter prunes hidden nodes without re-deriving
- * completion.
- */
 export function buildViewFilter(
   index: TreeIndex,
   ctx: ViewContext,
   isHidden: (node: Node) => boolean,
   focusedKey: string | null = null,
-): ViewFilter | null {
+): QueryFilter | null {
   const q = ctx.search.q;
-  const queryFilter = buildQueryFilter(
+  return buildQueryFilter(
     index,
     ctx.rootId,
     q,
@@ -313,29 +304,23 @@ export function buildViewFilter(
     isMirrorsEnabled(),
     focusedKey,
   );
-  if (queryFilter) return queryFilter;
-  for (const t of viewTransforms) {
-    const f = t.buildFilter?.(index, ctx, isHidden);
-    if (f) return f;
-  }
-  return null;
 }
 
 /**
  * Subscribe to the active view filter, re-rendering ONLY while a filter is live.
- * When no plugin wants to filter (no `?q=` query) {@link buildViewFilter}
+ * Without a `?q=` query, {@link buildViewFilter}
  * returns null, so the cached snapshot stays a stable `null` and a no-filter
  * keystroke never re-renders the editor shell. Field-only text/tag edits reuse
  * unchanged membership or update changed leaves and their ancestor context.
  * Other edits recompute against the live tree. The cache (keyed on the shared index's
  * identity, which is stable between edits) keeps getSnapshot referentially
- * stable, as `useSyncExternalStore` requires. See ADR 0014 and ADR 0001 (Seam G).
+ * stable, as `useSyncExternalStore` requires. See ADR 0047.
  */
 export function useViewFilter(
   ctx: ViewContext,
   isHidden: (node: Node) => boolean,
   focusedKey: string | null = null,
-): ViewFilter | null {
+): QueryFilter | null {
   const cache = useRef<{
     index: TreeIndex;
     ctx: ViewContext;

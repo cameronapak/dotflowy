@@ -14,7 +14,7 @@ import {
   observeElementOffset,
   useVirtualizer,
 } from "@tanstack/react-virtual";
-import { Cause, Effect, Fiber } from "effect";
+import { Cause, Effect, Fiber, Predicate } from "effect";
 import {
   ChevronRight,
   HomeIcon,
@@ -709,12 +709,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // selection is active, and clears any stale selection on this view's mount.
   const selection = useSelectionMode({ refs, pendingFocus });
 
-  // The pruned visible-set for the active filter (matches + ancestor context),
-  // or null when no filter. A plugin-contributed Seam-G transform (the tags
-  // plugin's tag-filter), composed in registry.buildViewFilter. Subscribed via
-  // useViewFilter so the shell re-renders on a keystroke ONLY while a filter is
-  // live; with no filter its snapshot stays a stable null. Render-time only,
-  // never mutates a node (ADR 0015).
+  // Filter subscriptions stay inactive without a query, so ordinary keystrokes
+  // do not rebuild the editor shell. Filtering never mutates a node (ADR 0015).
   const [focusedFilterKey, setFocusedFilterKey] = useState<string | null>(null);
   const filter = useViewFilter(viewCtx, isHidden, focusedFilterKey);
   // Mirrored for event-time reads: a structural paste asks, after it lands,
@@ -1929,7 +1925,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     );
   };
 
-  // Deep-linked to a node that no longer exists (and the store has loaded).
   if (rootId !== null && zoomedNode === null && hasNodes) {
     return (
       <div className="mx-auto max-w-[720px] p-6 max-sm:px-4">
@@ -3207,39 +3202,62 @@ function useNodeCommands({
           toggleCompleted(id, completed);
         },
 
-        onSetTask: (id, isTask) => {
-          if (guardLocked(getTreeIndex(), id, rowOf(id))) return;
-          // A protected node stays a plain text node -- it can't become a to-do.
-          // This funnel catches every task-creation path (`/todo`, the `[]`
-          // autoformat). Un-tasking (isTask=false) is always allowed. See ADR 0015.
-          if (isTask && guardProtected(id, "task", rowOf(id))) return;
-          const node = getTreeIndex().byId.get(id);
-          if (node?.isTask === isTask && node.kind === null) return;
-          capture(getTreeIndex(), id, null, { label: "kind" });
-          setIsTask(id, isTask);
+        onSetTask: (ids, isTask) => {
+          const idx = getTreeIndex();
+          const single = Predicate.isString(ids);
+          const sources = new Set(
+            (single ? [ids] : ids).map((id) =>
+              isMirrorsEnabled() ? trueSourceOf(idx, id) : id,
+            ),
+          );
+          const targets = [...sources].filter((id) => {
+            const node = idx.byId.get(id);
+            if (!node || guardLocked(idx, id, rowOf(id))) return false;
+            if (isTask && guardProtected(id, "task", rowOf(id))) return false;
+            return node.isTask !== isTask || node.kind !== null;
+          });
+          if (!targets.length) return;
+          const apply = () => {
+            capture(idx, targets[0]!, null, { label: "kind" });
+            for (const id of targets) setIsTask(id, isTask);
+          };
+          if (single) apply();
+          else runStructural(apply);
         },
 
-        // `/paragraph`, and `/bullet`'s kind half (ADR 0045). A FIELD edit, like
-        // onSetTask: one PATCH, no `runStructural`, no echo wait. No protection
-        // gate -- a paragraph is still a plain text node, so none of the four
-        // protected-node rules (delete/blank/to-do/complete) are in play.
-        onSetKind: (id, kind, text) => {
-          if (guardLocked(getTreeIndex(), id, rowOf(id))) return;
-          const node = getTreeIndex().byId.get(id);
-          if (kind === "embed") {
-            if (guardProtected(id, "task", rowOf(id))) return;
-            const url = embedUrl(text ?? node?.text ?? "");
-            if (!url) return;
-            text = url;
-          }
-          if (
-            node?.kind === kind &&
-            !node.isTask &&
-            (text === undefined || node.text === text)
-          )
-            return;
-          capture(getTreeIndex(), id, null, { label: "kind" });
-          setKind(id, kind, text);
+        onSetKind: (ids, kind, text) => {
+          const idx = getTreeIndex();
+          const single = Predicate.isString(ids);
+          const sources = new Set(
+            (single ? [ids] : ids).map((id) =>
+              isMirrorsEnabled() ? trueSourceOf(idx, id) : id,
+            ),
+          );
+          const targets = [...sources].flatMap((id) => {
+            const node = idx.byId.get(id);
+            if (!node || guardLocked(idx, id, rowOf(id))) return [];
+            let nextText = text;
+            if (kind === "embed") {
+              if (guardProtected(id, "task", rowOf(id))) return [];
+              const url = embedUrl(text ?? node.text);
+              if (!url) return [];
+              nextText = url;
+            }
+            if (
+              node.kind === kind &&
+              !node.isTask &&
+              (nextText === undefined || node.text === nextText)
+            )
+              return [];
+            return [{ id, text: nextText }];
+          });
+          if (!targets.length) return;
+          const apply = () => {
+            capture(idx, targets[0]!.id, null, { label: "kind" });
+            for (const target of targets) setKind(target.id, kind, target.text);
+          };
+          if (single) apply();
+          else runStructural(apply);
         },
 
         onSetLocked: (id, locked) => {

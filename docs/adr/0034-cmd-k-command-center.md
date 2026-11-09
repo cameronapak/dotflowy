@@ -62,3 +62,13 @@ keymap before focus moves; the links plugin reuses its `/link` action. This appl
 rows, zoomed titles, and Quick-add. A collapsed caret, cross-node selection, or selected
 folded chip keeps the command-center behavior. An open typing menu keeps priority over
 editor keymaps. The header search button still opens the command center directly.
+
+## Shared operations and execution phase, November 2026
+
+Copy, export, and collapse live below menu presentation in `data/outline-actions.ts`.
+Settings passes whole-outline scope explicitly; contextual menu and command-center
+actions pass the current live view root. This shares behavior, not action registries.
+
+Spotlight declares `executionPhase: "after-editor-restore"` on its action.
+The dialog no longer infers timing from its ID. Other actions keep immediate
+execution so captured targets and browser user activation remain intact.

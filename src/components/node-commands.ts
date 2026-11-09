@@ -31,11 +31,13 @@ export interface NodeCommands {
   // hidden.
   onJoinPrevious: (id: string) => void;
   onToggleCompleted: (id: string, completed: boolean) => void;
-  // Set whether a bullet is a task (checkbox shown/hidden). Clears `kind`.
-  onSetTask: (id: string, isTask: boolean) => void;
-  // Set the node's kind: "paragraph" (paragraph glyph, prose) or null (plain bullet).
-  // Clears `isTask` -- the kinds are mutually exclusive (ADR 0045).
-  onSetKind: (id: string, kind: NodeKind, text?: string) => void;
+  /** Arrays convert eligible sources in one transaction and undo step. */
+  onSetTask: (ids: string | readonly string[], isTask: boolean) => void;
+  onSetKind: (
+    ids: string | readonly string[],
+    kind: NodeKind,
+    text?: string,
+  ) => void;
   // Set direct owner lock intent on the node's true source (ADR 0067).
   onSetLocked: (id: string, locked: boolean) => void;
   // Open the `/move` destination picker for this bullet.

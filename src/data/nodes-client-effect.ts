@@ -1,8 +1,9 @@
-import { Data, Duration, Effect, Schedule } from "effect";
+import { Data, Effect } from "effect";
 
 import type { ChangeOp } from "./realtime";
 import type { Node } from "./schema";
 
+import { withRequestBudget } from "./request-policy";
 import { getWriteClientId } from "./write-origin";
 
 /**
@@ -125,12 +126,6 @@ export type NodesError =
 
 // --- Core request effect ----------------------------------------------------
 
-/** Retry schedule: exponential backoff 100ms → cap, bounded to 4 attempts. */
-const retryPolicy = Schedule.max([
-  Schedule.exponential("100 millis"),
-  Schedule.recurs(4),
-]);
-
 /**
  * One HTTP request to /api/nodes as an Effect. Retries transport failures only
  * (see the module note); a non-2xx response lands as `NodesResponseError`, a
@@ -148,24 +143,17 @@ function request(
       fetch(ENDPOINT, {
         method,
         headers: { "content-type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: JSON.stringify(body),
         signal,
       }),
     catch: (cause) => new NodesTransportError({ cause }),
   }).pipe(
-    // Retry transport failures (with backoff), THEN bound the whole sequence by
-    // one 8s budget. Timeout OUTSIDE retry on purpose: if it wrapped each
-    // attempt, a wedged endpoint would get 8s PER attempt (~40s across 5) and
-    // hold the writeSem permit that long; outside, the entire request — every
-    // retry included — can't exceed 8s, and the timeout itself isn't retried.
     (effect) =>
-      "expectedSeq" in body && body.expectedSeq !== undefined
-        ? effect
-        : effect.pipe(Effect.retry(retryPolicy)),
-    Effect.timeoutOrElse({
-      duration: Duration.seconds(8),
-      orElse: () => Effect.fail(new NodesTimeoutError()),
-    }),
+      withRequestBudget(
+        effect,
+        () => new NodesTimeoutError(),
+        !("expectedSeq" in body && body.expectedSeq !== undefined),
+      ),
     Effect.flatMap(classifyResponse),
   );
 }

@@ -27,10 +27,7 @@ export interface TreeIndex {
   /**
    * Reverse mirror index (ADR 0022): a source node's id -> ids of the *mirror*
    * nodes pointing at it (`mirrorOf === sourceId`). Built here and maintained
-   * incrementally in tree-store.ts alongside `childrenByParent`. Stage 0 fills
-   * it but nothing reads it yet; Stage 1 uses it for the "mirrored xN" badge,
-   * Stage 3 for promote-on-delete. Empty for any mirror-free outline (every
-   * `mirrorOf` is null), so it costs nothing today.
+   * incrementally in tree-store.ts alongside `childrenByParent`.
    */
   mirrorsBySource: Map<string, string[]>;
   /** Canonical content ids covered by a direct, ancestor, or mirror-crossing

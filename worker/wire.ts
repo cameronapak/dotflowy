@@ -19,9 +19,13 @@
  * (worker/index.ts, worker/wire.test.ts) keep resolving `Node`/`ChangeOp` here.
  */
 
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 
-import { ChangeOpSchema, NodeSchema } from "../src/data/wire-schema";
+import {
+  ChangeOpSchema,
+  NodeSchema,
+  WeekStartSchema,
+} from "../src/data/wire-schema";
 
 export { NodeSchema } from "../src/data/wire-schema";
 export type { ChangeOp, Node } from "../src/data/wire-schema";
@@ -39,13 +43,17 @@ export const NodesPostBody = Schema.Struct({
   ),
 });
 
-/** PATCH /api/nodes — single-field edits. `changes` stays an open record; the DO
- *  filters it against its writable-column allowlist, so it can't be injected. */
+// Unknown fields remain ignored. Node identity and write-once provenance are
+// never PATCH-writable; every other value uses the canonical Node validator.
+export const NodeChangesSchema = NodeSchema.mapFields((fields) =>
+  Struct.map(Struct.omit(fields, ["id", "origin"]), Schema.optionalKey),
+);
+
 export const NodesPatchBody = Schema.Struct({
   updates: Schema.Array(
     Schema.Struct({
       id: Schema.String,
-      changes: Schema.Record(Schema.String, Schema.Unknown),
+      changes: NodeChangesSchema,
     }),
   ),
   clientId: Schema.optional(Schema.String),
@@ -81,7 +89,7 @@ export const WeekStartPostBody = Schema.Union([
   Schema.Struct({ operation: Schema.Literal("canonicalize") }),
   Schema.Struct({
     operation: Schema.Literal("set"),
-    weekStart: Schema.Literals(["sunday", "monday"]),
+    weekStart: WeekStartSchema,
   }),
 ]);
 

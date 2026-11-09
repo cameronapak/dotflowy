@@ -33,8 +33,6 @@ export type TagColor =
   | "purple"
   | "pink";
 
-/** `#tag` chip: the app's outline Badge, a full pill. Uncolored tags keep the
- * hairline border; a colored tag swaps it for the palette fill. */
 export function TagChip({
   color,
   children,
@@ -65,19 +63,7 @@ export function TagChip({
   );
 }
 
-/** The provenance tooltip, as the app's Tooltip draws it. `arrow` points up
- * at the sparkle it describes. */
-export function ProvenanceTip({
-  who = "Claude",
-  when = "2m ago",
-  arrow,
-  className,
-}: {
-  who?: string;
-  when?: string;
-  arrow?: "up" | "down";
-  className?: string;
-}) {
+export function ProvenanceTip({ className }: { className?: string }) {
   return (
     <span
       className={cn(
@@ -85,21 +71,11 @@ export function ProvenanceTip({
         className,
       )}
     >
-      {arrow && (
-        <span
-          aria-hidden
-          className={cn(
-            "absolute left-[1.1em] size-[0.6em] rotate-45 rounded-[0.12em] bg-foreground",
-            arrow === "up" ? "-top-[0.25em]" : "-bottom-[0.25em]",
-          )}
-        />
-      )}
-      Created by {who} · {when}
+      Created by Claude · 2m ago
     </span>
   );
 }
 
-/** The sparkle an agent-created row carries between its dot and its text. */
 export function AgentMark() {
   return (
     <Sparkle
@@ -110,8 +86,6 @@ export function AgentMark() {
   );
 }
 
-/** The todo checkbox: 16px, 4px radius, muted hairline; checked fills with
- * the primary and draws a 14px check. */
 export function Check({
   done,
   className,
@@ -136,7 +110,6 @@ export function Check({
   );
 }
 
-/** `||spoiler||`: a muted-foreground bar the width of its hidden text. */
 export function Spoiler({ children }: { children: string }) {
   return (
     <span className="rounded-[0.25em] bg-muted-foreground text-transparent">
@@ -145,8 +118,6 @@ export function Spoiler({ children }: { children: string }) {
   );
 }
 
-/** The 16px bullet box with its 7px dot. Collapsed rows get the ring that
- * signals hidden children. */
 export function Bullet({
   collapsed,
   accent,
@@ -171,9 +142,6 @@ export function Bullet({
   );
 }
 
-/** One outline row. `collapsed` also draws the gutter chevron, which the app
- * keeps visible on collapsed parents. `done` fades the whole row to 40% and
- * strikes the text, like `[data-faded]`. */
 export function Row({
   depth = 0,
   children,
@@ -222,9 +190,6 @@ export function Row({
   );
 }
 
-/** The app's page: the header bar (home, chevron breadcrumb, toolbar icons)
- * over a hairline, then the zoomed title and rows. `framed` adds the card
- * edge a hero needs to sit on a page. */
 export function AppPage({
   crumbs,
   title,
@@ -286,8 +251,6 @@ export function AppPage({
   );
 }
 
-/** The ⌘K node switcher: filled search field, a "Nodes" group, the fuzzy
- * match highlighted, and the path underneath. */
 export function NodeSwitcher({
   query,
   match,

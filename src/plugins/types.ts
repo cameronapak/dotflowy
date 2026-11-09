@@ -283,19 +283,6 @@ export interface RouteSearch {
   day?: string;
 }
 
-/**
- * A precomputed visible-set for a global view transform (the tag filter today).
- * Both sets contain render keys: bare node IDs until a mirror is crossed.
- * `visibleIds`: rows that render (matches, their descendants, and ancestor context).
- * `matchIds`: the subset rendered as real matches; the rest are dimmed context.
- */
-export interface ViewFilter {
-  visibleIds: Set<string>;
-  matchIds: Set<string>;
-  /** Shown when `matchIds` is empty; plugin-owned copy (the tag filter today). */
-  emptyMessage?: string;
-}
-
 export interface ViewTransform {
   /** Stable id, for debugging. */
   id: string;
@@ -306,18 +293,6 @@ export interface ViewTransform {
    * it allocation-free. Omit if this transform has no per-node prune.
    */
   hidesNode?(node: Node, ctx: ViewContext): boolean;
-  /**
-   * A global precompute that needs whole-tree context (the tag filter walks to
-   * mark ancestors of matches). Built once per view, not per parent. Receives
-   * the already-composed `isHidden` predicate so it can skip pruned nodes
-   * WITHOUT re-deriving completion -- cross-transform coupling stays generic.
-   * Return null to contribute no filter. First non-null across plugins wins.
-   */
-  buildFilter?(
-    index: TreeIndex,
-    ctx: ViewContext,
-    isHidden: (node: Node) => boolean,
-  ): ViewFilter | null;
 }
 
 // --- Seam I: input transforms (paste) ---------------------------------------

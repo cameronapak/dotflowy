@@ -359,19 +359,108 @@ test("the flow is one nonblank gate, a JSON POST, and a receipt check", () => {
   expect(request.WFHTTPMethod).toBe("POST");
   expect(request.WFHTTPBodyType).toBe("JSON");
 
-  const source = JSON.stringify(workflow);
-  for (const key of [
-    "attemptId",
-    "date",
-    "text",
-    "Authorization",
-    "Bearer ",
-    "saved",
-    "nodeId",
-    "dailyNoteId",
-    "yyyy-MM-dd",
-  ]) {
-    expect(source).toContain(key);
+  const fields = (value: Plist | undefined) =>
+    required(
+      asArray(asDict(asDict(value)?.Value)?.WFDictionaryFieldValueItems),
+      "dictionary fields",
+    ).map((item) => {
+      const field = required(asDict(item), "dictionary field");
+      const token = required(
+        asDict(asDict(field.WFValue)?.Value),
+        "field token",
+      );
+      return {
+        key: asString(asDict(asDict(field.WFKey)?.Value)?.string),
+        text: token.string,
+        outputs: Object.entries(asDict(token.attachmentsByRange) ?? {}).map(
+          ([range, output]) => ({
+            range,
+            name: asDict(output)?.OutputName,
+            uuid: asDict(output)?.OutputUUID,
+            type: asDict(output)?.Type,
+          }),
+        ),
+      };
+    });
+  const producer = (name: string) =>
+    parametersOf(
+      actions.findIndex(
+        (action) =>
+          asDict(asDict(action)?.WFWorkflowActionParameters)
+            ?.CustomOutputName === name,
+      ),
+    ).UUID;
+  const captureTextAt = actions.findIndex(
+    (action) =>
+      identifierOf(action) === "is.workflow.actions.conditional" &&
+      asDict(asDict(action)?.WFWorkflowActionParameters)?.WFControlFlowMode ===
+        2,
+  );
+  expect(fields(request.WFJSONValues)).toEqual([
+    {
+      key: "attemptId",
+      text: "\uFFFC",
+      outputs: [
+        {
+          range: "{0, 1}",
+          name: "attemptId",
+          uuid: producer("attemptId"),
+          type: "ActionOutput",
+        },
+      ],
+    },
+    {
+      key: "date",
+      text: "\uFFFC",
+      outputs: [
+        {
+          range: "{0, 1}",
+          name: "captureDate",
+          uuid: producer("captureDate"),
+          type: "ActionOutput",
+        },
+      ],
+    },
+    {
+      key: "text",
+      text: "\uFFFC",
+      outputs: [
+        {
+          range: "{0, 1}",
+          name: "captureText",
+          uuid: parametersOf(captureTextAt).UUID,
+          type: "ActionOutput",
+        },
+      ],
+    },
+  ]);
+  expect(fields(request.WFHTTPHeaders)).toEqual([
+    {
+      key: "Authorization",
+      text: "Bearer \uFFFC",
+      outputs: [
+        {
+          range: "{7, 1}",
+          name: "captureKey",
+          uuid: producer("captureKey"),
+          type: "ActionOutput",
+        },
+      ],
+    },
+    { key: "Content-Type", text: "application/json", outputs: [] },
+  ]);
+  for (const key of ["saved", "nodeId", "dailyNoteId"]) {
+    const consumer = required(
+      actions
+        .map((action) => asDict(asDict(action)?.WFWorkflowActionParameters))
+        .find((parameters) => parameters?.CustomOutputName === key),
+      `receipt ${key}`,
+    );
+    expect(consumer.WFDictionaryKey).toBe(key);
+    expect(asDict(asDict(consumer.WFInput)?.Value)).toMatchObject({
+      OutputName: "response",
+      OutputUUID: request.UUID,
+    });
   }
   const dateAt = actions.findIndex(
     (action) => identifierOf(action) === "is.workflow.actions.format.date",

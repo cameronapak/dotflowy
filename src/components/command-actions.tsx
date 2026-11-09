@@ -29,15 +29,16 @@ import type { CommandCenterAction } from "../data/command-center";
 import { useEditorFeatures } from "../data/editor-features";
 import { openFeedbackReport } from "../data/feedback";
 import { toggleBookmark } from "../data/mutations";
-import { useTree } from "../data/useTree";
-import { signOutAndReload } from "../lib/auth-client";
-import { usePluginChrome } from "../plugins/registry";
-import { openChangelog } from "./changelog-opener";
 import {
   copyOutlineAsMarkdown,
   exportOutlineAsOpml,
   setViewCollapsed,
-} from "./header-more-menu";
+} from "../data/outline-actions";
+import { useTree } from "../data/useTree";
+import { getViewRootId } from "../data/view-state";
+import { signOutAndReload } from "../lib/auth-client";
+import { usePluginChrome } from "../plugins/registry";
+import { openChangelog } from "./changelog-opener";
 import { restoreHistory, useHistoryState } from "./history-restore";
 import { openOpmlImport } from "./opml-import-opener";
 import { openFilterInput } from "./query-filter-nav";
@@ -127,7 +128,7 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["copy", "markdown", "export", "clipboard"],
         run: () => {
-          void copyOutlineAsMarkdown();
+          void copyOutlineAsMarkdown(getViewRootId());
         },
       },
       {
@@ -146,7 +147,7 @@ export function useGlobalActions(opts: {
         icon: DownloadIcon,
         scope: "global",
         keywords: ["export", "opml", "download", "file", "workflowy", "backup"],
-        run: exportOutlineAsOpml,
+        run: () => exportOutlineAsOpml(getViewRootId()),
       },
       {
         id: "g:collapse-all",
@@ -155,7 +156,7 @@ export function useGlobalActions(opts: {
         icon: ChevronsDownUpIcon,
         scope: "global",
         keywords: ["collapse", "fold", "all"],
-        run: () => setViewCollapsed(true),
+        run: () => setViewCollapsed(getViewRootId(), true),
       },
       {
         id: "g:expand-all",
@@ -164,7 +165,7 @@ export function useGlobalActions(opts: {
         icon: ChevronsUpDownIcon,
         scope: "global",
         keywords: ["expand", "unfold", "all"],
-        run: () => setViewCollapsed(false),
+        run: () => setViewCollapsed(getViewRootId(), false),
       },
       {
         id: "g:show-completed",
@@ -177,6 +178,7 @@ export function useGlobalActions(opts: {
       },
       {
         id: "g:spotlight",
+        executionPhase: "after-editor-restore",
         label: spotlight ? "Turn off spotlight mode" : "Spotlight mode",
         description: "Dim everything but the focused bullet",
         icon: FocusIcon,
@@ -191,8 +193,7 @@ export function useGlobalActions(opts: {
         icon: FilterIcon,
         scope: "global",
         keywords: ["filter", "search", "query", "find", "tag", "todo"],
-        // The switcher closes first (runAction), releasing focus; the opener
-        // defers focus a frame so the input wins the focus race (ADR 0047 §6).
+        // The opener defers focus so it wins the modal restoration race.
         run: () => openFilterInput(),
       },
     ];

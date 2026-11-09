@@ -38,3 +38,13 @@ MCP node results expose whether each node is effectively locked. Rejected tools 
 - Locking remains one small write regardless of subtree size, while validation pays the graph walk at the authoritative boundary.
 - Existing plugin protection remains separate: it protects load-bearing scaffold identity but deliberately allows edits and children, and uses a plugin-owned indicator when supplied; Locked protects owner-authored content recursively and retains the lock glyph.
 - Tests must falsify both sides of the boundary: an intact root move succeeds, while descendant edits, insertion, extraction, ancestor deletion, mirror-side edits, undo, MCP, and CLI writes fail atomically. Recovery bypass, view-state changes, unlocked copies, nested direct locks, and cross-mirror inheritance require explicit coverage.
+
+## Kind conversion across command surfaces, November 2026
+
+Single-node and selection commands use the editor's same Kind handlers. They
+resolve and deduplicate true sources, skip locked content and redundant writes,
+and apply the existing plugin-protection rules. A selection converts its eligible
+sources in one transaction and one undo step rather than submitting an optimistic
+batch that the DO must reject because one selected source is locked. Paragraph
+conversion remains allowed for plugin-protected nodes; it adds none of the four
+forbidden operations in ADR 0015.

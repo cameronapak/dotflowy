@@ -1,8 +1,7 @@
 // The daily-note get-or-create engine (ADR 0001 / 0041 / 0052), extracted from
 // `index.tsx` so BOTH the plugin definition and the week-calendar subheader
 // strip (ADR 0054) can import `goToDate` without an import cycle (index.tsx
-// imports the strip for its slot; the strip imports nav from here). Behavior is
-// byte-identical to when this lived in index.tsx.
+// imports the strip for its slot; the strip imports nav from here).
 //
 // The cascade is CLAIM-FIRST: when the local replica shows a scaffold/day node
 // absent, mint a candidate id and run it through the atomic `claimMapping`. The
@@ -57,7 +56,6 @@ import {
   getKeyForNode,
   getMappedId,
   refreshDailyIndex,
-  setMapping,
 } from "./daily-index";
 import { withDailyNavigation } from "./pending";
 import {
@@ -85,7 +83,6 @@ async function claimScaffoldNode(
     return { id: existing, won: false, present: true };
   const candidate = createId();
   const { winner, won } = await claimMapping(key, candidate);
-  setMapping(key, winner);
   return { id: winner, won, present: hasNode(winner) };
 }
 
@@ -382,7 +379,6 @@ async function runDailyMigration(
         ? adoptable
         : createId();
     const { winner, won } = await claimMapping(key, candidate);
-    setMapping(key, winner);
     claimedIds.set(key, winner);
     const present = hasNode(winner);
     claims.push({ key, id: winner, present });
@@ -530,7 +526,7 @@ export async function getOrCreateDayResult(
       key,
       opts?.seedEntryLine ?? false,
       expectedSeq,
-    );
+    ).catch((cause): GetOrCreateResult => ({ id: null, cause }));
     inFlightDays.set(key, creating);
     void creating.finally(() => {
       if (inFlightDays.get(key) === creating) inFlightDays.delete(key);
@@ -540,7 +536,9 @@ export async function getOrCreateDayResult(
   // `trackNavigation: false` skips the shared nav-pending signal (ADR 0049): a
   // background quick-add born resolves today's note WITHOUT spinning the
   // unrelated header "Today" button, which is reserved for an actual navigation.
-  return opts?.trackNavigation === false ? run() : withDailyNavigation(run);
+  return (
+    opts?.trackNavigation === false ? run() : withDailyNavigation(run)
+  ).catch((cause): GetOrCreateResult => ({ id: null, cause }));
 }
 
 /** Ensure the container + the day exist and return the day's node id (no nav).
@@ -698,7 +696,7 @@ export async function getOrCreateScaffold(
       if (hasNode(target.id)) return { id: target.id };
       resyncNodes();
       return { id: null, cause: null };
-    })();
+    })().catch((cause): GetOrCreateResult => ({ id: null, cause }));
 
     inFlightScaffolds.set(key, creating);
     void creating.finally(() => {
@@ -708,10 +706,9 @@ export async function getOrCreateScaffold(
     return creating;
   };
 
-  const result =
-    opts?.trackNavigation === false
-      ? await run()
-      : await withDailyNavigation(run);
+  const result = await (
+    opts?.trackNavigation === false ? run() : withDailyNavigation(run)
+  ).catch((cause): GetOrCreateResult => ({ id: null, cause }));
   if (result.id !== null) return result.id;
   if (!isNodesLimitError(result.cause))
     toast.error(opts?.failureToast ?? "Couldn't open that calendar page");

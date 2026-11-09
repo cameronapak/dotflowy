@@ -24,10 +24,9 @@
 
 import { EyeOffIcon } from "lucide-react";
 
-import { mdPunct } from "../../components/inline-code";
 import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
 import { SPOILER_PATTERN, spoilerInterior } from "../../data/spoiler";
-import { isRevealed } from "../token-kit";
+import { isRevealed, mdPunct } from "../token-kit";
 import { definePlugin, type El, type PluginContext } from "../types";
 
 const SPOILER_MARKER: MarkerPair = { pre: "||", post: "||" };

@@ -11,8 +11,7 @@ import type { CommandSpec } from "../plugins/types";
 
 import { waitForPendingWrites } from "./api";
 import { isMirrorsEnabled } from "./flags";
-import { capture } from "./history";
-import { setKind, setLocked } from "./mutations";
+import { setLocked } from "./mutations";
 import { runStructural } from "./structural";
 import { isNodeInheritedLocked, isNodeLocked, trueSourceOf } from "./tree";
 
@@ -38,26 +37,7 @@ export const paragraphCommand: CommandSpec = {
   keywords: ["paragraph", "prose", "text", "note", "into"],
   available: (node) => node.kind !== "paragraph",
   run: (id, ctx) => ctx.mutations.onSetKind(id, "paragraph"),
-  // Node multi-selection: convert every selected root in ONE batch -- a single
-  // undo step, one DO frame. The todos To-do shape, minus its `isProtected`
-  // filter: To-do skips protected nodes because ADR 0015 BLOCKS the single-node
-  // `/todo` on them, and the batch must agree with it. Nothing blocks
-  // `/paragraph` (a paragraph is still a plain text node -- none of the four
-  // protected rules are delete, blank, to-do, or complete), so filtering here
-  // would invent a fifth rule that the single-node path doesn't enforce.
-  // Already-paragraph nodes are skipped as a redundant write; an empty run
-  // no-ops cleanly.
-  runMany: (ids, ctx) => {
-    const targets = ids.filter((id) => {
-      const n = ctx.tree.byId.get(id);
-      return !!n && n.kind !== "paragraph";
-    });
-    if (targets.length === 0) return;
-    runStructural(() => {
-      capture(ctx.tree, targets[0]!);
-      for (const id of targets) setKind(id, "paragraph");
-    });
-  },
+  runMany: (ids, ctx) => ctx.mutations.onSetKind(ids, "paragraph"),
 };
 
 export const lockCommand: CommandSpec = {

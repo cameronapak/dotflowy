@@ -60,6 +60,47 @@ test("NodesPostBody decodes ops with correlation and history metadata", () => {
   expect(post.expectedSeq).toBe(12);
 });
 
+test("PATCH validates every writable field before accepting a batch", () => {
+  const decode = Schema.decodeUnknownSync(NodesPatchBody);
+  expect(
+    decode({
+      updates: [
+        {
+          id: "a",
+          changes: {
+            parentId: null,
+            kind: null,
+            completed: false,
+            id: "other",
+            origin: "agent",
+            unknown: 1,
+          },
+        },
+      ],
+    }),
+  ).toEqual({
+    updates: [
+      { id: "a", changes: { parentId: null, kind: null, completed: false } },
+    ],
+  });
+  for (const changes of [
+    { completed: "false" },
+    { text: 123 },
+    { locked: null },
+    { updatedAt: "now" },
+    { kind: "task" },
+  ]) {
+    expect(() =>
+      decode({
+        updates: [
+          { id: "a", changes: { text: "valid" } },
+          { id: "b", changes },
+        ],
+      }),
+    ).toThrow();
+  }
+});
+
 test.each<[string, AnyBody, WirePayload]>([
   [
     "NodesPostBody: an atomic structural batch of ops",
@@ -79,7 +120,7 @@ test.each<[string, AnyBody, WirePayload]>([
   ],
   ["NodesPostBody: an empty no-op write", NodesPostBody, {}],
   [
-    "NodesPatchBody: field updates with an open changes record and clientId",
+    "NodesPatchBody: typed field updates and clientId",
     NodesPatchBody,
     {
       updates: [{ id: "a", changes: { text: "x", completed: true } }],

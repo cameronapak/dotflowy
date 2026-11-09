@@ -19,7 +19,7 @@
  */
 
 import { sendEmail } from "./email";
-import { normalizeEmail } from "./invites";
+import { normalizeEmail } from "./identity";
 
 /** The env slice the announcement flow needs: D1 (the `waitlist` table) and the
  *  email seam. */

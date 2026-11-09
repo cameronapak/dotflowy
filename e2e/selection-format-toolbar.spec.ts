@@ -233,3 +233,52 @@ for (const platform of ["MacIntel", "Linux x86_64"]) {
     }
   });
 }
+
+test("link cancellation is ready immediately after autofocus", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.addEventListener("focusin", (event) => {
+      const target = event.target;
+      if (
+        !(target instanceof HTMLInputElement) ||
+        target.getAttribute("aria-label") !== "Link URL"
+      )
+        return;
+      // Queue input before the browser advances to passive effects or timers.
+      queueMicrotask(() => {
+        document.documentElement.dataset.earlyEscape = "sent";
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            code: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+    });
+  });
+  await load(page, [
+    {
+      id: "n",
+      parentId: null,
+      prevSiblingId: null,
+      text: "Before bravo after",
+    },
+  ]);
+  const editor = text(page, "n");
+  await editor.click();
+  await editor.evaluate((el) => {
+    window
+      .getSelection()!
+      .setBaseAndExtent(el.firstChild!, 7, el.firstChild!, 12);
+  });
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-early-escape",
+    "sent",
+  );
+  await expect(page.locator("[data-link-edit-popover]")).toBeHidden();
+  await expect(editor).toHaveText("Before bravo after");
+});

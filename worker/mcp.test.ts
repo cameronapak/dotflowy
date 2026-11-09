@@ -1276,12 +1276,10 @@ test("a store fault surfaces as a tool error with the real message", async () =>
   // message. They now match commit(): an isError tool result carrying the
   // store's own diagnostic (the caller is the shard owner's own agent).
   const broken: OutlineStore = {
+    ...makeStore([]).store,
     getNodes: () => {
       throw new Error("too many terms in compound SELECT: SQLITE_ERROR");
     },
-    applyBatch: () => 0,
-    getKv: () => [],
-    getOrCreateKv: () => ({ key: "", nodeId: "" }),
   };
   const json = await callTool(broken, "get_outline", {});
   expect(json.result?.isError).toBe(true);

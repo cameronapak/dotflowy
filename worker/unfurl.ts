@@ -268,12 +268,6 @@ export const unfurlTitleE = Effect.fnUntraced(function* (url: string) {
   return title;
 });
 
-/** Promise shell over `unfurlTitleE` for non-Effect call sites. Prefer the
- *  Effect form inside the Worker pipeline. */
-export function unfurlTitle(url: string): Promise<string | null> {
-  return Effect.runPromise(unfurlTitleE(url));
-}
-
 /** Background authoring paths share the authenticated endpoint's quota. */
 export const rateLimitedTitleE = Effect.fn("Unfurl.rateLimitedTitle")(
   function* (url: string, limiter: RateLimit, key: string) {

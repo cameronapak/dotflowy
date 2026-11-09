@@ -20,19 +20,14 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { toast } from "sonner";
 
 import { useUnseenReleaseCount } from "../data/changelog-cursor";
-import { localDateKey } from "../data/date-links";
-import { downloadTextFile } from "../data/download";
 import { openFeedbackReport } from "../data/feedback";
-import { flattenInline } from "../data/inline-text";
-import { outlineToMarkdown } from "../data/markdown";
-import { toggleBookmark, toggleCollapsed } from "../data/mutations";
-import { exportOpml } from "../data/opml-export";
-import { runStructural } from "../data/structural";
-import { childrenOf } from "../data/tree";
-import { getTreeIndex } from "../data/tree-store";
+import { toggleBookmark } from "../data/mutations";
+import {
+  copyOutlineAsMarkdown,
+  setViewCollapsed,
+} from "../data/outline-actions";
 import { useTree } from "../data/useTree";
 import { getViewRootId } from "../data/view-state";
 import { useIsMobile } from "../hooks/use-mobile";
@@ -70,109 +65,6 @@ function GitHubIcon() {
   );
 }
 
-/**
- * Copy the current view's subtree to the clipboard as a markdown bullet list.
- * Scope is the zoom root (read live at click time), or every top-level node at
- * home -- the header is contextual to the current zoom view. See ADR 0017.
- */
-export async function copyOutlineAsMarkdown() {
-  const index = getTreeIndex();
-  const rootId = getViewRootId();
-  const rootIds = rootId ? [rootId] : childrenOf(index, null).map((n) => n.id);
-  const markdown = outlineToMarkdown(index, rootIds);
-  if (!markdown) {
-    toast("Nothing to copy");
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(markdown);
-    toast.success("Copied as Markdown");
-  } catch {
-    toast.error("Couldn't copy to clipboard");
-  }
-}
-
-/**
- * Download the current view as an OPML file (ADR 0037). Scope mirrors
- * `copyOutlineAsMarkdown`: the zoom root's subtree (root INCLUDED), or the
- * whole outline at home -- read live at click time. Serialization is entirely
- * the shared core (`exportOpml`); this shell only picks the scope, names the
- * file, and hands the string to the browser.
- *
- * Filename: `dotflowy-export-<YYYY-MM-DD>.opml` at home; a zoomed export
- * swaps `export` for a slug of the root's flattened text
- * (`dotflowy-<slug>-<date>.opml`). The date is the LOCAL calendar day
- * (`localDateKey`, never `toISOString` -- the daily-notes rule).
- */
-export function exportOutlineAsOpml() {
-  const index = getTreeIndex();
-  const rootId = getViewRootId();
-  const root = rootId ? (index.byId.get(rootId) ?? null) : null;
-  const rootText = root ? flattenInline(root.text) : "";
-  const slug = rootText
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40)
-    .replace(/-+$/, "");
-  const date = localDateKey();
-  const filename = slug
-    ? `dotflowy-${slug}-${date}.opml`
-    : `dotflowy-export-${date}.opml`;
-  const opml = exportOpml(index, root ? root.id : null, {
-    title: rootText || "dotflowy export",
-  });
-  downloadTextFile(filename, "text/x-opml;charset=utf-8", opml);
-}
-
-/**
- * Collect the collapsible nodes under the current view whose `collapsed` flag
- * needs to change to `collapsed`. Scope is the zoom root's subtree (read live at
- * click time), or the whole outline at home -- same contextual rule as
- * `copyOutlineAsMarkdown`. We seed the walk from the root's CHILDREN so the zoom
- * root itself is never collapsed (that would hide the whole view). Only nodes
- * that actually have children are collapsible; leaves are skipped. Already-in-
- * target-state nodes are filtered out so a bulk toggle ships no redundant PATCHes.
- * The walk descends through already-collapsed branches (the index is unaffected
- * by the flag), so "Expand all" reaches every nested node.
- */
-function collapsibleTargets(collapsed: boolean) {
-  const index = getTreeIndex();
-  const rootId = getViewRootId();
-  const targets: string[] = [];
-  const seen = new Set<string>();
-  const stack = childrenOf(index, rootId).map((n) => n.id);
-  while (stack.length) {
-    const id = stack.pop()!;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    const kids = childrenOf(index, id);
-    if (kids.length === 0) continue;
-    if ((index.byId.get(id)?.collapsed ?? false) !== collapsed)
-      targets.push(id);
-    for (const k of kids) stack.push(k.id);
-  }
-  return { ids: targets, rootId };
-}
-
-/**
- * Collapse or expand every collapsible node under the current view in ONE
- * atomic batch. Wrapped in `runStructural` so N `collapsed` field edits ship as
- * a single DO frame (one round-trip, one broadcast) instead of N PATCHes.
- * Browsing does not enter authoring history (ADR 0064). These are field edits,
- * not chain relinks, so the sibling chain is untouched.
- */
-export function setViewCollapsed(collapsed: boolean) {
-  const { ids } = collapsibleTargets(collapsed);
-  if (ids.length === 0) {
-    toast(collapsed ? "Already collapsed" : "Already expanded");
-    return;
-  }
-  runStructural(() => {
-    for (const id of ids) toggleCollapsed(id, collapsed);
-  });
-}
-
 /** Current-view actions and display toggles, separate from account/help (ADR 0072). */
 function ViewMenuItems() {
   const mobile = useIsMobile();
@@ -207,17 +99,21 @@ function ViewMenuItems() {
         </DropdownMenuCheckboxItem>
       )}
 
-      <DropdownMenuItem onClick={() => setViewCollapsed(true)}>
+      <DropdownMenuItem onClick={() => setViewCollapsed(getViewRootId(), true)}>
         <HugeiconsIcon icon={ArrowShrinkIcon} />
         Collapse all
       </DropdownMenuItem>
 
-      <DropdownMenuItem onClick={() => setViewCollapsed(false)}>
+      <DropdownMenuItem
+        onClick={() => setViewCollapsed(getViewRootId(), false)}
+      >
         <HugeiconsIcon icon={ArrowExpandIcon} />
         Expand all
       </DropdownMenuItem>
 
-      <DropdownMenuItem onClick={() => void copyOutlineAsMarkdown()}>
+      <DropdownMenuItem
+        onClick={() => void copyOutlineAsMarkdown(getViewRootId())}
+      >
         <HugeiconsIcon icon={Copy01Icon} />
         Copy as Markdown
       </DropdownMenuItem>

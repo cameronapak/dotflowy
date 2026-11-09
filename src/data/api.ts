@@ -30,7 +30,7 @@ import {
  * See docs/adr/0021-effect-first-one-schema-language.md.
  *
  * STRUCTURAL writes (insert/delete a bullet — anything that relinks the sibling
- * chain) go through `persistBatch` instead: one request carrying every op, so
+ * chain) go through `persistBatchE` instead: one request carrying every op, so
  * the DO commits them as one atomic frame. The per-type create/update/delete
  * helpers below stay for FIELD edits (text, completed, …) and the first-run
  * seed. See structural.ts and PLAN.md.
@@ -121,15 +121,6 @@ export const persistBatchE = (
     ),
   );
 
-/**
- * Throw-shell over `persistBatchE` for the non-composing callers (and the unit
- * tests). The caller (`runStructural`) waits for the returned seq to echo back
- * before dropping its optimistic overlay; all-or-nothing on failure.
- */
-export function persistBatch(ops: ChangeOp[]): Promise<{ seq: number }> {
-  return runPromise(persistBatchE(ops));
-}
-
 export const createNodes = (nodes: Node[]): Promise<void> =>
   runPromise(enqueueWrite(createNodesE(nodes)));
 
@@ -144,7 +135,7 @@ export const createNodes = (nodes: Node[]): Promise<void> =>
 //      Last-writer-wins then persists the stale "ab" and broadcasts it as the
 //      newest seq -- the echo overwrites the live row with older text and the
 //      "c" is lost (and survives refresh). The field-edit twin of the structural
-//      fan that `persistBatch` serializes away.
+//      fan that `persistBatchE` serializes away.
 //   2) Cost. One Worker + Durable Object invocation (a SQL write + a broadcast)
 //      PER CHARACTER. A 40-character bullet billed 40 round trips.
 //

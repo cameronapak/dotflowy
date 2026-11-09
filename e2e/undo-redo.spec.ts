@@ -812,7 +812,9 @@ test("undo and redo in a filter input stay separate from outline authoring", asy
   await page.keyboard.press("ControlOrMeta+f");
   const filter = page.getByRole("combobox", { name: "Filter query" });
   await expect(filter).toBeFocused();
-  await page.keyboard.type("Alpha");
+  // Native typing groups vary by browser; one edit tests history isolation
+  // without prescribing that grouping (ADR 0064).
+  await page.keyboard.insertText("Alpha");
   await page.keyboard.press("ControlOrMeta+z");
   await expect(filter).toHaveValue("");
   await expect(alpha).toHaveText("Alpha kept");

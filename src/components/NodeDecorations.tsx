@@ -75,16 +75,11 @@ export function NodeDecorations({
   node,
   position,
   getCtx,
-  onExpand,
 }: {
   node: Node;
   position: AfterTextPosition;
   /** The stable PluginContext factory the row passes everywhere. */
   getCtx: () => PluginContext;
-  /** Override what the overflow affordance opens. Defaults to the node's detail
-   *  in the Tier-3 side panel (`ctx.openPanel`), so the hidden decorations are
-   *  always reachable -- a consumer only passes this to do something else. */
-  onExpand?: () => void;
 }) {
   // The compiled-in slot roster is stable. Empty positions pay no zone or
   // observer cost; a registered component may itself render null while idle.
@@ -113,15 +108,10 @@ export function NodeDecorations({
 
   if (!hasSlots) return null;
 
-  // The affordance always has somewhere to go: open the node's full detail in
-  // the side panel unless a consumer overrides it. So it shows whenever the
-  // budget actually hid something (overflowing), never as a dead control.
-  const handleExpand =
-    onExpand ??
-    (() =>
-      getCtx().openPanel(
-        <NodeOverflowPanel node={node} position={position} getCtx={getCtx} />,
-      ));
+  const handleExpand = () =>
+    getCtx().openPanel(
+      <NodeOverflowPanel node={node} position={position} getCtx={getCtx} />,
+    );
 
   return (
     <span className="node-deco" data-overflowing={overflowing || undefined}>

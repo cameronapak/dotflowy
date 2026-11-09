@@ -1,6 +1,5 @@
 {
-  // Typechecks the Playwright specs and fixtures. e2e does not run in CI, so
-  // this is the CI signal that a spec still compiles against the app it drives.
+  // Typechecks Playwright specs and fixtures separately from the browser app.
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "types": ["node"],

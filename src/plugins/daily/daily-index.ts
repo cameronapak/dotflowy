@@ -4,7 +4,7 @@ import { Effect, Schema } from "effect";
 import { useCallback, useSyncExternalStore } from "react";
 
 import { subscribeCalendarSync } from "../../data/calendar-sync";
-import { localDateKey } from "../../data/date-links";
+import { localDateKey, parseDateKey } from "../../data/date-links";
 import {
   getEditorFeatures,
   subscribeEditorFeatures,
@@ -19,7 +19,6 @@ import {
 import { kvGetOrCreateE } from "../../data/kv-client-effect";
 import { queryClient } from "../../data/query-client";
 import { hasWindow } from "../../env";
-import { resolveDailyClaim } from "./claim-mapping";
 
 /**
  * The daily index -- the *identity* of a daily note (ADR 0001). A row maps a
@@ -50,7 +49,6 @@ export const DAILY_CONTAINER_TEXT = "Daily";
 const dailyRowSchema = Schema.Struct({
   /** `YYYY-MM-DD` (local) for a day, or {@link CONTAINER_KEY}. */
   key: Schema.String,
-  /** The node this key points at. */
   nodeId: Schema.String,
 });
 
@@ -93,26 +91,7 @@ export const dailyIndexCollection = createCollection(
  */
 export { localDateKey } from "../../data/date-links";
 
-/** Parse a `YYYY-MM-DD` key to a *local* Date at noon (a TZ-safe midpoint that
- *  never slips a day under DST). Null on a malformed key. */
-function parseDateKey(key: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
-  if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12);
-}
-
-/** The full, human date used to seed a day node's text + feed Cmd+K search,
- *  e.g. "Tuesday, June 23, 2026". */
-export function formatDayText(key: string): string {
-  const d = parseDateKey(key);
-  if (!d) return key;
-  return d.toLocaleDateString(undefined, {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
+export { formatDateFull as formatDayText } from "../../data/date-links";
 
 /** The *relative* label for a day key -- Today / Yesterday / Tomorrow -- or null
  *  for anything further out. Null (not a short date) on purpose: a date is
@@ -160,10 +139,7 @@ export function getContainerId(): string | null {
   return findRow((r) => r.key === CONTAINER_KEY)?.nodeId ?? null;
 }
 
-/** The node id mapped to ANY scaffold key -- container / year / month / week /
- *  day (issue #271). The generic reverse of {@link setMapping}, used by the
- *  Daily > Y > M > W > D get-or-create cascade AND to look up a day note by its
- *  date key. */
+/** The node id mapped to any scaffold key, including a day's local date key. */
 export function getMappedId(key: string): string | null {
   return findRow((r) => r.key === key)?.nodeId ?? null;
 }
@@ -178,15 +154,6 @@ export function getKeyForNode(nodeId: string): string | null {
   return keyByNodeId.get(nodeId) ?? null;
 }
 
-/** Upsert a `key -> nodeId` mapping (used when (re)creating a container/day). */
-export function setMapping(key: string, nodeId: string): void {
-  if (dailyIndexCollection.toArray.some((r) => r.key === key)) {
-    dailyIndexCollection.update(key, (draft) => void (draft.nodeId = nodeId));
-  } else {
-    dailyIndexCollection.insert({ key, nodeId });
-  }
-}
-
 /**
  * Atomic, server-authoritative claim of a `key -> nodeId` mapping. Mints nothing
  * itself — the caller supplies a `candidate` node id, and this returns the
@@ -195,35 +162,26 @@ export function setMapping(key: string, nodeId: string): void {
  * locally and both claim; the single-threaded DO lets exactly
  * one win, killing the duplicate-daily-note race at the source.
  *
- * Uses `/api/kv?op=claim` (Effect path). On network/server failure, treat `candidate`
- * as the winner so the feature keeps working.
+ * A failed or malformed claim cannot establish identity. Only adopt confirmed
+ * winners locally; an ordinary KV upsert would bypass get-or-create arbitration.
  */
 export async function claimMapping(
   key: string,
   candidate: string,
 ): Promise<{ winner: string; won: boolean }> {
-  /**
-   * Route every typed kv error to a single degraded outcome *inside* the Effect
-   * pipeline, then runPromise never rejects — caller sees only plain success.
-   * This is the whole point of the Effect boundary: error shape is known at the
-   * type level, and the recovery is expressed as a program transform, not a
-   * catch-block after the fact.
-   */
+  // A pending initial snapshot must settle before adopting its newer claim.
+  await dailyIndexCollection.preload();
   const row = await Effect.runPromise(
-    kvGetOrCreateE<DailyRow>(KV, key, { key, nodeId: candidate }).pipe(
-      Effect.match({
-        onFailure: (e) => {
-          console.warn(
-            `daily: claim "${key}" failed, creating locally:`,
-            e.message,
-          );
-          return { key, nodeId: candidate } satisfies DailyRow;
-        },
-        onSuccess: (r) => r,
-      }),
+    kvGetOrCreateE<unknown>(KV, key, { key, nodeId: candidate }).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(dailyRowSchema)),
+      Effect.filterOrFail(
+        (row) => row.key === key && row.nodeId.length > 0,
+        () => new Error("daily claim returned an invalid identity"),
+      ),
     ),
   );
-  return resolveDailyClaim(row.nodeId, candidate);
+  dailyIndexCollection.utils.writeUpsert(row);
+  return { winner: row.nodeId, won: row.nodeId === candidate };
 }
 
 // --- Reactive read (mirrors tag-colors.ts; prerender-safe) ------------------

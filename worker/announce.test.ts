@@ -1,3 +1,4 @@
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { expect, test } from "bun:test";
 
 import {
@@ -19,108 +20,109 @@ test("announceEmail carries the signup url and discloses that founding auto-rene
   }
 });
 
-/**
- * A stateful in-memory `waitlist` table, just enough to exercise the two SQL
- * statements the announcement flow issues: the conditional `notifiedAt` claim
- * and the pending-rows SELECT. The claim mirrors real D1 semantics — an UPDATE
- * that matches 0 rows reports `meta.changes === 0` — which is the whole
- * idempotency guarantee under test.
- */
-function fakeWaitlistDb(
+function waitlistFixture(
   rows: Array<{ email: string; createdAt: number; notifiedAt: number | null }>,
 ) {
-  // SAFETY: the object below implements the D1 surface sendAnnouncements uses (prepare/bind/run/all) and nothing else; the single assertion stamps it as D1Database for the env.
-  const db = Object.assign({} as D1Database, {
-    prepare() {
+  const sql = new Database(":memory:");
+  sql.run(
+    "CREATE TABLE waitlist (email TEXT PRIMARY KEY, createdAt INTEGER NOT NULL, notifiedAt INTEGER)",
+  );
+  for (const row of rows)
+    sql.run("INSERT INTO waitlist VALUES (?, ?, ?)", [
+      row.email,
+      row.createdAt,
+      row.notifiedAt,
+    ]);
+  // SAFETY: this adapter exposes only the D1 methods used by this workflow.
+  // SQLite, not the fixture, executes the production WHERE, ORDER BY and LIMIT.
+  const db = {
+    prepare(query: string) {
+      const statement = sql.query(query);
       return {
-        bind(...args: unknown[]) {
+        bind(...args: SQLQueryBindings[]) {
           return {
-            run() {
-              // UPDATE waitlist SET notifiedAt = ? WHERE email = ? AND notifiedAt IS NULL
-              // SAFETY: this stub is bound only by that UPDATE, whose args are [notifiedAt: number, email: string].
-              const [, email] = args as [number, string];
-              const row = rows.find((r) => r.email === email);
-              if (row && row.notifiedAt == null) {
-                // SAFETY: args[0] is the notifiedAt timestamp the caller bound as a number.
-                row.notifiedAt = args[0] as number;
-                return Promise.resolve({ meta: { changes: 1 } });
-              }
-              return Promise.resolve({ meta: { changes: 0 } });
+            async run() {
+              return { meta: { changes: statement.run(...args).changes } };
             },
-            all() {
-              // SELECT email FROM waitlist WHERE notifiedAt IS NULL ... [LIMIT ?]
-              // SAFETY: the only optional bind on this SELECT is the LIMIT integer.
-              const limit = args.length > 0 ? (args[0] as number) : undefined;
-              const pending = rows
-                .filter((r) => r.notifiedAt == null)
-                .sort((a, b) => a.createdAt - b.createdAt)
-                .map((r) => ({ email: r.email }));
-              return Promise.resolve({
-                results: limit != null ? pending.slice(0, limit) : pending,
-              });
+            async all() {
+              return { results: statement.all(...args) };
             },
           };
         },
-        all() {
-          // The no-bind SELECT (limit === null).
-          const pending = rows
-            .filter((r) => r.notifiedAt == null)
-            .sort((a, b) => a.createdAt - b.createdAt)
-            .map((r) => ({ email: r.email }));
-          return Promise.resolve({ results: pending });
+        async all() {
+          return { results: statement.all() };
         },
       };
     },
-  });
-  // EMAIL omitted: sendEmail falls back to console logging (never throws), so a
-  // `notified` entry means the row was claimed and the send was attempted.
-  const env: AnnounceEnv = { DB: db };
-  return { env, rows };
+  } as D1Database;
+  const sent: string[] = [];
+  const env: AnnounceEnv = {
+    DB: db,
+    EMAIL: {
+      async send(message) {
+        sent.push(String(message.to));
+        return { messageId: `message-${sent.length}` };
+      },
+    },
+  };
+  return { env, sql, sent };
 }
 
 test("sendAnnouncements claims each pending waitlist address once, so a re-run sends nothing", async () => {
-  const { env, rows } = fakeWaitlistDb([
+  const { env, sql, sent } = waitlistFixture([
     { email: "second@b.com", createdAt: 2, notifiedAt: null },
     { email: "old@b.com", createdAt: 1, notifiedAt: 500 },
     { email: "first@b.com", createdAt: 1, notifiedAt: null },
     { email: "third@b.com", createdAt: 3, notifiedAt: null },
   ]);
-  // Pending lists only un-notified rows, oldest first, honoring the limit.
-  expect(await pendingAnnounceEmails(env, null)).toEqual([
-    "first@b.com",
-    "second@b.com",
-    "third@b.com",
-  ]);
-  expect(await pendingAnnounceEmails(env, 2)).toEqual([
-    "first@b.com",
-    "second@b.com",
-  ]);
-
-  // Input is normalized and de-duped; an already-notified row and an address
-  // not on the waitlist are skipped, never emailed.
-  const res = await sendAnnouncements(
-    env,
-    [
-      "  First@B.com ",
+  try {
+    // Pending lists only un-notified rows, oldest first, honoring the limit.
+    expect(await pendingAnnounceEmails(env, null)).toEqual([
       "first@b.com",
-      "",
       "second@b.com",
-      "old@b.com",
-      "stranger@x.com",
-    ],
-    "https://dotflowy.com",
-  );
-  expect(res.notified.sort()).toEqual(["first@b.com", "second@b.com"]);
-  expect(res.skipped.sort()).toEqual(["old@b.com", "stranger@x.com"]);
-  expect(rows.find((r) => r.email === "old@b.com")!.notifiedAt).toBe(500);
-  expect(await pendingAnnounceEmails(env, null)).toEqual(["third@b.com"]);
+      "third@b.com",
+    ]);
+    expect(await pendingAnnounceEmails(env, 2)).toEqual([
+      "first@b.com",
+      "second@b.com",
+    ]);
 
-  // A re-run is safe: the stamp makes every repeat a skip.
-  const again = await sendAnnouncements(
-    env,
-    ["first@b.com", "second@b.com"],
-    "https://dotflowy.com",
-  );
-  expect(again.notified).toEqual([]);
-  expect(again.skipped.sort()).toEqual(["first@b.com", "second@b.com"]);
+    // Input is normalized and de-duped; an already-notified row and an address
+    // not on the waitlist are skipped, never emailed.
+    const res = await sendAnnouncements(
+      env,
+      [
+        "  First@B.com ",
+        "first@b.com",
+        "",
+        "second@b.com",
+        "old@b.com",
+        "stranger@x.com",
+      ],
+      "https://dotflowy.com",
+    );
+    expect(res.notified.sort()).toEqual(["first@b.com", "second@b.com"]);
+    expect(res.skipped.sort()).toEqual(["old@b.com", "stranger@x.com"]);
+    expect(
+      sql
+        .query<{ notifiedAt: number }, []>(
+          "SELECT notifiedAt FROM waitlist WHERE email = 'old@b.com'",
+        )
+        .get()?.notifiedAt,
+    ).toBe(500);
+    expect(sent).toEqual(["first@b.com", "second@b.com"]);
+    expect(await pendingAnnounceEmails(env, null)).toEqual(["third@b.com"]);
+
+    // A re-run is safe: the stamp makes every repeat a skip.
+    const again = await sendAnnouncements(
+      env,
+      ["first@b.com", "second@b.com"],
+      "https://dotflowy.com",
+    );
+    expect(again.notified).toEqual([]);
+    expect(again.skipped.sort()).toEqual(["first@b.com", "second@b.com"]);
+    expect(sent).toEqual(["first@b.com", "second@b.com"]);
+  } finally {
+    sql.close();
+  }
 });

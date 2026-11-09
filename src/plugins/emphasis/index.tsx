@@ -27,7 +27,6 @@ import {
   UnderlineIcon,
 } from "lucide-react";
 
-import { mdPunct } from "../../components/inline-code";
 import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
 import {
   BOLD_PATTERN,
@@ -37,7 +36,7 @@ import {
   STRIKETHROUGH_PATTERN,
   UNDERLINE_PATTERN,
 } from "../../data/emphasis";
-import { isRevealed } from "../token-kit";
+import { isRevealed, mdPunct } from "../token-kit";
 import {
   definePlugin,
   type El,

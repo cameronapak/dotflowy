@@ -3,7 +3,7 @@
 // instead of N copies. Pure/DOM helpers only — no UI barrel imports.
 
 import type { NodeCommands } from "../components/node-commands";
-import type { TokenView } from "./types";
+import type { El, TokenView } from "./types";
 
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
@@ -14,6 +14,10 @@ import { spliceToken } from "./token-splice";
 // Workers-types compilation. Re-exported here so token-plugin consumers are
 // undisturbed.
 export { spliceToken };
+
+export function mdPunct(s: string): El {
+  return { tag: "span", attrs: { class: "md-punct" }, children: [s] };
+}
 
 /** True iff the caret sits within or adjacent to a token's source span — the
  *  fold/reveal rule every folding token shares (inclusive boundaries, so the

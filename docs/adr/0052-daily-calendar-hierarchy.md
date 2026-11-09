@@ -17,3 +17,16 @@ Non-issues checked at design time: the free-tier node ceiling (~65 scaffold node
 Rejected: **prefixed scaffold keys** (`week:2026-W29`) — the bare shapes are already unambiguous and prefixes would break the ADR 0038 token-interior-is-key extension. Rejected: **configurable week start** — persisted week identity would then vary per setting, turning a preference toggle into a data migration. Rejected: **splitting straddle weeks per month** — Workflowy's own calendar keeps weeks atomic, and a split week has no single identity key. Rejected: **prompt-gated or server-side migration** — a declined prompt strands the container half-structured; the DO can't run TanStack-side move semantics and doesn't need to. Rejected: **renaming the container or re-keying the sentinel** — pure churn on a protected, referenced node.
 
 Out of scope (v1): week-start display setting, "create my whole year" templates, custom recurring periods. Follow-up (separate issue, blocked by this one): period tokens `[[2026]]` / `[[2026-07]]` / `[[2026-W29]]` — this ADR only guarantees the key shape they need.
+
+## Identity and relocation clarification, November 2026
+
+ADR 0068 supersedes the original week identity and migration policy above.
+Top-level placement is a relocation, just like moving a Daily note beneath an
+ordinary node. Legacy repair may recover a dangling non-null parent, but it must
+not move a top-level Daily note back into the scaffold.
+
+Daily claims adopt only schema-validated, server-confirmed identities through a
+local collection write. They never issue a second ordinary mapping upsert: that
+would bypass atomic arbitration. Failed or malformed claims stop materialization
+and return the existing failure result, preserving each caller's feedback and
+Quick-add failure handling. The collection starts sync before adopting a claim.

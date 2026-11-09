@@ -142,14 +142,14 @@ describe("planDailyMigration", () => {
     expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["flat", "nested"]);
   });
 
-  test("orphan mapped day (dangling parent) is in scope and needed", () => {
+  test("dangling-parent days recover without reversing top-level relocation", () => {
     // After a partial upgraded-sync cutover the day nodes can survive while their
     // week parents are gone — parentId dangles. inScaffoldScope alone would skip
     // them forever; orphans must reattach.
     const nodes = [
       createNode({ id: "c", text: "Daily" }),
       createNode({ id: "d1", parentId: "deleted-week" }), // 2026-07-16
-      createNode({ id: "d2", parentId: null }), // 2026-07-08, top-level stray
+      createNode({ id: "d2", parentId: null }), // 2026-07-08, intentionally relocated
     ];
     const map = {
       c: "container",
@@ -158,11 +158,11 @@ describe("planDailyMigration", () => {
     };
     const index = buildTreeIndex(nodes);
     expect(isOrphanMappedDay(index, nodes[1]!)).toBe(true);
-    expect(isOrphanMappedDay(index, nodes[2]!)).toBe(true);
+    expect(isOrphanMappedDay(index, nodes[2]!)).toBe(false);
     const plan = planDailyMigration(index, "c", dayRows(map), keyOf(map));
     expect(plan.needed).toBe(true);
-    expect(plan.days.map((d) => d.nodeId).sort()).toEqual(["d1", "d2"]);
-    expect(plan.scaffoldKeys).toContain("week:2026-07-06");
+    expect(plan.days.map((d) => d.nodeId)).toEqual(["d1"]);
+    expect(plan.scaffoldKeys).not.toContain("week:2026-07-06");
     expect(plan.scaffoldKeys).toContain("week:2026-07-13");
   });
 
