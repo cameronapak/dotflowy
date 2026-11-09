@@ -143,6 +143,8 @@ test.describe("mobile actions bar (coarse pointer)", () => {
 
     // The last row must remain reachable after its virtual height grows, even
     // in landscape where the keyboard takes more than half the layout height.
+    // Tap the empty corner to reveal navigation without activating a control.
+    await page.touchscreen.tap(2, 2);
     await page
       .getByRole("button", { name: "Back to Home", exact: true })
       .click();

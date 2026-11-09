@@ -131,6 +131,7 @@ import {
 } from "../data/visible-order";
 import { hasMatchMedia, hasResizeObserver, hasWindow } from "../env";
 import { useIsMobile } from "../hooks/use-mobile";
+import { useWritingChrome } from "../hooks/use-writing-chrome";
 import { DailyNavigationProgress } from "../plugins/daily/navigation-progress";
 import {
   blocksCaret,
@@ -408,6 +409,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const pointerFocus = useRef(false);
   // Header and subheaders stay in normal flow above the scrolling editor.
   const headerRef = useRef<HTMLDivElement | null>(null);
+  useWritingChrome(headerRef);
 
   // Zoom navigation: the shared-element morph between a node's title and list-
   // item roles, Cmd+, zoom-out, the current pivot id, and the post-navigation

@@ -312,6 +312,8 @@ test("title undo returns to the editing root and Cmd+K can redo it", async ({
   await expect(title).toBeVisible({ timeout: 60_000 });
   await placeCaret(title, "end");
   await page.keyboard.type(" title");
+  // Move the pointer to reveal navigation after typing.
+  await page.mouse.move(0, 0);
   await page
     .getByRole("navigation", { name: "Breadcrumb", exact: true })
     .getByRole("button", { name: "", exact: true })
