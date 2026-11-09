@@ -112,5 +112,12 @@ test.describe("touch writing with Spotlight", () => {
     await expect(addNode).toHaveCSS("transition-property", "none");
     await page.keyboard.press("Escape");
     await expect(chrome).toHaveCSS("opacity", "1");
+
+    // Switching to opaque chrome must keep the editor's actions and focus.
+    await page
+      .getByRole("button", { name: "Toggle complete", exact: true })
+      .tap();
+    await expect(node).toHaveAttribute("data-completed", "true");
+    await expect(node).toBeFocused();
   });
 });

@@ -8,6 +8,8 @@ import {
 } from "lucide-react";
 import {
   Fragment,
+  lazy,
+  Suspense,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -20,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { getOutlineScroller } from "../data/outline-scroll";
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
+import { useOpaqueChrome } from "../hooks/use-opaque-chrome";
 import { caretPosition } from "./caret-menu-utils";
 import { useHistoryState } from "./history-restore";
 import {
@@ -32,6 +35,13 @@ import {
   type SelectionSnapshot,
   snapshotSelection,
 } from "./wrap";
+
+// Like the header and dock, keep package glass out of desktop's editor graph.
+const Glass = lazy(() =>
+  import("@onlymoein/liquidglass").then((module) => ({
+    default: module.Glass,
+  })),
+);
 
 /**
  * The zero-arg command surface the bar drives. Each method resolves the focused
@@ -261,7 +271,7 @@ function Divider() {
  * pointer and shows ONLY while an editable bullet has DOM focus and the software
  * keyboard reduces the visual viewport. Position still follows useKeyboardViewport.
  *
- * Styled as a floating frosted-glass CAPSULE, not a full-width edge bar, so it
+ * Styled as a floating Liquid Glass capsule, not a full-width edge bar, so it
  * reads as a sibling of iOS's own keyboard accessory pill (which the web can't
  * remove) rather than a second bar fighting it: same shape grammar (inset, big
  * radius, translucent, soft shadow), our app-action tier above their system tier.
@@ -277,6 +287,7 @@ export function MobileActionsBar({
   findFocusedId: () => string | null;
 }) {
   const coarse = useCoarsePointer();
+  const opaque = useOpaqueChrome();
   const editing = useOutlineEditing(coarse, findFocusedId);
   const { height, offsetTop } = useKeyboardViewport();
   const barRef = useRef<HTMLDivElement | null>(null);
@@ -464,84 +475,84 @@ export function MobileActionsBar({
         aria-label={formatActive ? "Format selection" : "Editing actions"}
         data-mobile-bar
         data-mode={formatActive ? "format" : "edit"}
+        className="mobile-actions-bar pointer-events-auto relative mb-1.5 max-w-full rounded-full"
         onPointerDownCapture={() => {
           pressSnapshot.current = formatActive ? snapshotSelection() : null;
           setHeld(formatActive);
         }}
-        className={cn(
-          // max-w-full + overflow-x-auto: on a narrow / browser-zoomed viewport the
-          // pill can't outgrow the padded outer (the outer's px-3 keeps it off the
-          // screen edges), and if the buttons don't fit it scrolls horizontally
-          // instead of clipping. Buttons are shrink-0, so they keep their 44px
-          // targets and the strip scrolls rather than squashing; justify-start (the
-          // flex default) keeps the leftmost button reachable when it does scroll.
-          "pointer-events-auto flex max-w-full scroll-fade-x items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1",
-          // Frosted-glass material: translucent, blurred, hairline edge + soft
-          // shadow (depth from shadow, not a hard border) — the iOS accessory
-          // pill's grammar, resolved through our own theme tokens so it adapts to
-          // light/dark. A more see-through now (/50). mb-1.5 floats it off
-          // the very bottom edge.
-          "mb-1.5 border border-border/50 bg-background/50 shadow-lg backdrop-blur-xl",
-          "ring-1 ring-black/5 dark:ring-white/10",
-        )}
       >
-        {formatActive ? (
-          FORMAT_BUTTONS.map((btn, i) => {
-            const run = btn.action(formatActions);
-            if (!run) return null;
-            return (
-              <Fragment key={btn.key}>
-                {i > 0 && FORMAT_BUTTONS[i - 1]?.group !== btn.group && (
-                  <Divider />
-                )}
-                <BarButton
-                  label={btn.label}
-                  active={btn.marker ? formatActive.has(btn.key) : undefined}
-                  onRun={() => {
-                    restoreSelection(pressSnapshot.current);
-                    run();
-                  }}
-                >
-                  <btn.Icon className="size-5" />
-                </BarButton>
-              </Fragment>
-            );
-          })
+        {opaque ? (
+          <div className="mobile-actions-solid" aria-hidden="true" />
         ) : (
-          <>
-            <BarButton label="Outdent" onRun={actions.outdent}>
-              <Outdent className="size-5" />
-            </BarButton>
-            <BarButton label="Indent" onRun={actions.indent}>
-              <Indent className="size-5" />
-            </BarButton>
-            <Divider />
-            <BarButton
-              label={history.undoLabel}
-              onRun={actions.undo}
-              disabled={!history.canUndo}
-            >
-              <Undo2 className="size-5" />
-            </BarButton>
-            <BarButton
-              label={history.redoLabel}
-              onRun={actions.redo}
-              disabled={!history.canRedo}
-            >
-              <Redo2 className="size-5" />
-            </BarButton>
-            <Divider />
-            {/* A boxed check, deliberately NOT a bare ✓ — iOS's accessory pill shows a
+          <Suspense
+            fallback={
+              <div className="mobile-actions-solid" aria-hidden="true" />
+            }
+          >
+            <Glass aria-hidden="true" />
+          </Suspense>
+        )}
+        {/* Scroll controls without clipping the glass. Buttons keep 44px targets
+            and left alignment so both ends remain reachable on narrow screens. */}
+        <div className="relative flex max-w-full scroll-fade-x items-center gap-1 overflow-x-auto rounded-full px-1.5 py-1">
+          {formatActive ? (
+            FORMAT_BUTTONS.map((btn, i) => {
+              const run = btn.action(formatActions);
+              if (!run) return null;
+              return (
+                <Fragment key={btn.key}>
+                  {i > 0 && FORMAT_BUTTONS[i - 1]?.group !== btn.group && (
+                    <Divider />
+                  )}
+                  <BarButton
+                    label={btn.label}
+                    active={btn.marker ? formatActive.has(btn.key) : undefined}
+                    onRun={() => {
+                      restoreSelection(pressSnapshot.current);
+                      run();
+                    }}
+                  >
+                    <btn.Icon className="size-5" />
+                  </BarButton>
+                </Fragment>
+              );
+            })
+          ) : (
+            <>
+              <BarButton label="Outdent" onRun={actions.outdent}>
+                <Outdent className="size-5" />
+              </BarButton>
+              <BarButton label="Indent" onRun={actions.indent}>
+                <Indent className="size-5" />
+              </BarButton>
+              <Divider />
+              <BarButton
+                label={history.undoLabel}
+                onRun={actions.undo}
+                disabled={!history.canUndo}
+              >
+                <Undo2 className="size-5" />
+              </BarButton>
+              <BarButton
+                label={history.redoLabel}
+                onRun={actions.redo}
+                disabled={!history.canRedo}
+              >
+                <Redo2 className="size-5" />
+              </BarButton>
+              <Divider />
+              {/* A boxed check, deliberately NOT a bare ✓ — iOS's accessory pill shows a
               bare "Done" check right below, and two identical checks that mean
               different things (complete-bullet vs dismiss-keyboard) read as a bug. */}
-            <BarButton label="Toggle complete" onRun={actions.toggleComplete}>
-              <SquareCheck className="size-5" />
-            </BarButton>
-            <BarButton label="Command menu" onRun={actions.insertSlash}>
-              <SquareSlash className="size-5" />
-            </BarButton>
-          </>
-        )}
+              <BarButton label="Toggle complete" onRun={actions.toggleComplete}>
+                <SquareCheck className="size-5" />
+              </BarButton>
+              <BarButton label="Command menu" onRun={actions.insertSlash}>
+                <SquareSlash className="size-5" />
+              </BarButton>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
