@@ -12,8 +12,8 @@
 //
 // Idempotent = parse it, serialize it with `outlineToMarkdown`, parse again,
 // and you are at a fixed point. That is why the fence delimiters survive as
-// bullets, why a blockquote keeps its text, and why marker stripping never
-// recurses.
+// bullets, why a blockquote keeps its text behind one `> ` (ADR 0079), and why
+// marker stripping never recurses.
 //
 // NOT remark/micromark/marked: a CommonMark library yields an AST of paragraphs
 // and inline nodes which we would then have to RE-SERIALIZE back to markdown to
@@ -22,6 +22,7 @@
 // nothing else. See ADR 0044; do not add a markdown dependency here.
 
 import { OPML_APP_MAX_NODES } from "./opml-import";
+import { QUOTE_MARKER } from "./quote";
 import { childrenOf, type NodeKind, type TreeIndex } from "./tree";
 
 /** The paste ceiling, shared with the OPML app import (ADR 0044: one number,
@@ -72,9 +73,15 @@ const HEADING_RE = /^(#{1,6}) +(.*)$/;
  *  See ADR 0044. */
 const LIST_MARKER_RE = /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
 
-/** A run of blockquote markers at the very start of the content. Stripping the
- *  whole run keeps every character and is a fixed point (no `>` survives). */
+/** A run of blockquote markers at the very start of the content. The run
+ *  collapses to ONE `> ` on the node's text -- a quote (ADR 0079) -- because a
+ *  node has no nesting inside its text: `>> x` and `>x` both land as `> x`, and
+ *  that exports as `- > x`, a fixed point. */
 const BLOCKQUOTE_RE = /^(?:>[ \t]*)+/;
+
+/** A line of blockquote markers and nothing else: a blank line inside a quote,
+ *  so a separator, not an empty node. */
+const BLOCKQUOTE_ONLY_RE = /^(?:>[ \t]*)+$/;
 
 /** A GFM task checkbox, only ever matched AFTER a list marker was consumed
  *  (GFM requires the list item). `- [ ]` with no text is an empty task. One
@@ -206,7 +213,8 @@ export function parseMarkdownForest(
       continue;
     }
 
-    if (content === "") continue; // blank lines are separators, not content
+    // Blank lines are separators, not content -- including a blank `>` line.
+    if (content === "" || BLOCKQUOTE_ONLY_RE.test(content)) continue;
 
     const heading = HEADING_RE.exec(content);
     if (heading) {
@@ -261,18 +269,24 @@ function pushListLine(
  *
  * A line with NO list marker is a **paragraph** (ADR 0045 / ADR 0044's
  * amendment): markdown's own paragraph syntax is a bare line, so that is what a
- * bare line maps to. A blockquote whose `>` run was just stripped is marker-less
- * by this rule and lands as a paragraph too.
+ * bare line maps to.
+ *
+ * A blockquote is a **quote** (ADR 0079): its `>` run becomes one `> ` at the
+ * start of the text, and the node is never a paragraph, because a paragraph
+ * whose text starts with `> ` exports with the `- ` fallback and would not come
+ * back a paragraph. A list marker or checkbox inside the quote still applies.
  */
 function stripLine(content: string): [string, boolean, boolean, NodeKind] {
   const quoted = content.replace(BLOCKQUOTE_RE, "");
+  const quote = quoted === content ? "" : QUOTE_MARKER;
   const marker = LIST_MARKER_RE.exec(quoted);
-  if (!marker) return [quoted, false, false, "paragraph"];
+  if (!marker)
+    return [quote + quoted, false, false, quote ? null : "paragraph"];
   const rest = quoted.slice(marker[0].length);
   const task = TASK_RE.exec(rest);
-  if (!task) return [rest, false, false, null];
+  if (!task) return [quote + rest, false, false, null];
   return [
-    rest.slice(task[0].length),
+    quote + rest.slice(task[0].length),
     true,
     task[1]!.toLowerCase() === "x",
     null,

@@ -49,19 +49,19 @@ _Why always._ The current fallback — joining with spaces — **is itself lossy
 
 ## The grammar
 
-| Construct                                 | Maps to                                                             |
-| ----------------------------------------- | ------------------------------------------------------------------- |
-| `-` `*` `+` markers                       | stripped                                                            |
-| `1.` `1)` markers                         | stripped (ordinal is positional, recovered from sibling order)      |
-| Indentation (tab / 2sp / 4sp)             | depth; skipped depths clamped                                       |
-| `[ ]` `[x]`                               | `isTask` / `completed`                                              |
-| `-`, `- `, `*` with no content            | an **empty node**, never a dropped line                             |
-| Inline markdown                           | **untouched** — `node.text` is markdown                             |
-| Blockquote `> x`                          | `>` stripped → `x` (loses quote-ness, keeps every char, idempotent) |
-| Heading `#`–`######` + **space**          | a node, level drives nesting                                        |
-| Fenced code ` ``` `                       | grammar suppressor                                                  |
-| Tables, HRs, frontmatter, setext headings | **not recognized** — literal text                                   |
-| Blank lines                               | dropped (separators, not content)                                   |
+| Construct                                 | Maps to                                                        |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| `-` `*` `+` markers                       | stripped                                                       |
+| `1.` `1)` markers                         | stripped (ordinal is positional, recovered from sibling order) |
+| Indentation (tab / 2sp / 4sp)             | depth; skipped depths clamped                                  |
+| `[ ]` `[x]`                               | `isTask` / `completed`                                         |
+| `-`, `- `, `*` with no content            | an **empty node**, never a dropped line                        |
+| Inline markdown                           | **untouched** — `node.text` is markdown                        |
+| Blockquote `> x`                          | a **quote**: one `> ` kept on a bullet (amended by ADR 0079)   |
+| Heading `#`–`######` + **space**          | a node, level drives nesting                                   |
+| Fenced code ` ``` `                       | grammar suppressor                                             |
+| Tables, HRs, frontmatter, setext headings | **not recognized** — literal text                              |
+| Blank lines                               | dropped (separators, not content)                              |
 
 Four rules the obvious implementation gets wrong:
 
@@ -172,7 +172,8 @@ Paragraph nodes ([ADR 0045](./0045-paragraph-node-kind.md)) give the grammar a c
 when "one line, one bullet" was written. The rule becomes: **one marker-less line, one _paragraph_**
 — a line with no list/task/heading marker parses to a node with `kind: 'paragraph'`; marker lines
 parse exactly as before. Depth still comes from indentation; heading lines still drive nesting and
-stay bullets; a stripped blockquote line (`> x` → `x`) is marker-less and so lands as a paragraph.
+stay bullets. (A blockquote line was stripped to `x` and landed as a paragraph; [ADR 0079](./0079-quote-nodes.md)
+now keeps one `> ` on a bullet.)
 Line 1 of a paste inherits kind into the anchor under the same head-is-empty rule as
 `isTask`/`completed`. Fenced raw mode and `Mod+Shift+V` literal paste are untouched — no
 interpretation means no kind inference; their lines stay bullets.

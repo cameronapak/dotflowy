@@ -7,6 +7,7 @@ import type { PluginContext, SlotSpec } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
 import { isMirrorsEnabled } from "../data/flags";
+import { isQuoteText, stripQuoteMarker } from "../data/quote";
 import { useSelectionFill } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
 import {
@@ -436,9 +437,11 @@ function RowChrome({
           onClick={() => commands.onBulletClick(content.id)}
           title="Zoom in"
         >
-          {/* Dot or paragraph glyph, per the CONTENT's kind (ADR 0045). */}
+          {/* Dot, paragraph glyph, or quote bar, per the CONTENT's kind and
+              text (ADR 0045, ADR 0079). */}
           <BulletGlyph
             kind={content.kind}
+            quote={isQuoteText(content.text)}
             completed={content.completed}
             hasChildren={hasChildren}
             collapsed={effectiveCollapsed}
@@ -474,7 +477,7 @@ function RowChrome({
             suppressContentEditableWarning
             spellCheck={false}
             role="textbox"
-            aria-label={content.text.trim() || "Empty bullet"}
+            aria-label={stripQuoteMarker(content.text).trim() || "Empty bullet"}
             aria-readonly={locked}
             aria-multiline="true"
             data-completed={content.completed}

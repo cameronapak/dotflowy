@@ -20,6 +20,10 @@ _Avoid_: type, mode, style
 A node that reads as prose rather than a list item — a paragraph glyph (an align-left mark) stands where a bullet shows its dot, carrying the same zoom and drag affordance. Full tree citizen: children, collapse, zoom, complete.
 _Avoid_: text node, block, prose node
 
+**Quote**:
+A node whose text source starts with `> `. A presentation of the text, not a Kind: any node can be a quote, and removing the marker makes it plain again. A bar stands where a bullet shows its dot, carrying the same zoom and drag affordance.
+_Avoid_: blockquote (the Markdown construct), callout, quote block
+
 **Embed**:
 A node devoted to displaying one external resource identified by a URL. The external content is read-only and is not part of the outline's text; the node can have child notes, move, collapse, zoom, and be mirrored like other nodes.
 _Avoid_: oEmbed (the protocol, not the node), preview (also describes ordinary link metadata)

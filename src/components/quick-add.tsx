@@ -131,6 +131,7 @@ import {
   pasteIntoBullet,
 } from "./paste";
 import { setQuickAddOpener } from "./quick-add-opener";
+import { useQuoteMarkerBackspace } from "./quote-marker";
 import { useNativeFormatInput } from "./selection-format";
 import { useSlashMenu } from "./slash-menu";
 import { typingSuggestionsHeight } from "./typing-suggestions";
@@ -255,6 +256,8 @@ const MiniNodeEditor = forwardRef<
     endComposition,
   } = useInputDecoration(ref);
   const caretReveal = useCaretReveal(composingRef, syncedRef);
+  // Backspace at or inside a quote's `> ` unquotes the draft (ADR 0079).
+  useQuoteMarkerBackspace(ref, onText);
   const { slotsByPosition } = usePluginChrome();
   const ownsFormatEditable = useCallback(
     (el: HTMLElement) => ref.current === el,

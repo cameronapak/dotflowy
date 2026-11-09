@@ -387,9 +387,9 @@ test.each<[string, string, string[]]>([
   ["`# urgent` is a heading", "# urgent", ["urgent"]],
   ["`[]` with nothing inside is text, not a checkbox", "- [] x", ["[] x"]],
   [
-    "blockquote markers strip; the text survives whole",
-    "> quoted\n>> deeper\n> - listed",
-    ["quoted", "deeper", "listed"],
+    "a blockquote run collapses to one `> `; a bare `>` line is blank",
+    "> quoted\n>\n>> deeper\n>tight\n> - listed\n> - [x] done",
+    ["> quoted", "> deeper", "> tight", "> listed", "> done"],
   ],
   // What `outlineToMarkdown` emits for fence-delimiter bullets.
   [
@@ -455,10 +455,16 @@ test.each<[string, string, OutlineFixture[]]>([
   ],
   [
     // ADR 0044 rule 2: the heading grammar fires only at content start, before
-    // any marker. `>` is a marker, so `# A` stays literal text (ADR 0045).
-    "a quoted heading is not a heading",
-    "> # A\n> body",
-    [para("# A"), para("body")],
+    // any marker. `>` is a marker, so `# A` stays literal text. A quote is a
+    // bullet whose text keeps `> ` (ADR 0079), never a paragraph: a paragraph
+    // starting with `> ` would export as `- > ` and come back a bullet.
+    "a quoted heading is not a heading, and quotes land as bullets",
+    "> # A\n> body\n> - [ ] todo",
+    [
+      outlineFixture("> # A"),
+      outlineFixture("> body"),
+      outlineFixture("> todo", [], true, false),
+    ],
   ],
   [
     // Raw mode infers no kind, so only the line AFTER the fence is a paragraph.

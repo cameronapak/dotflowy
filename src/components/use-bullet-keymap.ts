@@ -18,6 +18,10 @@ import {
 } from "./inline-code";
 import { openInlineTargetAtCaret } from "./link-keymap";
 import { nodeZoomShortcuts } from "./node-zoom-shortcut";
+import {
+  exitEmptyQuoteOnEnter,
+  removeQuoteMarkerOnBackspace,
+} from "./quote-marker";
 
 interface BulletKeymapArgs {
   node: Node;
@@ -119,6 +123,14 @@ export function useBulletKeymap({
     const el = textRef.current;
     if (!el || !enabled) return;
     const handleBackspace = (e: Event) => {
+      // A quote's marker goes first, ahead of task demotion and the join, so
+      // the first Backspace at or inside `> ` unquotes the row (ADR 0079).
+      if (
+        removeQuoteMarkerOnBackspace(el, e, (text) =>
+          commands.onTextChange(node.id, text),
+        )
+      )
+        return;
       if (
         e.defaultPrevented ||
         !e.cancelable ||
@@ -179,6 +191,11 @@ export function useBulletKeymap({
     commands,
   ]);
 
+  // Enter on an empty quote unquotes the row in place (ADR 0079).
+  const enterExitsEmptyQuote = (el: HTMLElement | null) =>
+    !!el &&
+    exitEmptyQuoteOnEnter(el, (text) => commands.onTextChange(node.id, text));
+
   useHotkeys(
     focused
       ? [
@@ -225,6 +242,7 @@ export function useBulletKeymap({
                   if (handled) return;
                 }
               }
+              if (enterExitsEmptyQuote(el)) return;
               commands.onEnter(
                 node.id,
                 (el && getSelectionRange(el)) ?? {
@@ -267,6 +285,7 @@ export function useBulletKeymap({
             hotkey: "Shift+Enter",
             callback: () => {
               const el = textRef.current;
+              if (enterExitsEmptyQuote(el)) return;
               commands.onEnter(
                 node.id,
                 (el && getSelectionRange(el)) ?? {

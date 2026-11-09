@@ -1076,6 +1076,49 @@ h2 span.protection-indicator {
 }
 
 /*
+ * A quote's bar (ADR 0079): it replaces the dot inside the same `.bullet`
+ * button, so it is the zoom and drag target. The button stretches over the
+ * quote's own line boxes -- the 3px margins match `.node-text`'s 3px padding --
+ * so the bar is exactly as tall as the quotation, and children (sources,
+ * commentary) stay outside it. Width is untouched: 16px on fine pointers, 24px
+ * on coarse, so the bar never crowds the chevron or the caret (ADR 0029). This
+ * selector (0,3,0) outranks both the base optical margin and the coarse
+ * `.outline-row .bullet` override, which a stretched box does not need.
+ */
+.outline-row .bullet:has(.bullet-quote) {
+  align-self: stretch;
+  height: auto;
+  margin-top: 3px;
+  margin-bottom: 3px;
+}
+
+.bullet-quote {
+  @apply block h-full rounded-full bg-accent-foreground/35;
+  width: 3px;
+  transition:
+    background-color 0.15s ease,
+    height 0.15s ease;
+}
+
+.bullet:hover .bullet-quote {
+  @apply bg-primary;
+}
+
+/* Wherever the ring shows (hover, or collapsed with hidden children), the bar
+   pulls in from both ends so the ring pads it vertically as well as sideways.
+   The button keeps its size, so the hit area does not change. */
+.bullet:hover .bullet-quote,
+.bullet-quote[data-has-children="true"][data-collapsed="true"] {
+  height: calc(100% - 10px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bullet-quote {
+    transition: none;
+  }
+}
+
+/*
  * Inactive bullet dim. When a bullet in the outline holds focus, every OTHER
  * row's dot is dimmed (lighter/muted color) so the active/focused bullet stands
  * out clearly. Pure CSS. Row hover restores strength.
@@ -1090,6 +1133,10 @@ h2 span.protection-indicator {
 
 .outline-list:focus-within .outline-row:focus-within .bullet-paragraph {
   @apply text-muted-foreground/40;
+}
+
+.outline-list:focus-within .outline-row:not(:focus-within) .bullet-quote {
+  @apply bg-muted-foreground/30;
 }
 
 /*
@@ -1328,6 +1375,29 @@ h2.zoomed-title .row-body > .title-paragraph {
   margin-right: 0;
 }
 
+/* A zoomed quote's bar (ADR 0079), hung the same way as the paragraph mark:
+   inside a carved gutter on narrow screens, outdented into the margin on wide
+   ones. It spans the title's lines, not a fixed glyph box. */
+.title-quote {
+  @apply rounded-full bg-accent-foreground/35;
+  width: 3px;
+  pointer-events: none;
+}
+
+h2.zoomed-title:has(.title-quote) {
+  position: relative;
+  padding-inline-start: 30px;
+}
+
+h2.zoomed-title .row-body > .title-quote {
+  position: absolute;
+  inset-inline-start: 14px;
+  top: 6px;
+  bottom: 6px;
+  float: none;
+  margin-right: 0;
+}
+
 /* WIDE: there's margin to hang into, so the mark outdents out of the text
    column entirely. The title then keeps the 8px lead every zoomed title has --
    its text sits on the same column as a bullet title's, and as the dot, the
@@ -1342,6 +1412,14 @@ h2.zoomed-title .row-body > .title-paragraph {
 
   h2.zoomed-title .row-body > .title-paragraph {
     inset-inline-start: -20px;
+  }
+
+  h2.zoomed-title:has(.title-quote) {
+    padding-inline-start: 8px;
+  }
+
+  h2.zoomed-title .row-body > .title-quote {
+    inset-inline-start: -12px;
   }
 }
 
@@ -1453,6 +1531,15 @@ h2.zoomed-title .row-body > .title-paragraph {
 .node-text:empty::before {
   content: "";
   display: inline-block;
+}
+
+/* Quick-add has no bullet column, so a quote draws its bar on the text itself
+   (ADR 0079). The marker renders as a folded atom or, near the caret, as
+   revealed `.quote-marker-reveal` text; either one leads the line. */
+.quick-add-editor .node-text:has(> .quote-marker, > .quote-marker-reveal) {
+  padding-inline-start: 12px;
+  box-shadow: inset 3px 0 0
+    color-mix(in oklab, var(--accent-foreground) 35%, transparent);
 }
 
 /* Quick-add mini-editor (ADR 0049): show its placeholder while the capture is
