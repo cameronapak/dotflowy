@@ -585,6 +585,60 @@ test("free-account HTTP capture honors explicit date and has decisive idempotenc
   ]);
 });
 
+test("Markdown capture creates typed nodes atomically and replays the whole forest", async () => {
+  const { userId, key } = await account();
+  const payload = {
+    attemptId: randomUUID(),
+    date: "2024-02-29",
+    text: "- [ ] fumadocs - demo components with controls for #yvp\n  - [X] **Reviewed**\n- [ ] Document dissonance with standup #yvp\n# Notes\nKeep [authored](https://example.com) and #tags\n```\n- [ ] literal\n```",
+  };
+  const saved = await api("/api/capture", key, payload);
+  expect(saved.response.status).toBe(200);
+  const replay = await api("/api/capture", key, payload);
+  expect(replay.body).toEqual({ ...saved.body, replayed: true });
+  const { snapshot } = await fixture<Inspection>("inspect", { userId });
+  const first = snapshot.nodes.find((node) => node.id === saved.body!.nodeId)!;
+  expect(first).toMatchObject({
+    text: "fumadocs - demo components with controls for #yvp",
+    parentId: saved.body!.dailyNoteId,
+    isTask: true,
+    completed: false,
+    kind: null,
+    origin: null,
+  });
+  expect(
+    snapshot.nodes.filter((node) => node.parentId === first.id),
+  ).toMatchObject([
+    { text: "**Reviewed**", isTask: true, completed: true, kind: null },
+  ]);
+  const roots = snapshot.nodes.filter(
+    (node) => node.parentId === saved.body!.dailyNoteId,
+  );
+  expect(roots).toMatchObject([
+    { id: first.id },
+    {
+      text: "Document dissonance with standup #yvp",
+      isTask: true,
+      completed: false,
+      prevSiblingId: first.id,
+    },
+    { text: "Notes", isTask: false, kind: null },
+  ]);
+  expect(
+    snapshot.nodes.filter((node) => node.parentId === roots[2]!.id),
+  ).toMatchObject([
+    {
+      text: "Keep [authored](https://example.com) and #tags",
+      kind: "paragraph",
+    },
+    { text: "```", kind: null },
+    { text: "- [ ] literal", isTask: false, completed: false, kind: null },
+    { text: "```", kind: null },
+  ]);
+  expect(snapshot.nodes).toHaveLength(13);
+  assertSiblingChains(snapshot.nodes);
+});
+
 test("concurrent distinct captures make one scaffold and a valid sibling chain", async () => {
   const { userId, key } = await account();
   const requests = Array.from({ length: 8 }, (_, index) =>
@@ -661,8 +715,8 @@ test("quota refusal rolls back receipt and all scaffold rows", async () => {
     userId,
     attemptId,
     date: "2026-08-12",
-    text: "over quota",
-    limit: 5,
+    text: "- [x] first\n  - [ ] nested\n- last",
+    limit: 7,
   });
   expect(refused).toEqual({ error: "node_limit" });
   let inspection = await fixture<Inspection>("inspect", { userId });
@@ -675,15 +729,15 @@ test("quota refusal rolls back receipt and all scaffold rows", async () => {
     userId,
     attemptId,
     date: "2026-08-12",
-    text: "over quota",
-    limit: 6,
+    text: "- [x] first\n  - [ ] nested\n- last",
+    limit: 8,
   });
   expect(retry.replayed).toBe(false);
   inspection = await fixture<Inspection>("inspect", { userId });
   expect(
     inspection.snapshot.nodes.some((node) => node.id === retry.receipt.nodeId),
   ).toBe(true);
-  expect(inspection.snapshot.nodes).toHaveLength(6);
+  expect(inspection.snapshot.nodes).toHaveLength(8);
 });
 
 test("title upgrade only changes the untouched captured node", async () => {

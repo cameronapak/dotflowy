@@ -164,7 +164,14 @@ Content-Type: application/json
 {"attemptId":"<UUID>","date":"yyyy-MM-dd","text":"<input>"}
 ```
 
-The optional `title` field is intentionally omitted by this stock template; the server may unfurl a URL after saving. A run reports success only when the JSON response has `saved: true` and nonempty `nodeId`, `dailyNoteId`, and `date`. Otherwise it displays the response's `error` and `message`. There is no persistent queue: it is online-only, and one run can create at most one bullet.
+The optional `title` field is intentionally omitted by this stock template; the server may unfurl a URL after saving. A run reports success only when the JSON response has `saved: true` and nonempty `nodeId`, `dailyNoteId`, and `date`. Otherwise it displays the response's `error` and `message`. There is no persistent queue: it is online-only.
+
+The receiving endpoint interprets Markdown using the app's paste grammar, even
+for one line. `- [ ] Write notes` creates a task; `- [x] Write notes` creates a
+completed task. Lists and headings preserve their nesting across lines, and bare
+prose becomes paragraph nodes. Inline Markdown and tags stay in the text; fenced
+content stays literal. All nodes save together, and `nodeId` identifies the first
+root. Installed Shortcuts need no update. Existing captures stay unchanged.
 
 The attempt ID, date, and text are action outputs created before the request. A retry added around only the request/receipt actions must reuse those outputs. Starting the shortcut again is a fresh invocation and creates a fresh attempt ID. The stock template does not automatically retry.
 
@@ -235,7 +242,7 @@ separate unsigned input, so a changed source still requires signing before
 publication. Keep the final release sequence build, test, sign, validate.
 The static download headers specify an attachment named `Dotflowy.shortcut`.
 
-Before general release, import the signed file on a current iPhone and verify both direct launch and the share sheet with text and a URL, blank/cancel, a valid key, an invalid key, a server error receipt, and an offline request. Confirm a successful run creates exactly one bullet in the phone-local daily note. Keep discovery experimental until these checks pass.
+Before general release, import the signed file on a current iPhone and verify both direct launch and the share sheet with text and a URL, blank/cancel, a valid key, an invalid key, a server error receipt, and an offline request. Confirm a successful run creates the expected nodes in the phone-local daily note, including a single Markdown task and a nested list. Keep discovery experimental until these checks pass.
 
 Before claiming that sharing clears the capture key:
 

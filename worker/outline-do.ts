@@ -25,6 +25,10 @@ import {
   scaffoldKeyKind,
   type WeekStart,
 } from "../src/data/date-links";
+import {
+  parseMarkdownForest,
+  PASTE_MAX_NODES,
+} from "../src/data/markdown-import";
 import { buildTreeIndex } from "../src/data/tree";
 import {
   planWeekStartMigration,
@@ -34,7 +38,7 @@ import { WeekStartPreferenceSchema } from "../src/data/wire-schema";
 import { SNAPSHOT_VERSION } from "./backup";
 import { canResumeChangelog, planChangeFrames } from "./changelog";
 import { validateLockedPatches, validateLockedWrite } from "./lock-policy";
-import { planAddToDaily } from "./outline-ops";
+import { planAddSubtreeToDaily } from "./outline-ops";
 import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
 import { APP_VERSION } from "./version";
 import { NodeChangesSchema } from "./wire";
@@ -796,19 +800,22 @@ export class UserOutlineDO extends DurableObject<Env> {
             monthId: claim(chain.monthKey),
             weekId: claim(chain.weekKey),
           };
-      const plan = planAddToDaily(index, {
+      const plan = planAddSubtreeToDaily(index, {
         dateKey: input.date,
         weekStart,
         containerId,
         dayId,
         ...levels,
         keyByNodeId: new Map([...ids].map(([key, id]) => [id, key])),
-        newNodeId: crypto.randomUUID(),
-        text: input.text,
-        isTask: false,
+        nodes: parseMarkdownForest(input.text),
+        newId: () => crypto.randomUUID(),
+        maxNodes: PASTE_MAX_NODES,
         origin: null,
         timestamp: now,
       });
+      // HTTP intake already rejects blank text and bounds source to 10,000
+      // characters, below the shared 50,000-node ceiling.
+      if (!("ops" in plan)) throw new Error("invalid capture forest");
       const growth = countNetGrowth(plan.ops, (id) => this.nodeExists(id));
       if (
         batchExceedsNodeLimit(
@@ -841,7 +848,7 @@ export class UserOutlineDO extends DurableObject<Env> {
       );
       const receipt: CaptureReceipt = {
         saved: true,
-        nodeId: plan.nodeId,
+        nodeId: plan.rootIds[0]!,
         dailyNoteId: dayId,
         date: input.date,
       };

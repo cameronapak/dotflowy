@@ -54,11 +54,19 @@ and import. End-to-end real-device testing remains a general-release requirement
   a discovery gate, not API authorization or a server kill switch; disabling
   it does not revoke keys or stop already installed shortcuts. All plans can
   opt in. Remove the temporary gate after real-device verification.
-- **One capture, one bullet.** Accept shared text or a URL. Without shared input,
-  prompt for text, with keyboard dictation available. Flatten multiline text to
-  spaces, matching the single-node Quick-add surface. Blank input or cancellation
-  creates nothing, including no daily-note scaffold. Append at the bottom; no
-  task chooser, attachment conversion, or structural import in the first version.
+- **Interpret Markdown at intake.** Accept shared text or a URL. Without shared
+  input, prompt for text, with keyboard dictation available. The receiving endpoint
+  uses the shared [Markdown grammar](./0044-markdown-paste.md), including single-line
+  captures: list markers become bullets, `- [ ]` becomes a task, and `- [x]` or
+  `- [X]` becomes a completed task. Multiline input preserves list and heading
+  nesting; marker-less lines become paragraphs. Inline Markdown stays in text,
+  and fenced content stays literal. This supersedes the original one-bullet,
+  newline-flattening rule without changing the Shortcut. Blank input or
+  cancellation creates nothing, including no daily-note scaffold. Append the
+  forest at the bottom in one transaction with its receipt and quota check.
+  The unchanged receipt's `nodeId` identifies the first root; retries replay the
+  whole capture without reinserting any nodes. No task chooser or attachment
+  conversion is added. Existing captures are not converted retroactively.
 - **Device-local Today.** Use the phone's local date at submission, not its date
   when composition began or a saved home timezone. Keep that date unchanged
   throughout retries. No date picker or silent UTC fallback. The endpoint permits

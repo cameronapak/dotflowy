@@ -6,6 +6,7 @@ import type { CaptureResult } from "./capture-input";
 import type { UserOutlineDO } from "./outline-do";
 
 import { bareHttpUrl } from "../src/data/links";
+import { parseMarkdownForest } from "../src/data/markdown-import";
 import {
   CaptureBody,
   CaptureKeyCreateBody,
@@ -219,28 +220,27 @@ export const handleCaptureRequest = Effect.fn("Capture.request")(
           ctx.waitUntil(
             Effect.runPromise(
               Effect.gen(function* () {
+                const first = parseMarkdownForest(normalized.text)[0];
+                if (!first || first.literal) return;
                 // A supplied title only labels a standalone URL, never prose.
                 const before =
                   input.title?.trim() && bareHttpUrl(input.text)
-                    ? normalized.text
+                    ? first.text
                     : "";
-                const text = yield* unfurlTextE(
-                  before,
-                  normalized.text,
-                  (url) =>
-                    rateLimitedTitleE(
-                      url,
-                      env.UNFURL_LIMIT,
-                      resolveUserId(key.userId, env),
-                    ),
+                const text = yield* unfurlTextE(before, first.text, (url) =>
+                  rateLimitedTitleE(
+                    url,
+                    env.UNFURL_LIMIT,
+                    resolveUserId(key.userId, env),
+                  ),
                 );
-                if (text === normalized.text) return;
+                if (text === first.text) return;
                 const liveKey = yield* Effect.promise(() =>
                   authenticateCaptureKey(env.DB, authorization, Date.now()),
                 );
                 if (!liveKey) return;
                 yield* Effect.promise(() =>
-                  stub.upgradeCaptureText(attemptId, normalized.text, text),
+                  stub.upgradeCaptureText(attemptId, first.text, text),
                 );
               }),
             ).catch(() => {

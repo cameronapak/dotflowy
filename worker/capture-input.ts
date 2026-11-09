@@ -46,11 +46,11 @@ export type CaptureResult =
   | { receipt: CaptureReceipt; replayed: boolean }
   | { error: "node_limit" | "attempt_conflict" };
 
-/** No structural paste or embedded-link rewriting on the capture surface. */
+/** Preserve Markdown structure for intake; only standalone URLs are rewritten. */
 export function normalizeCapture(input: typeof CaptureBody.Type) {
   if (!dayKeyToScaffoldChain(input.date)) return null;
-  const text = input.text.replace(/[\r\n]+/g, " ").trim();
-  if (!text) return null;
+  const text = input.text;
+  if (!text.trim()) return null;
   const url = bareHttpUrl(text);
   if (!url || !isHttpUrlString(url)) return { text, unfurlUrl: null };
   const title = sanitizeLinkLabel(input.title ?? "");
