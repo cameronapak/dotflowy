@@ -118,7 +118,11 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     // A zoomed title shares the same editing contract, even when the node is
     // taller than the keyboard-visible band. Revealing its whole box cannot
     // keep the last line visible.
-    await page.goto("/row-10");
+    await page
+      .locator('li[data-node-id="row-10"]')
+      .getByRole("button", { name: "Zoom in", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/row-10$/);
     const title = page.locator('h2 .node-text[contenteditable="true"]');
     await placeCaret(title, "end");
     await page.keyboard.insertText(
@@ -139,7 +143,10 @@ test.describe("mobile actions bar (coarse pointer)", () => {
 
     // The last row must remain reachable after its virtual height grows, even
     // in landscape where the keyboard takes more than half the layout height.
-    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Back to Home", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/$/);
     await page.locator(".outline-list").waitFor();
     for (const viewport of [
       { width: 1024, height: 768, visible: 368 },
@@ -755,10 +762,8 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await loadOne(page);
     await selectAll(page, "n");
     await btn(page, "Link").click();
-    const sheet = page.locator(".sheet-surface");
-    await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
-      "data-expanded",
-    );
+    const sheet = page.getByRole("dialog", { name: "Add link", exact: true });
+    await expect(sheet).toBeVisible();
     // Wait out the entry animation before tapping inside the sheet.
     const done = sheet.getByRole("button", { name: "Done" });
     await expect
@@ -772,7 +777,7 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(url).toBeFocused();
     await expect(bar(page)).toHaveCount(0);
     await url.fill("https://example.com");
-    await expect(sheet.getByRole("heading")).toHaveText("Add link");
+    await expect(sheet).toHaveAccessibleName("Add link");
     await done.click();
     // Done animates the sheet out, then the overlay unmounts.
     await expect(sheet).toHaveCount(0);

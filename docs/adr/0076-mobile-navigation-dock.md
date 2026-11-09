@@ -74,7 +74,8 @@ without an additional background or selected fill. The one exception: while
 the subheader is open, the band stops at the toolbar's bottom edge, because its
 24px fade would otherwise wash over the opaque subheader, such as the focus
 band. Quick-add's fill is
-`--primary`. Menus stay Dotflowy's React Aria sheets, not the package's Menu.
+`--primary`. Narrow-screen menus use the package's Sheet, not its Menu,
+as amended in [ADR 0066](./0066-narrow-screen-menu-drawers.md).
 Do not mark the editable outline `data-liquidglass-backdrop`: cloning an editor
 and continuously refreshing that copy is inappropriate for this surface.
 

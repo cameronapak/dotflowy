@@ -192,7 +192,7 @@ function ViewMenuItems() {
         This view
       </div>
       {mobile && (
-        <DropdownMenuItem onClick={openFilterInput}>
+        <DropdownMenuItem onAfterClose={openFilterInput}>
           <HugeiconsIcon icon={Search01Icon} />
           Filter this view
         </DropdownMenuItem>
@@ -255,7 +255,7 @@ function ViewMenuItems() {
             <DropdownMenuItem
               key={action.id}
               disabled={action.disabled}
-              onClick={() => action.run(rootId)}
+              onAfterClose={() => action.run(rootId)}
             >
               <action.icon />
               {action.menuLabel}
@@ -323,7 +323,7 @@ function AppMenuItems() {
   const unseen = useUnseenReleaseCount();
   return (
     <>
-      <DropdownMenuItem onClick={() => void navigate({ to: "/settings" })}>
+      <DropdownMenuItem onAfterClose={() => void navigate({ to: "/settings" })}>
         <HugeiconsIcon icon={Settings01Icon} />
         Settings
       </DropdownMenuItem>
@@ -332,7 +332,7 @@ function AppMenuItems() {
         are unread, it's emphasized -- bolder text + a solid count pill --
         so the eye lands here once the trigger's dot draws the menu open. */}
       <DropdownMenuItem
-        onClick={() => openChangelog()}
+        onAfterClose={openChangelog}
         data-unseen={unseen > 0 ? "" : undefined}
         className={unseen > 0 ? "font-medium" : undefined}
       >

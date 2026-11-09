@@ -5,7 +5,7 @@ import {
   type ReactNode,
   type CSSProperties,
 } from "react";
-import { SheetTrigger } from "react-aria-components/Sheet";
+import { DialogTrigger } from "react-aria-components/Dialog";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -28,7 +28,7 @@ export function ResponsivePopover({
   return (
     <MobileTitle value={mobile ? title : null}>
       {mobile ? (
-        <SheetTrigger isOpen={open} {...props} />
+        <DialogTrigger isOpen={open} {...props} />
       ) : (
         <Popover open={open} {...props} />
       )}
@@ -50,14 +50,15 @@ export function ResponsivePopoverContent({
   side,
   sideOffset,
   className,
+  onAfterClose,
   ...props
 }: Omit<
   ComponentProps<typeof PopoverContent>,
   "render" | "className" | "style"
-> & { className?: string; style?: CSSProperties }) {
+> & { className?: string; style?: CSSProperties; onAfterClose?: () => void }) {
   const title = useContext(MobileTitle);
   return title ? (
-    <MenuSheetContent title={title} compact>
+    <MenuSheetContent title={title} onAfterClose={onAfterClose}>
       {props.children}
     </MenuSheetContent>
   ) : (

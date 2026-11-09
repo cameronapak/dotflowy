@@ -57,16 +57,16 @@ test("mobile destinations, search, capture, and filter use existing app behavior
 
   // View options and Account and help share the narrow-screen More menu.
   await page.getByRole("button", { name: "More", exact: true }).tap();
-  await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
-    "data-expanded",
-  );
+  await expect(
+    page.getByRole("dialog", { name: "More", exact: true }),
+  ).toBeVisible();
   await expect
     .poll(() =>
       page
-        .locator('.sheet-menu-content[role="dialog"]')
+        .locator(".lg-sheet")
         .evaluate((el) => Math.round(el.getBoundingClientRect().bottom)),
     )
-    .toBe(844);
+    .toBe(836);
   await expect(
     page.getByRole("menuitem", { name: "Sign out", exact: true }),
   ).toBeAttached();

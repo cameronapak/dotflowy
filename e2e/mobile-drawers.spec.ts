@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { mockKeyboardViewport, seedOutline, type SeedNode } from "./fixtures";
+import {
+  mockKeyboardViewport,
+  openSeededOutline,
+  seedOutline,
+  type SeedNode,
+} from "./fixtures";
 
 // Include desktop scrollbar gutters in the narrow-window keyboard check.
 test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } });
@@ -19,20 +24,22 @@ const TREE: SeedNode[] = [
 const editor = (page: Page) =>
   page.locator('li[data-node-id="edit"] .node-text');
 const suggestions = (page: Page) => page.locator(".typing-suggestions");
-const sheet = (page: Page) => page.locator(".sheet-surface");
+const sheet = (page: Page) => page.locator(".lg-sheet");
 const sheetDialog = (page: Page) =>
-  page.locator('.sheet-menu-content[role="dialog"]');
-const drawer = (page: Page) =>
-  page.locator(".typing-suggestions, .sheet-surface");
+  page.locator("dialog[open].lg-sheet-dialog");
+const drawer = (page: Page) => page.locator(".typing-suggestions, .lg-sheet");
 const quickAdd = (page: Page) =>
   page.getByRole("dialog", { name: "Quick add", exact: true });
 
 async function load(page: Page, path = "/") {
   await seedOutline(page, TREE);
-  await page.goto(path);
-  await expect(page.locator(".node-text").first()).toBeVisible({
-    timeout: 15_000,
-  });
+  if (path === "/") await openSeededOutline(page);
+  else {
+    await page.goto(path);
+    await page
+      .locator(".zoomed-title .node-text")
+      .waitFor({ state: "visible" });
+  }
 }
 
 async function setVisualViewport(
@@ -59,16 +66,30 @@ async function setVisualViewport(
 }
 
 async function settleSheet(page: Page) {
-  await expect(page.locator(".menu-sheet-overlay")).toHaveAttribute(
-    "data-expanded",
-  );
+  await expect(sheetDialog(page)).toBeVisible();
   await expect
     .poll(() =>
-      sheetDialog(page).evaluate((el) =>
-        Math.round(el.getBoundingClientRect().bottom),
+      sheet(page).evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        const bottom = visualViewport!.height + visualViewport!.offsetTop;
+        return (
+          rect.top >= visualViewport!.offsetTop &&
+          Math.abs(rect.bottom - (bottom - 8)) < 0.5 &&
+          rect.height > 0
+        );
+      }),
+    )
+    .toBe(true);
+  // Wait for entry rather than making a locator scroll an animating sheet.
+  await expect
+    .poll(() =>
+      sheet(page).evaluate((el) =>
+        Math.round(el.getBoundingClientRect().height),
       ),
     )
-    .toBe(await page.evaluate(() => innerHeight));
+    .toBe(
+      await page.evaluate(() => Math.round(visualViewport!.height * 0.516)),
+    );
 }
 
 async function settleDrawer(page: Page) {
@@ -91,7 +112,7 @@ async function settleDrawer(page: Page) {
 
 async function swipeSheet(page: Page) {
   await settleSheet(page);
-  const handle = await sheet(page).locator(".sheet-handle").boundingBox();
+  const handle = await sheet(page).locator(".lg-sheet-handle").boundingBox();
   const x = handle!.x + handle!.width / 2;
   const y = handle!.y + handle!.height / 2;
   const distance = Math.max(
@@ -553,9 +574,8 @@ test.describe("narrow-screen drawers", () => {
     );
     await expect(drawer(page)).toBeVisible();
     await expect(sheetDialog(page)).toBeVisible();
-    await expect(sheet(page).locator(".sheet-handle")).toBeVisible();
-    await expect(page.locator(".menu-sheet-overlay")).toBeVisible();
-    await expect(page.locator(".menu-sheet-backdrop")).toBeVisible();
+    await expect(sheet(page).locator(".lg-sheet-handle")).toBeVisible();
+    await expect(sheetDialog(page).locator(".lg-modal-scrim")).toBeVisible();
     await settleSheet(page);
     await page.getByRole("menuitem", { name: "Collapse all" }).tap();
     await expect(drawer(page)).toBeHidden();
@@ -625,6 +645,7 @@ test.describe("narrow-screen drawers", () => {
     await page.locator("[data-quick-add-dest]").tap();
     await expect(drawer(page)).toBeVisible();
     await settleSheet(page);
+    await expect(drawer(page).getByPlaceholder("Capture into…")).toBeFocused();
     expect(
       await page.locator(".outline-scroll").evaluate((el) => el.scrollTop),
     ).toBe(400);
@@ -729,6 +750,16 @@ test.describe("narrow-screen drawers", () => {
         changelog.evaluate((el) => el.contains(document.activeElement)),
       )
       .toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(changelog).toBeHidden();
+    await page.getByRole("button", { name: /^More/ }).tap();
+    await settleSheet(page);
+    const opened = page.waitForEvent("popup");
+    await page.getByRole("menuitem", { name: "Terms", exact: true }).tap();
+    const terms = await opened;
+    await expect(terms).toHaveURL(/\/terms$/);
+    await terms.close();
+    await expect(drawer(page)).toBeHidden();
   });
 
   test("scrolling commands does not pick the touched option or blur the editor", async ({
@@ -792,87 +823,56 @@ test.describe("narrow-screen drawers", () => {
     expect(
       await page.locator(".outline-scroll").evaluate((el) => el.scrollHeight),
     ).toBeGreaterThan(620);
-    // Observe actual painted geometry: an autofocus jump to the resting snap
-    // passes click tests but must fail the smooth-entry contract.
-    const entry = await page.evaluateHandle(() => {
-      const positions: number[] = [];
-      const deadline = performance.now() + 5000;
-      const sample = () => {
-        const sheet = document.querySelector(".sheet-menu-content");
-        const rect = sheet?.getBoundingClientRect();
-        if (rect) positions.push(rect.top);
-        if (
-          performance.now() < deadline &&
-          (!rect || rect.bottom > innerHeight + 1)
-        )
-          requestAnimationFrame(sample);
-      };
-      requestAnimationFrame(sample);
-      return positions;
-    });
     const trigger = page.getByRole("button", { name: /^More/ });
     await trigger.tap();
     await settleSheet(page);
-    expect((await entry.jsonValue()).some((top) => top > 80 && top < 560)).toBe(
-      true,
-    );
-    await entry.dispose();
-    const body = sheetDialog(page);
-    const heading = body.getByRole("heading", { name: "More" });
-    const headingY = (await heading.boundingBox())!.y;
+    const body = sheet(page).locator(".lg-sheet-content");
     const box = (await body.boundingBox())!;
-    await expect(body).not.toHaveCSS("mask-image", "none");
-    const topMask = await body.evaluate((el) => getComputedStyle(el).maskImage);
-    await settleSheet(page);
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.wheel(0, 90);
     await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBe(90);
-    await expect(body).not.toHaveCSS("mask-image", topMask);
-    const middleMask = await body.evaluate(
-      (el) => getComputedStyle(el).maskImage,
-    );
-    await settleSheet(page);
     const scrollDistance = await body.evaluate((el) => el.scrollHeight);
     await page.mouse.wheel(0, scrollDistance);
     await expect
       .poll(() => body.evaluate((el) => el.scrollTop))
       .toBeGreaterThan(0);
     await settleSheet(page);
-    await expect(body).not.toHaveCSS("mask-image", middleMask);
     await expect(
       body.getByRole("menuitem", { name: "Sign out" }),
-    ).toBeInViewport();
-    expect((await heading.boundingBox())!.y).toBeCloseTo(headingY, 0);
-    await expect(
-      body.getByRole("button", { name: "Close", exact: true }),
     ).toBeInViewport();
     await settleSheet(page);
     await page.mouse.wheel(0, -scrollDistance);
     await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBe(0);
 
-    // Start inside the content at its upper scroll boundary. Native chaining
-    // should pull the sheet, not scroll the page or activate a menu item.
-    const y = box.y + 60;
-    const x = box.x + box.width / 2;
+    // The package owns handle dragging. Content scrolling must not drag the
+    // sheet or activate a menu item; only the handle starts a pull.
+    const handle = (await sheet(page)
+      .locator(".lg-sheet-handle")
+      .boundingBox())!;
+    const y = handle.y + handle.height / 2;
+    const x = handle.x + handle.width / 2;
     const top = (await sheet(page).boundingBox())!.y;
     const pageY = await page
       .locator(".outline-scroll")
       .evaluate((el) => el.scrollTop);
     const cdp = await page.context().newCDPSession(page);
+    const start = Date.now() / 1000;
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
       touchPoints: [{ x, y }],
+      timestamp: start,
     });
     for (let step = 1; step <= 8; step++) {
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchMove",
         touchPoints: [{ x, y: y + step * 20 }],
+        timestamp: start + step * 0.02,
       });
     }
     await expect
       .poll(async () => (await sheet(page).boundingBox())!.y)
       .toBeGreaterThan(top + 50);
-    await expect(page.locator(".menu-sheet-backdrop")).not.toHaveCSS(
+    await expect(sheetDialog(page).locator(".lg-modal-scrim")).not.toHaveCSS(
       "opacity",
       "1",
     );
@@ -883,19 +883,31 @@ test.describe("narrow-screen drawers", () => {
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchMove",
         touchPoints: [{ x, y: y + step * 20 }],
+        timestamp: start + 0.4 + (7 - step) * 0.02,
       });
     }
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchEnd",
       touchPoints: [],
+      timestamp: start + 0.82,
     });
     await cdp.detach();
-    await settleSheet(page);
-    await expect(page.locator(".menu-sheet-backdrop")).toHaveCSS(
+    // Reversing must keep the sheet open. Release velocity may choose either
+    // supported detent; it must not strand the sheet between them.
+    await expect
+      .poll(() =>
+        sheet(page).evaluate((el) =>
+          [Math.round(innerHeight * 0.516), innerHeight - 67].includes(
+            Math.round(el.getBoundingClientRect().height),
+          ),
+        ),
+      )
+      .toBe(true);
+    await expect(sheetDialog(page).locator(".lg-modal-scrim")).toHaveCSS(
       "opacity",
       "1",
     );
-    await swipeSheet(page);
+    await page.keyboard.press("Escape");
     await expect(drawer(page)).toBeHidden();
     await expect(trigger).toBeFocused();
     await page
@@ -909,13 +921,14 @@ test.describe("narrow-screen drawers", () => {
       .toBeGreaterThan(pageY);
   });
 
-  test("reduced motion keeps modal controls and dismissal usable", async ({
+  test("reduced motion and increased contrast keep modal controls and dismissal usable", async ({
     page,
   }) => {
-    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.emulateMedia({ reducedMotion: "reduce", contrast: "more" });
     await load(page);
     await page.getByRole("button", { name: "More", exact: true }).tap();
     await settleSheet(page);
+    await expect(sheet(page)).toHaveCSS("backdrop-filter", "none");
     await page.getByRole("menuitemcheckbox", { name: "Show completed" }).tap();
     await expect(drawer(page)).toBeVisible();
     await settleSheet(page);
@@ -924,6 +937,68 @@ test.describe("narrow-screen drawers", () => {
     await page.getByRole("button", { name: "More", exact: true }).tap();
     await swipeSheet(page);
     await expect(drawer(page)).toBeHidden();
+  });
+
+  test("sheets follow keyboard viewport changes without losing the expanded detent", async ({
+    page,
+  }) => {
+    await load(page);
+    await page.getByRole("button", { name: "More", exact: true }).tap();
+    await settleSheet(page);
+    const handle = (await sheet(page)
+      .locator(".lg-sheet-handle")
+      .boundingBox())!;
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + 15);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + handle.width / 2, handle.y - 350, {
+      steps: 12,
+    });
+    await page.mouse.up();
+    await expect
+      .poll(() =>
+        sheet(page).evaluate((el) =>
+          Math.round(el.getBoundingClientRect().top),
+        ),
+      )
+      .toBe(67);
+    await setVisualViewport(page, 420, 67);
+    await expect
+      .poll(() =>
+        sheet(page).evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          return box.top >= 67 && box.bottom <= 487 && box.height > 300;
+        }),
+      )
+      .toBe(true);
+    await setVisualViewport(page, 844, 0);
+    await expect
+      .poll(() =>
+        sheet(page).evaluate((el) =>
+          Math.round(el.getBoundingClientRect().top),
+        ),
+      )
+      .toBe(67);
+    await page.keyboard.press("Escape");
+    await expect(sheetDialog(page)).toHaveCount(0);
+  });
+
+  test("pointer dismissal restores focus without a ring; keyboard dismissal keeps it", async ({
+    page,
+  }) => {
+    await load(page);
+    const trigger = page.getByRole("button", { name: "More", exact: true });
+    await trigger.tap();
+    await settleSheet(page);
+    await page.touchscreen.tap(4, 100);
+    await expect(sheetDialog(page)).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toHaveCSS("outline-style", "none");
+    await page.keyboard.press("Enter");
+    await settleSheet(page);
+    await page.keyboard.press("Escape");
+    await expect(sheetDialog(page)).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toHaveCSS("outline-style", "solid");
   });
 
   test("calendar drawer pages months and navigates to a chosen day", async ({
@@ -1016,7 +1091,9 @@ test("keyboard opening App focuses its first item and supports immediate arrows"
   await expect(items.last()).toBeFocused();
   await expect(items.last()).toBeInViewport();
   expect(
-    await sheetDialog(page).evaluate((el) => el.scrollTop),
+    await sheet(page)
+      .locator(".lg-sheet-content")
+      .evaluate((el) => el.scrollTop),
   ).toBeGreaterThan(0);
   await page.keyboard.press("ArrowDown");
   await expect(items.first()).toBeFocused();

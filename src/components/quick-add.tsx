@@ -105,6 +105,7 @@ import { getViewRootId } from "../data/view-state";
 import { hasWindow } from "../env";
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
 import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
+import { useIsMobile } from "../hooks/use-mobile";
 import {
   afterPaste,
   getCaptureDestination,
@@ -492,6 +493,7 @@ function CaptureTargetPicker({
     <Command shouldFilter={false} className="max-md:[&_[cmdk-item]]:min-h-11">
       <CommandInput
         autoFocus
+        data-sheet-autofocus
         value={query}
         onValueChange={setQuery}
         placeholder="Capture into…"
@@ -561,6 +563,8 @@ function DestinationButton({
   "data-quick-add-dest"?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const mobile = useIsMobile();
+  const pending = useRef<PickTarget | null>(null);
   return (
     <Popover title="Capture destination" open={open} onOpenChange={setOpen}>
       <PopoverTrigger className={triggerClassName} title={title} {...dataProps}>
@@ -570,13 +574,21 @@ function DestinationButton({
         align="end"
         sideOffset={6}
         className="w-80 max-w-[calc(100vw-2rem)] gap-0 p-0"
+        onAfterClose={() => {
+          const target = pending.current;
+          pending.current = null;
+          if (target) onPick(target);
+        }}
       >
         <CaptureTargetPicker
           index={index}
           excludeId={excludeId}
           onPick={(target) => {
+            // Let the native child sheet restore focus before the capture
+            // engine returns to the draft. Desktop's popover is unchanged.
+            if (mobile) pending.current = target;
             setOpen(false);
-            onPick(target);
+            if (!mobile) onPick(target);
           }}
           onCancel={() => setOpen(false)}
         />

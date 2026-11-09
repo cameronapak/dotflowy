@@ -142,6 +142,6 @@
   },
   "packageManager": "bun@1.4.2",
   "patchedDependencies": {
-    "react-aria-components@1.22.0": "patches/react-aria-components@1.22.0.patch"
+    "@onlymoein/liquidglass@0.12.0": "patches/@onlymoein%2Fliquidglass@0.12.0.patch"
   }
 }

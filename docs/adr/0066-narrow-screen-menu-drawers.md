@@ -5,43 +5,57 @@ status: accepted
 # Narrow-screen sheets and typing suggestions
 
 Below 768px, the View and App menus ([ADR 0072](./0072-split-header-view-and-app-menus.md)), breadcrumb overflow, the calendar month picker, and
-Quick-add destinations use React Aria Sheet. Typing suggestions (`/`, `#`, and
+Quick-add destinations use Liquidglass Sheet. The narrow-screen link form uses
+the same owner. Typing suggestions (`/`, `#`, and
 `[[`) use a compact results panel above the keyboard instead. At 768px and above,
 the existing anchored menus and popovers remain unchanged.
 
-This supersedes the original decision to use Base UI drawers for all seven
-surfaces and the subsequent attempt to imitate Adobe's native scrolling inside
-Base UI. Matching [Adobe's Sheet](https://react-aria.adobe.com/blog/sheet) directly
-is preferable to maintaining a second gesture implementation. A modal sheet is
-not suitable for suggestions that must leave focus in an external editor.
+This supersedes the original Base UI drawers and the later React Aria Sheet
+implementation. Cameron chose the exported Liquidglass Sheet after trying the
+lab and the app preview. Package defaults take priority over recreating the old
+header or gestures. A modal sheet is not suitable for suggestions that must
+leave focus in an external editor.
 
-## Modal sheets use Adobe's implementation
+## Modal sheets use the package defaults
 
-React Aria owns native scroll snapping, swipe momentum, scroll chaining,
-keyboard accommodation, entry/exit, focus containment and restoration, and
-reduced motion. Keep Dotflowy's colors and typeface, with 32px top corners, 8px
-side insets, an 80-by-6px handle, and a 40% black backdrop without blur. The
-surface continues below the screen during overscroll. No custom snap points or
-JavaScript mouse-drag implementation are added.
+`@onlymoein/liquidglass` 0.12.0 owns the native modal dialog, glass material,
+corners, handle, spring, detents, and reduced-motion entry/exit. The first detent
+is medium (51.6%); dragging the handle expands to large. Short sheets also start
+at medium: the exported API has no content-fit height. Do not clamp their CSS
+height, because that breaks expansion. There is no app-made title bar, X button,
+or second gesture engine. Each dialog has an accessible name. Keyboard users can
+scroll to every control without expanding it. Dragging starts only on the
+package handle, not inside the scrolling content.
 
-Each sheet has a sticky header with a title and an X button labelled Close.
-The handle and header stay visible while the contents scroll. The existing
-`scroll-fade` utility fades overflowing content below the header, leaving the
-header opaque. Its plain-scroll fallback is unchanged. Action-menu text has a
-16px inset; the X's 44px target supplies its own visible right inset. Calendar
-and destination content use compact spacing. React Aria's overscroll padding
-requires a content-box sheet despite Tailwind's border-box default.
+The shared integration lazily loads the package for narrow screens, follows the
+app's explicit theme through the package's `data-theme`, focuses a form's
+requested first field with `preventScroll`, and preserves menu keyboard
+navigation. Native focus restoration remains intact. After pointer dismissal,
+only the restored trigger's ring is suppressed; keyboard use restores it.
+The native `close` event, not the start of exit, runs link submissions and
+menu-to-dialog handoffs. Menu actions that need a new focus target use
+`onAfterClose`; clipboard writes and new tabs stay in the original click to
+retain browser user activation. Destination selection also waits for that
+boundary before returning focus to the Quick-add draft.
 
-React Aria Components is pinned to 1.22.0 with a Bun patch that processes every
-IntersectionObserver entry. Its original `entries[0]` misses the expanded state
-when instant, reduced-motion entry batches invisible and visible observations.
-Remove the patch when an upstream release handles those batches. CSS rounds
-intrinsic sheet heights where `calc-size` is supported so Chromium's pixel-rounded
-snap offset does not leave fractional content outside the visibility observer.
-While a sheet is present, release the page's stable scrollbar gutter: otherwise
-it clips React Aria's viewport-wide stage on narrow desktop windows. Reserve the
-released width as body padding until the sheet exits, so the outline does not
-widen or clamp its horizontal scroll. Nested sheets reuse the outer reservation.
+The Bun patch fixes package limitations without replacing the spring:
+exit travel includes the 8px bottom inset and finishes below half a pixel;
+viewport resize/scroll updates the sheet against the unzoomed visual viewport
+and preserves its nearest detent. This keeps the sheet above a docked keyboard.
+Drag-release snapping also respects reduced motion. Pinch zoom remains native.
+Remove each patch hunk when upstream supplies the
+same behavior. Both ESM and CommonJS builds are patched. The former React Aria
+Sheet patch and its styles are removed.
+
+Content clips to the package's animated corners. App separators use the
+package Menu's separator spacing and color. Size-specific lens variables reset
+at the sheet boundary: inheriting the toolbar's small SVG filter clips entry
+blur to the toolbar's dimensions until the sheet's own lens is ready.
+Safe-area spacing keeps controls
+clear of screen edges. Reduced transparency, increased contrast, forced colors,
+and missing backdrop-filter use the package's opaque surface rather than an
+invented palette. These are integration corrections, not unmodified upstream
+defaults.
 
 Header toggles stay open. One-shot actions and navigation close the sheet.
 Header and breadcrumb menus share open state across the width breakpoint and
@@ -49,9 +63,8 @@ focus their first enabled item after entry. Arrow keys skip disabled items.
 Calendar month navigation stays open; selecting a day closes it.
 
 Quick-add's destination sheet stays inside the capture dialog's DOM focus
-boundary. Its overlay uses fixed positioning, and the capture frame uses no
-transform, so this containment does not change its viewport geometry. Close,
-Escape, swipe, and outside press dismiss the destination sheet independently.
+boundary and uses the native top layer. Escape, handle swipe, and outside press
+dismiss the destination sheet independently.
 The draft and capture engine are unchanged. This supersedes the narrow-screen
 anchored-popover choice in [ADR 0049](./0049-quick-add-capture-surface.md).
 
@@ -86,7 +99,7 @@ typing suggestions, the editing toolbar, and the capture button account for
 safe-area insets. Keyboard-attached controls add bottom spacing only when the
 visible viewport reaches the layout viewport's bottom.
 
-Playwright covers focus, selection, nested dismissal, scrolling and swipe
+Playwright covers focus, selection, nested dismissal, scrolling and handle swipe
 reversal, reduced motion, synthetic keyboard viewports, and the 767px/768px
 boundary. A WebKit regression covers touch selection: preventing touch
 `pointerdown` suppresses its click, so suggestions prevent only `mousedown`
