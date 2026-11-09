@@ -86,6 +86,16 @@ remains single-node. This deliberately reuses the selection actor's imperative
 root-id API rather than moving pointer state into that actor. General
 multi-selection drag among outline gaps remains outside this amendment.
 
+**Keyboard movement (2026-11-09).** While nodes are selected,
+`Cmd/Ctrl+Shift+↑/↓` moves the whole run one visible sibling position, preserving
+its order, subtrees, and selection. The leading edge uses the single-node move's
+boundary behavior: at the first or last sibling, move into the parent's previous
+or next sibling, but never outside the zoom root. Filtered-out siblings are not
+move targets or added to the selection. Each gesture is one atomic structural
+write and one undo step; a boundary no-op creates no undo step. Bulk shortcuts
+take precedence over actions-menu navigation. Selection still starts with
+`Shift+↑/↓`; `Cmd/Ctrl+↑/↓` remains collapse/expand while editing text.
+
 **The actions menu, and `runMany`.** When a selection exists, a menu **auto-appears anchored to the
 active (focus) edge — the newest node a `Shift+arrow` just added — and re-anchors to it on every
 extension**, so it tracks the node you're selecting instead of parking over the run's text.
