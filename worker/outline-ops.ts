@@ -136,6 +136,7 @@ function newNode(args: {
   prevSiblingId: string | null;
   text: string;
   isTask?: boolean;
+  completed?: boolean;
   /** ADR 0045. `"paragraph"` wins over `isTask`, so an agent that passes both
    *  gets a paragraph — the same tie-break the renderer applies. */
   kind?: NodeKind;
@@ -155,6 +156,7 @@ function newNode(args: {
     // The kind exclusivity invariant, enforced at the trust boundary exactly as
     // the client funnels enforce it (`setKind` clears `isTask`).
     isTask: kind !== null ? false : (args.isTask ?? false),
+    completed: args.completed ?? false,
     kind,
     mirrorOf: args.mirrorOf ?? null,
     origin: args.origin ?? null,
@@ -563,10 +565,12 @@ export function planReparent(
 
 /** A node to create in a batch, with its own nested children — the recursive
  *  shape the `add_subtree` tool accepts. Fresh content only: no id (the caller
- *  mints them), no mirror, no completed/collapsed state (ADR 0028). */
+ *  mints them), no mirror or collapsed state. Markdown intake also carries
+ *  completed state; MCP's public schema still excludes it (ADR 0028). */
 export interface SubtreeInput {
   readonly text: string;
   readonly isTask?: boolean | null;
+  readonly completed?: boolean;
   readonly kind?: NodeKind;
   readonly children?: readonly SubtreeInput[] | null;
 }
@@ -661,6 +665,7 @@ function emitForest(
           prevSiblingId: prev,
           text: input.text,
           isTask: input.isTask ?? false,
+          completed: input.completed ?? false,
           kind: input.kind ?? null,
           origin,
           timestamp,

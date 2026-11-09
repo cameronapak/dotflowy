@@ -13,11 +13,11 @@ const input = {
   text: "",
 };
 
-test("capture flattens lines without importing bullets or rewriting embedded links", () => {
+test("capture preserves Markdown structure and authored links for intake", () => {
   expect(
     normalizeCapture({ ...input, text: "  First\r\n- second\n  third  " }),
   ).toEqual({
-    text: "First - second   third",
+    text: "  First\r\n- second\n  third  ",
     unfurlUrl: null,
   });
   expect(
