@@ -414,6 +414,168 @@ test("at the sibling boundary, a single-root selection climbs to the parent and 
   await expect(li(page, "aa")).not.toHaveAttribute("data-selected", /.*/);
 });
 
+test("Cmd/Ctrl+Shift+arrows move the selected run without reversing it or losing selection", async ({
+  page,
+}) => {
+  await load(page);
+  await focus(page, "d");
+  await page.keyboard.down("Shift");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
+  await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
+
+  // Keep Shift held while adding Cmd/Ctrl, as in an uninterrupted keyboard gesture.
+  await page.keyboard.down("ControlOrMeta");
+  await page.keyboard.press("ArrowUp");
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual(["alpha", "charlie", "delta", "bravo"]);
+  await page.keyboard.press("ArrowUp");
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual(["charlie", "delta", "alpha", "bravo"]);
+  await page.keyboard.press("ArrowUp"); // top-level boundary is a no-op
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual(["charlie", "delta", "alpha", "bravo"]);
+  await page.keyboard.press("ArrowDown");
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual(["alpha", "charlie", "delta", "bravo"]);
+  await page.keyboard.press("ArrowDown");
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual(["alpha", "bravo", "charlie", "delta"]);
+  await expect(li(page, "c")).toHaveAttribute("data-selected", "top");
+  await expect(li(page, "d")).toHaveAttribute("data-selected", "bottom");
+  await page.keyboard.up("ControlOrMeta");
+  await page.keyboard.up("Shift");
+  await page.keyboard.press(`${MOD}+z`);
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual(["alpha", "charlie", "delta", "bravo"]);
+});
+
+test("keyboard movement carries selected subtrees across parent boundaries and stops at the zoom root", async ({
+  page,
+}) => {
+  await load(page, [
+    ...FLAT,
+    { id: "c1", parentId: "c", prevSiblingId: null, text: "charlie child" },
+    { id: "c2", parentId: "c", prevSiblingId: "c1", text: "charlie sibling" },
+    { id: "leaf", parentId: "c1", prevSiblingId: null, text: "leaf" },
+  ]);
+  await focus(page, "c2");
+  await page.keyboard.press("Shift+ArrowUp");
+  await page.keyboard.press("Shift+ArrowUp");
+  await page.keyboard.press(`${MOD}+Shift+ArrowUp`);
+  await expect(li(page, "c1")).toHaveAttribute("data-parent-id", "b");
+  await expect(li(page, "c2")).toHaveAttribute("data-parent-id", "b");
+  await expect(li(page, "leaf")).toHaveAttribute("data-parent-id", "c1");
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual([
+      "alpha",
+      "bravo",
+      "charlie child",
+      "leaf",
+      "charlie sibling",
+      "charlie",
+      "delta",
+    ]);
+  await page.keyboard.press(`${MOD}+Shift+ArrowDown`);
+  await expect(li(page, "c1")).toHaveAttribute("data-parent-id", "c");
+  await expect(li(page, "c2")).toHaveAttribute("data-parent-id", "c");
+  await expect(li(page, "c1")).toHaveAttribute("data-selected", "top");
+  await expect(li(page, "c2")).toHaveAttribute("data-selected", "bottom");
+  await page.keyboard.press(`${MOD}+z`);
+  await expect(li(page, "c1")).toHaveAttribute("data-parent-id", "b");
+  await expect(li(page, "c2")).toHaveAttribute("data-parent-id", "b");
+
+  await openSeededOutline(page, { path: "/b", anchorId: "c1" });
+  await focus(page, "c2");
+  await page.keyboard.press("Shift+ArrowUp");
+  await page.keyboard.press("Shift+ArrowUp");
+  await page.keyboard.press(`${MOD}+Shift+ArrowUp`);
+  await page.keyboard.press(`${MOD}+Shift+ArrowDown`);
+  await expect(li(page, "c1")).toHaveAttribute("data-parent-id", "b");
+  await expect(li(page, "c2")).toHaveAttribute("data-parent-id", "b");
+  await expect(li(page, "c1")).toHaveAttribute("data-selected", "top");
+});
+
+test("a boundary move into a mirror of a selected root keeps the whole run in place", async ({
+  page,
+}) => {
+  await load(page, [
+    {
+      id: "before",
+      parentId: null,
+      prevSiblingId: null,
+      text: "",
+      mirrorOf: "c2",
+    },
+    { id: "parent", parentId: null, prevSiblingId: "before", text: "Parent" },
+    {
+      id: "after",
+      parentId: null,
+      prevSiblingId: "parent",
+      text: "",
+      mirrorOf: "c1",
+    },
+    { id: "c1", parentId: "parent", prevSiblingId: null, text: "First" },
+    { id: "c2", parentId: "parent", prevSiblingId: "c1", text: "Second" },
+  ]);
+  await focus(page, "c2");
+  await page.keyboard.press("Shift+ArrowUp");
+  await page.keyboard.press("Shift+ArrowUp");
+  for (const key of ["ArrowUp", "ArrowDown"]) {
+    await page.keyboard.press(`${MOD}+Shift+${key}`);
+    await expect(li(page, "c1")).toHaveAttribute("data-parent-id", "parent");
+    await expect(li(page, "c2")).toHaveAttribute("data-parent-id", "parent");
+    await expect(li(page, "c1")).toHaveAttribute("data-selected", "top");
+    await expect(li(page, "c2")).toHaveAttribute("data-selected", "bottom");
+  }
+});
+
+test("filtered keyboard movement skips hidden siblings and only moves selected roots", async ({
+  page,
+}) => {
+  await seedOutline(page, [
+    { id: "a", parentId: null, prevSiblingId: null, text: "alpha #go" },
+    { id: "hidden", parentId: null, prevSiblingId: "a", text: "hidden" },
+    { id: "b", parentId: null, prevSiblingId: "hidden", text: "bravo #go" },
+    { id: "gap", parentId: null, prevSiblingId: "b", text: "gap" },
+    { id: "c", parentId: null, prevSiblingId: "gap", text: "charlie #go" },
+    { id: "d", parentId: null, prevSiblingId: "c", text: "delta #go" },
+  ]);
+  await openSeededOutline(page, { path: "/?q=%23go", anchorId: "b" });
+  await focus(page, "b");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press(`${MOD}+Shift+ArrowUp`);
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual(["bravo #go", "charlie #go", "alpha #go", "delta #go"]);
+  await page.keyboard.press(`${MOD}+Shift+ArrowDown`);
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual(["alpha #go", "bravo #go", "charlie #go", "delta #go"]);
+  await expect(li(page, "b")).toHaveAttribute("data-selected", "top");
+  await expect(li(page, "c")).toHaveAttribute("data-selected", "bottom");
+  await openSeededOutline(page, { anchorId: "a" });
+  await expect
+    .poll(() => orderedTexts(page))
+    .toEqual([
+      "alpha #go",
+      "bravo #go",
+      "charlie #go",
+      "hidden",
+      "gap",
+      "delta #go",
+    ]);
+});
+
 test("Tab indents the selected run under the previous sibling; Shift+Tab outdents it back", async ({
   page,
 }) => {
