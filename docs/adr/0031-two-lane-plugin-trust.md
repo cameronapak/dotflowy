@@ -116,3 +116,9 @@ alternative, not a prerequisite. Prefer nonsensitive reproduction content.
 Admin enablement, allowed-origin changes, and deployment require separate
 approval. Setup, revocation, and the feedback-to-update workflow live in the
 [feedback widget guide](../feedback-widget.md).
+
+The owner-only loader gives an enabled, focused node editor priority over Amp's
+window-capture Cmd/Ctrl+Period visibility shortcut. An earlier capture listener
+invokes the zoom action registered by that editor's keymap, rather than resolving
+nodes independently or modifying the third-party script. Non-node surfaces and
+other shortcuts retain Amp's behavior; its button remains clickable.

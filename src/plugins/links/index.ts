@@ -15,6 +15,7 @@ import {
   sourceOffsetUpTo,
 } from "../../components/inline-code";
 import { openUrlInFocusedTab } from "../../components/open-url";
+import { readFormatTarget } from "../../components/selection-format";
 import { getEditorFeatures } from "../../data/editor-features";
 import { unfurlLinks } from "../../data/link-unfurl";
 import {
@@ -372,6 +373,18 @@ export default definePlugin({
       caretScoped: true,
       run: (nodeId: string, ctx: PluginContext) =>
         createLinkFromSelection(nodeId, ctx),
+    },
+  ],
+
+  // Cmd+K keeps its command-center meaning at a collapsed caret. The global
+  // handler yields only for a single editable text selection (ADR 0034).
+  keymap: [
+    {
+      id: "link",
+      hotkey: "Mod+K",
+      run: (nodeId, ctx) => {
+        if (readFormatTarget()) createLinkFromSelection(nodeId, ctx);
+      },
     },
   ],
 
