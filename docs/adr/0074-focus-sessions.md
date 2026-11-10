@@ -90,12 +90,25 @@ is an experiment, not v1. The window never outlives the tab and is absent in
 Safari and on phones.
 
 The whole window is the same `primary` fill as the running band, with the
-band's on-fill controls, focus outline, and full progress line at time is up,
-in every state: running, paused, time is up, break, reflection, and no session. A floating window sits on the
+band's on-fill controls and focus outline, in every state: running, paused,
+time is up, break, reflection, and no session. A floating window sits on the
 desktop and over other apps, not on the page, so the page surface blended in;
 switching to the page surface for reflection would hide the window exactly when
 it asks for input. The reflection field's border is `primary-foreground` at
 60%, so the field boundary stays above 3:1 on the near-white dark-mode fill.
+
+The window leads with the node, because what you set out to do matters more
+than how long is left. Its title is the largest and boldest text in the window
+and scales with the window's size, clamped to 2 lines in a short window and up
+to 5 in a tall one, with `dir="auto"` and a `title` tooltip. Tags stay at
+normal weight and 60% opacity so the words lead. The time is a small pill
+beside the status and parent line; at time is up it fills and turns medium
+weight. Progress drains as a faint `primary-foreground` wash behind the whole
+window instead of a line, and the wash fills the window at time is up. Back to
+focus is a quiet text button, so the state's own actions, such as Done, stay
+the strongest controls. Reflection keeps the stacked layout. The window drops
+the page's reserved scrollbar gutter, which would otherwise leave an empty
+strip down its edge where scrollbars always show.
 
 ## Session state stays in this browser
 
@@ -123,6 +136,11 @@ ordinary nodes.
 - **A page-surface PiP window.** The v1 window used `background`, the same
   surface as most light or dark desktop windows, so it blended into the
   desktop. Replaced by the primary fill.
+- **A timer-first PiP card.** The first primary-fill card sized the time
+  (`text-xl`) above a two-line title at body size, so the clock outranked the
+  task. Three task-first layouts were prototyped side by side: a large heading
+  with a quiet footer, this poster with a wash, and the title on an inverted
+  inner card. Cameron chose the poster.
 - **Zoom in on start.** Jarring without an explicit request. Only Return zooms.
 - **Auto-open the PiP window on tab leave.** Not possible for a silent page; see
   above.

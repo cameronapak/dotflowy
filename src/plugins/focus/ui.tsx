@@ -15,6 +15,7 @@ import type { Node } from "../../data/tree";
 
 import { flattenInline } from "../../data/inline-text";
 import { redactSpoilers } from "../../data/spoiler";
+import { TAG_PATTERN } from "../../data/tags";
 import { getTreeIndex, useNode, useSyncReady } from "../../data/tree-store";
 import { getViewFilter, getViewIsHidden } from "../../data/view-state";
 import { useSession as useAccount } from "../../lib/auth-client";
@@ -85,6 +86,9 @@ async function popOut() {
     popup.document.title = "Focus session";
     popup.document.documentElement.className =
       document.documentElement.className;
+    // The page's root reserves a scrollbar gutter. The card never scrolls, so
+    // with classic scrollbars that gutter is an empty strip down the window.
+    popup.document.documentElement.style.scrollbarGutter = "auto";
     for (const style of document.querySelectorAll(
       'style, link[rel="stylesheet"]',
     ))
@@ -123,6 +127,19 @@ async function popOut() {
 
 function display(text: string | undefined) {
   return flattenInline(redactSpoilers(text || "Untitled"));
+}
+const TAG_SPLIT = new RegExp(`(${TAG_PATTERN})`, "u");
+// Tags stay in the card but step back, so the words of the task lead.
+function quietTags(text: string) {
+  return text.split(TAG_SPLIT).map((part, index) =>
+    index % 2 ? (
+      <span key={index} className="font-normal opacity-60">
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  );
 }
 // Sessions run up to 24 hours and overtime is unbounded, so an hour or more
 // reads as h:mm:ss rather than "134:34".
@@ -323,6 +340,24 @@ function FocusSurface({
   const ghost = fill ? fillGhost : undefined;
   const outline = fill ? fillOutline : undefined;
   const primary = fill ? fillPrimary : undefined;
+  const rounds = session.pomodoro && (
+    <span
+      aria-label={`Round ${session.round}; ${session.settings.rounds} ${session.settings.rounds === 1 ? "round" : "rounds"} before a long break`}
+      className="flex shrink-0 gap-1"
+    >
+      {Array.from({ length: session.settings.rounds }, (_, i) => (
+        <span
+          key={i}
+          className={cn(
+            "size-1.5 rounded-full",
+            i < ((session.round - 1) % session.settings.rounds) + 1
+              ? "bg-primary-foreground"
+              : "bg-primary-foreground/25",
+          )}
+        />
+      ))}
+    </span>
+  );
   const controls =
     session.phase === "reflect" ? (
       <Reflection key={session.id} session={session} card={card} />
@@ -440,6 +475,98 @@ function FocusSurface({
       </>
     );
 
+  // The floating card leads with what you set out to do: the title is the
+  // largest thing in the window, the time is a pill, and progress drains as a
+  // wash behind everything (ADR 0074). Reflection keeps the stacked layout below.
+  if (card && session.phase !== "reflect") {
+    const title = display(node?.text);
+    return (
+      <section
+        aria-label="Focus card"
+        data-focus-phase={session.phase}
+        className="relative h-dvh overflow-hidden text-sm"
+      >
+        <div
+          aria-hidden="true"
+          className={cn(
+            "absolute inset-y-0 left-0 transition-[width] duration-1000 ease-linear motion-reduce:transition-none",
+            breaking ? "bg-primary-foreground/5" : "bg-primary-foreground/9",
+          )}
+          style={{ width: `${progress * 100}%` }}
+        />
+        <div className="relative flex h-full flex-col gap-2 p-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="min-w-0 flex-1 truncate text-xs opacity-70">
+              {breaking
+                ? "Break · "
+                : up
+                  ? "Time is up · "
+                  : session.pausedAt !== null
+                    ? "Paused · "
+                    : ""}
+              {parent ? display(parent.text) : "Home"}
+            </p>
+            {rounds}
+            <span
+              aria-label="Focus time remaining"
+              className={cn(
+                "max-w-[60%] shrink-0 truncate rounded-full border border-primary-foreground/30 px-2 py-0.5 text-xs tabular-nums",
+                up && "bg-primary-foreground/15 font-medium",
+              )}
+            >
+              {/* The pill is narrow; Start round says the rest. */}
+              {session.phase === "ready" ? "Ready" : timer(ms)}
+            </span>
+          </div>
+          {/* The title scales with the window; taller windows show more lines. */}
+          <div className="flex min-h-0 flex-1 flex-col justify-center">
+            <div className="flex min-w-0 items-start gap-[0.45em] text-[clamp(1.125rem,min(7.5vw,13vh),2.5rem)] leading-[1.15] font-bold tracking-[-0.02em]">
+              {task && (
+                <Checkbox
+                  aria-label="Complete focused task"
+                  className="mt-[0.2em] size-[0.9em] min-h-4 min-w-4 rounded-[0.22em] border-primary-foreground/60 dark:bg-transparent"
+                  checked={node.completed}
+                  onCheckedChange={(checked) => {
+                    if (checked) endSession(true);
+                  }}
+                />
+              )}
+              <button
+                // dir="auto" clamps a right-to-left title at its end.
+                dir="auto"
+                title={title}
+                className={cn(
+                  fillFocus,
+                  "min-w-0 text-start decoration-[0.06em] underline-offset-[0.15em] hover:underline",
+                )}
+                onClick={returnToFocus}
+              >
+                <span className="line-clamp-3 [@media(max-height:150px)]:line-clamp-2 [@media(min-height:230px)]:line-clamp-4 [@media(min-height:320px)]:line-clamp-5">
+                  {quietTags(title)}
+                </span>
+              </button>
+            </div>
+          </div>
+          {/* Below 280px, a break's Back to focus, Done, pause, and end would clip,
+              so buttons drop their padding and Done its icon. */}
+          <div className="flex min-w-0 items-center justify-end gap-1 [@media(max-width:279px)]:gap-0.5 [@media(max-width:279px)]:[&_[data-icon=inline-start]]:hidden [@media(max-width:279px)]:[&_[data-slot=button]]:px-1.5">
+            {!up && session.phase !== "ready" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className={cn(ghost, "mr-auto -ml-2 px-2 opacity-80")}
+                onClick={returnToFocus}
+              >
+                Back to focus
+              </Button>
+            )}
+            {controls}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section
       aria-label={card ? "Focus card" : "Focus session"}
@@ -464,20 +591,14 @@ function FocusSurface({
       >
         {card && (
           <p className="truncate text-xs opacity-75">
-            {breaking ? "Break · " : up ? "Time is up · " : ""}
             {parent ? display(parent.text) : "Home"}
           </p>
         )}
         {session.phase !== "reflect" && (
           <>
-            <div
-              className={cn(
-                "flex min-w-0 flex-1 items-center gap-2",
-                // A floor for the title: crowded controls wrap to a second
-                // line instead of squeezing what you set out to do away.
-                !card && "basis-72 max-sm:basis-full",
-              )}
-            >
+            {/* A floor for the title: crowded controls wrap to a second line
+                instead of squeezing what you set out to do away. */}
+            <div className="flex min-w-0 flex-1 basis-72 items-center gap-2 max-sm:basis-full">
               {task && (
                 <Checkbox
                   aria-label="Complete focused task"
@@ -488,55 +609,28 @@ function FocusSurface({
                   }}
                 />
               )}
-              {!card && (
-                <span
-                  className={cn("shrink-0 font-medium", !up && "opacity-75")}
-                >
-                  {breaking
-                    ? "Break"
-                    : away
-                      ? "You set out to"
-                      : up
-                        ? "Time is up"
-                        : "Now"}
-                </span>
-              )}
+              <span className={cn("shrink-0 font-medium", !up && "opacity-75")}>
+                {breaking
+                  ? "Break"
+                  : away
+                    ? "You set out to"
+                    : up
+                      ? "Time is up"
+                      : "Now"}
+              </span>
               <button
                 // dir="auto" truncates a right-to-left title at its end.
                 dir="auto"
                 title={display(node?.text)}
-                className={cn(
-                  "min-w-0 text-start font-medium hover:underline",
-                  card ? "line-clamp-2" : "truncate",
-                )}
+                className="min-w-0 truncate text-start font-medium hover:underline"
                 onClick={returnToFocus}
               >
                 {display(node?.text)}
               </button>
             </div>
-            {session.pomodoro && (
-              <span
-                aria-label={`Round ${session.round}; ${session.settings.rounds} ${session.settings.rounds === 1 ? "round" : "rounds"} before a long break`}
-                className="flex shrink-0 gap-1"
-              >
-                {Array.from({ length: session.settings.rounds }, (_, i) => (
-                  <span
-                    key={i}
-                    className={cn(
-                      "size-1.5 rounded-full",
-                      i < ((session.round - 1) % session.settings.rounds) + 1
-                        ? "bg-primary-foreground"
-                        : "bg-primary-foreground/25",
-                    )}
-                  />
-                ))}
-              </span>
-            )}
+            {rounds}
             <span
-              className={cn(
-                "shrink-0 tabular-nums",
-                card ? "text-xl" : "font-medium",
-              )}
+              className="shrink-0 font-medium tabular-nums"
               aria-label="Focus time remaining"
             >
               {session.phase === "ready" ? "Ready when you are" : timer(ms)}
@@ -544,20 +638,7 @@ function FocusSurface({
                 <span className="ml-2 text-xs opacity-75">Paused</span>
               )}
             </span>
-            {card && (
-              <div className="h-[3px] w-full bg-primary-foreground/20">
-                <div
-                  className={cn(
-                    "h-full",
-                    breaking
-                      ? "bg-primary-foreground/50"
-                      : "bg-primary-foreground",
-                  )}
-                  style={{ width: `${progress * 100}%` }}
-                />
-              </div>
-            )}
-            {!card && away && (
+            {away && (
               <Button
                 variant="outline"
                 size="sm"
@@ -576,19 +657,6 @@ function FocusSurface({
             card && "flex-wrap",
           )}
         >
-          {card &&
-            !up &&
-            session.phase !== "ready" &&
-            session.phase !== "reflect" && (
-              <Button
-                variant="outline"
-                size="sm"
-                className={outline}
-                onClick={returnToFocus}
-              >
-                Back to focus
-              </Button>
-            )}
           {controls}
         </div>
       </div>
