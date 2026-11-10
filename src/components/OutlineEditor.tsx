@@ -102,6 +102,7 @@ import {
   useIsLocked,
   useMirrorCount,
   useNode,
+  useNodeOrdinal,
   useSyncReady,
   useTrail,
   useTreeIndex,
@@ -2870,7 +2871,7 @@ function useNodeCommands({
                 let newId: string;
                 let atStart = false;
                 let caret: number | undefined;
-                if (caretAtEnd && isOpen) {
+                if (caretAtEnd && isOpen && content.kind !== "numbered") {
                   // Dive in: a child of the CONTENT (source), so the new node windows
                   // into every instance, not just the one being edited.
                   newId = insertChildAtStart(
@@ -3268,6 +3269,8 @@ function useNodeCommands({
             const node = idx.byId.get(id);
             if (!node || guardLocked(idx, id, rowOf(id))) return [];
             let nextText = text;
+            if (kind === "numbered" && guardProtected(id, "task", rowOf(id)))
+              return [];
             if (kind === "embed") {
               if (guardProtected(id, "task", rowOf(id))) return [];
               const url = embedUrl(text ?? node.text);
@@ -3500,6 +3503,7 @@ function ZoomedTitle({
   // page title. Session-fixed flag -> no reactive work when mirrors are off.
   const mirrorsOn = isMirrorsEnabled();
   const mirrorCount = useMirrorCount(node.id, mirrorsOn);
+  const ordinal = useNodeOrdinal(node.id);
 
   // Plugin slots for the zoomed title (Seam F) plus the two core decorations
   // (protected lock, mirror badge), in ONE list -- the same composition as
@@ -3515,7 +3519,11 @@ function ZoomedTitle({
       id: "core:kind-mark",
       position: "title:before-text",
       render: () => (
-        <TitleGlyph kind={node.kind} quote={isQuoteText(node.text)} />
+        <TitleGlyph
+          kind={node.kind}
+          quote={isQuoteText(node.text)}
+          ordinal={ordinal}
+        />
       ),
     },
     {

@@ -7,6 +7,8 @@
  *
  *   1. an initial `vite build` + copy `_shell.html` -> `index.html` so wrangler
  *      has assets to serve (wrangler errors out if dist/client is missing).
+ *      Only this preview combines client chunks, avoiding request waves over
+ *      high-latency portals. Normal production builds retain code splitting.
  *   2. `wrangler dev` - serves the built dist/client + the Worker/DO, reading
  *      assets live, so a browser refresh picks up each rebuild with no restart.
  *      It already watches `worker/` itself, so we don't rebuild on worker edits.
@@ -36,6 +38,7 @@ const log = (msg: string) => console.log(`\x1b[36m[cf:dev]\x1b[0m ${msg}`);
 async function build(): Promise<boolean> {
   const proc = Bun.spawn(["bun", "run", "build:cf"], {
     cwd: ROOT,
+    env: { ...process.env, DOTFLOWY_CF_DEV: "true" },
     stdio: ["inherit", "inherit", "inherit"],
   });
   const code = await proc.exited;

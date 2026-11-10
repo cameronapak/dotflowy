@@ -216,6 +216,7 @@ describe("createSyncStream", () => {
           expect(helloOf(nth(sockets, 0))).toEqual({
             type: "hello",
             since: 99,
+            numbered: true,
           });
 
           yield* resync;
@@ -229,6 +230,7 @@ describe("createSyncStream", () => {
           expect(helloOf(nth(sockets, 1))).toEqual({
             type: "hello",
             since: null,
+            numbered: true,
           });
           // Another acknowledged write times out while recovery is connecting.
           // It must not cancel the connection already fetching server truth.

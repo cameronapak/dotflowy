@@ -19,7 +19,7 @@ export const NodeSchema = Schema.Struct({
   origin: Schema.NullOr(Schema.String),
   // Mutations enforce Kind exclusivity with isTask; old clients may send both,
   // so readers give kind precedence (ADR 0045).
-  kind: Schema.NullOr(Schema.Literals(["paragraph", "embed"])),
+  kind: Schema.NullOr(Schema.Literals(["paragraph", "embed", "numbered"])),
 });
 export type Node = Schema.Schema.Type<typeof NodeSchema>;
 

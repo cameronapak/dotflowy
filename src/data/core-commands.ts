@@ -1,3 +1,5 @@
+import { LeftToRightListNumberIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
   AlignLeftIcon,
   CopyPlusIcon,
@@ -6,6 +8,7 @@ import {
   Trash2Icon,
   UnlockIcon,
 } from "lucide-react";
+import { createElement } from "react";
 
 import type { CommandSpec } from "../plugins/types";
 
@@ -38,6 +41,20 @@ export const paragraphCommand: CommandSpec = {
   available: (node) => node.kind !== "paragraph",
   run: (id, ctx) => ctx.mutations.onSetKind(id, "paragraph"),
   runMany: (ids, ctx) => ctx.mutations.onSetKind(ids, "paragraph"),
+};
+
+const NumberedIcon: CommandSpec["icon"] = (props) =>
+  createElement(HugeiconsIcon, { ...props, icon: LeftToRightListNumberIcon });
+
+export const numberedCommand: CommandSpec = {
+  id: "numbered",
+  label: "Numbered list",
+  description: "Turn into a numbered list item",
+  icon: NumberedIcon,
+  keywords: ["numbered", "ordered", "list", "number"],
+  available: (node) => node.kind !== "numbered",
+  run: (id, ctx) => ctx.mutations.onSetKind(id, "numbered"),
+  runMany: (ids, ctx) => ctx.mutations.onSetKind(ids, "numbered"),
 };
 
 export const lockCommand: CommandSpec = {
@@ -116,6 +133,7 @@ export const unlockCommand: CommandSpec = {
  */
 export const CORE_COMMANDS: CommandSpec[] = [
   paragraphCommand,
+  numberedCommand,
   lockCommand,
   unlockCommand,
   {

@@ -35,7 +35,7 @@ const ToolResult = Schema.Struct({
 const SearchNode = Schema.Struct({
   id: Schema.String,
   text: Schema.String,
-  kind: Schema.NullOr(Schema.Literals(["paragraph", "embed"])),
+  kind: Schema.NullOr(Schema.Literals(["paragraph", "embed", "numbered"])),
   isTask: Schema.Boolean,
   completed: Schema.Boolean,
   locked: Schema.Boolean,
@@ -138,7 +138,15 @@ export const connect = Effect.fn("MCP.connect")(function* (
       }),
     invoke: (name: string, args: JsonObject, write: boolean) =>
       Effect.gen(function* () {
-        const raw = yield* call("tools/call", { name, arguments: args }, write);
+        const raw = yield* call(
+          "tools/call",
+          {
+            name,
+            arguments:
+              name === "search_nodes" ? { numbered: true, ...args } : args,
+          },
+          write,
+        );
         const checked = yield* decode(ToolResult, raw, "tool result");
         return {
           raw,

@@ -1,5 +1,12 @@
 import { ChevronRight, LockIcon } from "lucide-react";
-import { Fragment, memo, useLayoutEffect, useRef, type RefObject } from "react";
+import {
+  Fragment,
+  memo,
+  useLayoutEffect,
+  useRef,
+  type CSSProperties,
+  type RefObject,
+} from "react";
 
 import type { QueryFilter } from "../data/filter-query";
 import type { Node } from "../data/schema";
@@ -14,6 +21,7 @@ import {
   useIsLocked,
   useMirrorCount,
   useNode,
+  useNodeOrdinal,
   useVisibleChildIds,
 } from "../data/tree-store";
 import { rowKeyFor } from "../data/visible-order";
@@ -203,6 +211,11 @@ function RowChrome({
   measureRef,
 }: RowChromeProps) {
   const textRef = useRef<HTMLSpanElement | null>(null);
+  const ordinal = useNodeOrdinal(instance.id);
+  const numberStyle: CSSProperties & { "--number-width"?: string } = {
+    "--number-width":
+      ordinal === undefined ? undefined : `${String(ordinal).length + 1}ch`,
+  };
   const {
     syncedRef,
     composingRef,
@@ -399,7 +412,12 @@ function RowChrome({
         paddingInlineStart: depth * INDENT_PX,
       }}
     >
-      <div className="outline-row" data-faded={faded} data-context={isContext}>
+      <div
+        className="outline-row"
+        data-faded={faded}
+        data-context={isContext}
+        style={numberStyle}
+      >
         {hasChildren ? (
           <button
             type="button"
@@ -426,7 +444,9 @@ function RowChrome({
         <button
           type="button"
           className="bullet touch-hitbox"
-          aria-label="Zoom in"
+          aria-label={
+            ordinal === undefined ? "Zoom in" : `Zoom into item ${ordinal}`
+          }
           // Drag arms with the row KEY so a windowed copy inside a mirror is the
           // exact instance grabbed, never its source copy (ADR 0022). key === id
           // off the flag / outside a mirror.
@@ -445,6 +465,7 @@ function RowChrome({
             completed={content.completed}
             hasChildren={hasChildren}
             collapsed={effectiveCollapsed}
+            ordinal={ordinal}
           />
         </button>
         {/* Block cell so wrapped text flows UNDER the slot icons: the icons
@@ -492,6 +513,20 @@ function RowChrome({
                 e.nativeEvent.inputType === "insertText"
               ) {
                 const caret = getCaretOffset(el);
+                if (
+                  (content.kind === "paragraph" ||
+                    (content.kind === null && !content.isTask)) &&
+                  !protectedNode &&
+                  text.startsWith("1. ") &&
+                  caret === 3
+                ) {
+                  const nextText = text.slice(3);
+                  commands.onSetKind(content.id, "numbered", nextText);
+                  decorate(el, nextText, 0, false);
+                  syncedRef.current = nextText;
+                  setCaretOffset(el, 0);
+                  return;
+                }
                 if (
                   content.kind === "paragraph" &&
                   text.startsWith("- ") &&

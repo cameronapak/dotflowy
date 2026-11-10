@@ -97,6 +97,7 @@ tools; `dotflowy tools TOOL_NAME` prints its description and complete input sche
 ```sh
 dotflowy today "Follow up with Alex" --task --time-zone America/Chicago
 dotflowy add "Project notes" --parent NODE_ID --kind paragraph
+dotflowy add "First step" --parent NODE_ID --kind numbered
 dotflowy search 'is:todo -is:complete #dotflowy' --node NODE_ID --limit 100 --all --json
 dotflowy update NODE_ID --completed
 dotflowy update NODE_ID --no-completed --text "Revised text"
@@ -109,6 +110,12 @@ dotflowy call get_outline --args '{"nodeId":null,"maxDepth":2}' --json
 Every tool command also accepts `--input FILE` or `--args JSON` containing its
 exact MCP argument object. Use `--input -` for stdin. Nested subtree input looks
 like `{"nodes":[{"text":"Parent","children":[{"text":"Child"}]}]}`.
+Use `--kind numbered` with `add`, `today`, or `update`, or `"kind":"numbered"`
+on subtree input nodes, for automatically numbered sibling runs. Nonnumbered
+siblings restart a run; nested runs count independently. Kind and task are
+mutually exclusive. Use `update NODE_ID --kind bullet` to remove numbering.
+This CLI requests numbered Kind values in search. Older CLI versions receive
+bullet-compatible search results, so they can keep reading numbered outlines.
 Use `call TOOL_NAME` for a tool added after this CLI version. Explicit `null`,
 `false`, empty strings, arrays, and nested objects are preserved in raw calls.
 Do not supply the same field in both JSON input and command flags.

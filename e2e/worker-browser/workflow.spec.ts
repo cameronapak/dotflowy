@@ -234,3 +234,221 @@ test("acknowledged splits survive missing echoes, resync, peer edits and reload"
     );
   }
 });
+
+test("legacy clients read numbered nodes without losing their Kind through writes or undo", async ({
+  page,
+  context,
+}) => {
+  const { origin } = backend;
+  const email = "numbered-compat@worker-browser.test";
+  const password = "disposable-numbered-password";
+  const signup = await context.request.post(
+    `${origin}/api/auth/sign-up/email`,
+    {
+      headers: { origin },
+      data: { email, name: "Numbered compatibility", password },
+    },
+  );
+  expect(signup.status()).toBe(200);
+  const { user } = await signup.json();
+  await backend.db
+    .prepare('UPDATE "user" SET emailVerified=1 WHERE id=?')
+    .bind(user.id)
+    .run();
+  expect(
+    (
+      await context.request.post(`${origin}/api/auth/sign-in/email`, {
+        headers: { origin },
+        data: { email, password },
+      })
+    ).status(),
+  ).toBe(200);
+  const numbered = createNode({
+    id: "numbered",
+    text: "First step",
+    kind: "numbered",
+  });
+  const plain = createNode({
+    id: "plain",
+    text: "Unchanged",
+    prevSiblingId: "numbered",
+  });
+  const headers = { "x-dotflowy-numbered": "true" };
+  expect(
+    (
+      await context.request.post(`${origin}/api/nodes`, {
+        headers,
+        data: { nodes: [numbered, plain] },
+      })
+    ).status(),
+  ).toBe(200);
+  const frames: Array<{
+    modern: boolean;
+    frame: import("../../src/data/wire-schema").ServerMessage;
+  }> = [];
+  page.on("websocket", (socket) => {
+    if (!socket.url().includes("compat=")) return;
+    socket.on("framereceived", ({ payload }) =>
+      frames.push({
+        modern: socket.url().endsWith("compat=modern"),
+        frame: JSON.parse(String(payload)),
+      }),
+    );
+  });
+  await page.goto(origin);
+  await expect(editor(page, "numbered")).toHaveText("First step");
+  for (const modern of [false, true]) {
+    await page.evaluate(
+      (modern) =>
+        new Promise<void>((resolve) => {
+          const socket = new WebSocket(
+            `ws://${location.host}/api/sync?compat=${modern ? "modern" : "legacy"}`,
+          );
+          const hello = modern
+            ? { type: "hello", since: null, numbered: true }
+            : { type: "hello", since: null };
+          socket.onopen = () => socket.send(JSON.stringify(hello));
+          socket.onmessage = () => resolve();
+        }),
+      modern,
+    );
+  }
+  const snapshot = frames.find(
+    (entry) => !entry.modern && entry.frame.type === "snapshot",
+  )!.frame;
+  expect(snapshot.type).toBe("snapshot");
+  if (snapshot.type !== "snapshot") throw new Error("missing snapshot");
+  expect(
+    snapshot.nodes.find((node) => node.id === "numbered")?.kind,
+  ).toBeNull();
+  expect(snapshot.serverVersion).toBeTruthy();
+  expect(snapshot.calendar).toBeDefined();
+  const modernSnapshot = frames.find(
+    (entry) => entry.modern && entry.frame.type === "snapshot",
+  )!.frame;
+  expect(
+    modernSnapshot.type === "snapshot" &&
+      modernSnapshot.nodes.find((node) => node.id === "numbered")?.kind,
+  ).toBe("numbered");
+  const legacyRead = await (
+    await context.request.get(`${origin}/api/nodes`)
+  ).json();
+  expect(
+    legacyRead.find((node: { id: string }) => node.id === "numbered").kind,
+  ).toBeNull();
+  const edited = await context.request.patch(`${origin}/api/nodes`, {
+    data: {
+      updates: [{ id: "numbered", changes: { text: "Legacy text edit" } }],
+      clientId: "legacy-client",
+    },
+  });
+  expect(edited.status()).toBe(200);
+  const { seq } = await edited.json();
+  await expect
+    .poll(
+      () =>
+        frames.filter(
+          (entry) => entry.frame.type === "change" && entry.frame.seq === seq,
+        ).length,
+    )
+    .toBe(2);
+  for (const { modern, frame } of frames.filter(
+    (entry) => entry.frame.type === "change" && entry.frame.seq === seq,
+  )) {
+    if (frame.type !== "change") throw new Error("missing change");
+    expect(frame.clientId).toBe("legacy-client");
+    const op = frame.ops[0]!;
+    expect(op.op !== "delete" && op.value.kind).toBe(
+      modern ? "numbered" : null,
+    );
+  }
+  const resume = await page.evaluate(
+    (since) =>
+      new Promise<import("../../src/data/wire-schema").ServerMessage>(
+        (resolve) => {
+          const socket = new WebSocket(`ws://${location.host}/api/sync`);
+          socket.onopen = () =>
+            socket.send(JSON.stringify({ type: "hello", since }));
+          socket.onmessage = (event) => {
+            socket.close();
+            resolve(JSON.parse(event.data));
+          };
+        },
+      ),
+    snapshot.seq,
+  );
+  expect(resume.type).toBe("resume");
+  if (resume.type !== "resume") throw new Error("missing resume");
+  expect(resume.seq).toBe(seq);
+  expect(resume.changes[0]?.clientId).toBe("legacy-client");
+  expect(
+    resume.changes[0]?.ops[0]?.op !== "delete" &&
+      resume.changes[0]?.ops[0]?.value.kind,
+  ).toBeNull();
+  const inspect = async (): Promise<OutlineSnapshot> =>
+    backend.control("inspect", user.id);
+  const baseline = (await inspect()).nodes;
+  // A stale paragraph undo and a delete/undo cycle must not erase numbered Kind.
+  for (const body of [
+    {
+      ops: [
+        { op: "update", value: { ...plain, text: "Must roll back" } },
+        { op: "update", value: { ...numbered, kind: "paragraph" } },
+      ],
+      expectedSeq: seq,
+    },
+    { nodes: [{ ...numbered, kind: null }] },
+    {
+      ops: [
+        { op: "delete", key: "numbered" },
+        { op: "update", value: { ...plain, prevSiblingId: null } },
+      ],
+    },
+  ]) {
+    const response = await context.request.post(`${origin}/api/nodes`, {
+      data: body,
+    });
+    expect(response.status()).toBe(409);
+    expect((await response.json()).error).toBe("client_upgrade_required");
+    expect((await inspect()).nodes).toEqual(baseline);
+  }
+  for (const changes of [
+    { kind: null, isTask: true },
+    { kind: "paragraph", text: "Must not be coupled" },
+  ]) {
+    const response = await context.request.patch(`${origin}/api/nodes`, {
+      data: {
+        updates: [
+          { id: "plain", changes: { text: "Must roll back" } },
+          { id: "numbered", changes },
+        ],
+      },
+    });
+    expect(response.status()).toBe(409);
+    expect((await inspect()).nodes).toEqual(baseline);
+  }
+  expect(
+    (
+      await context.request.delete(`${origin}/api/nodes`, {
+        data: { ids: ["plain", "numbered"] },
+      })
+    ).status(),
+  ).toBe(409);
+  expect((await inspect()).nodes).toEqual(baseline);
+  expect(
+    (
+      await context.request.patch(`${origin}/api/nodes`, {
+        headers,
+        data: {
+          updates: [{ id: "numbered", changes: { kind: null, isTask: true } }],
+        },
+      })
+    ).status(),
+  ).toBe(200);
+  const converted = (await inspect()).nodes.find(
+    (node) => node.id === "numbered",
+  );
+  expect(converted?.kind).toBeNull();
+  expect(converted?.isTask).toBe(true);
+  expect(converted?.text).toBe("Legacy text edit");
+});

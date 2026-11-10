@@ -38,6 +38,7 @@ import { WeekStartPreferenceSchema } from "../src/data/wire-schema";
 import { SNAPSHOT_VERSION } from "./backup";
 import { canResumeChangelog, planChangeFrames } from "./changelog";
 import { validateLockedPatches, validateLockedWrite } from "./lock-policy";
+import { legacyNumberedFrame, touchesNumbered } from "./numbered-compat";
 import { planAddSubtreeToDaily } from "./outline-ops";
 import { batchExceedsNodeLimit, countNetGrowth } from "./plan";
 import { APP_VERSION } from "./version";
@@ -114,6 +115,7 @@ const WRITABLE_COLUMNS = new Set(Object.keys(NodeChangesSchema.fields));
 interface HelloMessage {
   type: "hello";
   since: number | null;
+  numbered?: boolean;
 }
 
 /** How many recent change frames the DO retains for reconnect replay. A client
@@ -144,7 +146,10 @@ function rowToNode(r: NodeRow): Node {
     // The column is a plain TEXT, so narrow it back to the literal union: an
     // unrecognized value reads as a bullet rather than escaping into a frame the
     // client's `ServerMessageSchema` would then reject (ADR 0045 / ADR 0014).
-    kind: r.kind === "paragraph" || r.kind === "embed" ? r.kind : null,
+    kind:
+      r.kind === "paragraph" || r.kind === "embed" || r.kind === "numbered"
+        ? r.kind
+        : null,
   };
 }
 
@@ -482,7 +487,8 @@ export class UserOutlineDO extends DurableObject<Env> {
     clientId?: string,
     expectedSeq?: number,
     allowLockChanges = false,
-  ): number | null | "stale" | "locked" {
+    supportsNumbered = true,
+  ): number | null | "stale" | "locked" | "upgrade" {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
       // History replay is conditional on exactly the state it was planned
@@ -490,7 +496,16 @@ export class UserOutlineDO extends DurableObject<Env> {
       // cap probes and node writes, so rejection has no observable side effect.
       if (expectedSeq !== undefined && this.currentSeq() !== expectedSeq)
         return "stale" as const;
-      if (validateLockedWrite(this.getNodes(), ops, allowLockChanges))
+      const current = this.getNodes();
+      if (
+        !supportsNumbered &&
+        touchesNumbered(
+          current,
+          ops.map((op) => (op.op === "delete" ? op.key : op.value.id)),
+        )
+      )
+        return "upgrade" as const;
+      if (validateLockedWrite(current, ops, allowLockChanges))
         return "locked" as const;
       if (limit !== null) {
         const { inserts, deletes } = countNetGrowth(ops, (id) =>
@@ -508,7 +523,12 @@ export class UserOutlineDO extends DurableObject<Env> {
         clientId,
       );
     });
-    if (frames === null || frames === "stale" || frames === "locked")
+    if (
+      frames === null ||
+      frames === "stale" ||
+      frames === "locked" ||
+      frames === "upgrade"
+    )
       return frames;
     return this.broadcastChange(frames);
   }
@@ -521,11 +541,21 @@ export class UserOutlineDO extends DurableObject<Env> {
     nodes: readonly Node[],
     limit: number | null,
     clientId?: string,
-  ): boolean | "locked" {
+    supportsNumbered = true,
+  ): boolean | "locked" | "upgrade" {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
       const ops = nodes.map((value) => ({ op: "update" as const, value }));
-      if (validateLockedWrite(this.getNodes(), ops)) return "locked" as const;
+      const current = this.getNodes();
+      if (
+        !supportsNumbered &&
+        touchesNumbered(
+          current,
+          nodes.map((node) => node.id),
+        )
+      )
+        return "upgrade" as const;
+      if (validateLockedWrite(current, ops)) return "locked" as const;
       if (limit !== null) {
         const newIds = new Set<string>();
         for (const n of nodes) if (!this.nodeExists(n.id)) newIds.add(n.id);
@@ -533,12 +563,12 @@ export class UserOutlineDO extends DurableObject<Env> {
           return null;
       }
       return this.recordChange(
-        nodes.map((n) => this.putNode(n)),
+        nodes.map((node) => this.putNode(node)),
         clientId,
       );
     });
     if (frames === null) return false;
-    if (frames === "locked") return frames;
+    if (frames === "locked" || frames === "upgrade") return frames;
     this.broadcastChange(frames);
     return true;
   }
@@ -930,10 +960,24 @@ export class UserOutlineDO extends DurableObject<Env> {
     updates: readonly PatchUpdate[],
     clientId?: string,
     allowLockChanges = false,
-  ): number | "locked" {
+    supportsNumbered = true,
+  ): number | "locked" | "upgrade" {
     this.assertWritable();
     const frames = this.ctx.storage.transactionSync(() => {
       const current = this.getNodes();
+      if (
+        !supportsNumbered &&
+        touchesNumbered(
+          current,
+          updates
+            .filter(
+              (update) =>
+                "kind" in update.changes || "isTask" in update.changes,
+            )
+            .map((update) => update.id),
+        )
+      )
+        return "upgrade" as const;
       if (validateLockedPatches(current, updates, allowLockChanges))
         return "locked" as const;
       const ops: ChangeOp[] = [];
@@ -962,22 +1006,29 @@ export class UserOutlineDO extends DurableObject<Env> {
       }
       return this.recordChange(ops, clientId);
     });
-    if (frames === "locked") return frames;
+    if (frames === "locked" || frames === "upgrade") return frames;
     return this.broadcastChange(frames);
   }
 
-  deleteNodes(ids: readonly string[], clientId?: string): boolean {
+  deleteNodes(
+    ids: readonly string[],
+    clientId?: string,
+    supportsNumbered = true,
+  ): boolean | "upgrade" {
     this.assertWritable();
     const ops = ids.map((key) => ({ op: "delete" as const, key }));
-    if (validateLockedWrite(this.getNodes(), ops)) return false;
-    this.broadcastChange(
-      this.ctx.storage.transactionSync(() =>
-        this.recordChange(
-          ids.map((id) => this.deleteNodeRow(id)),
-          clientId,
-        ),
-      ),
-    );
+    const frames = this.ctx.storage.transactionSync(() => {
+      const current = this.getNodes();
+      if (!supportsNumbered && touchesNumbered(current, ids))
+        return "upgrade" as const;
+      if (validateLockedWrite(current, ops)) return false;
+      return this.recordChange(
+        ids.map((id) => this.deleteNodeRow(id)),
+        clientId,
+      );
+    });
+    if (frames === false || frames === "upgrade") return frames;
+    this.broadcastChange(frames);
     return true;
   }
 
@@ -1075,10 +1126,11 @@ export class UserOutlineDO extends DurableObject<Env> {
         message = { ...message, calendar: frameCalendar };
       }
       const data = JSON.stringify(message);
+      const legacyData = JSON.stringify(legacyNumberedFrame(message));
       for (const ws of sockets) {
         // A socket can race a close; the runtime will fire webSocketClose for it.
         try {
-          ws.send(data);
+          ws.send(ws.deserializeAttachment() === true ? data : legacyData);
         } catch {
           // already gone
         }
@@ -1112,7 +1164,13 @@ export class UserOutlineDO extends DurableObject<Env> {
   ): Promise<void> {
     const hello = this.parseHello(raw);
     if (!hello) return;
-    ws.send(JSON.stringify(this.initialFrame(hello.since)));
+    ws.serializeAttachment(hello.numbered === true);
+    const frame = this.initialFrame(hello.since);
+    ws.send(
+      JSON.stringify(
+        hello.numbered === true ? frame : legacyNumberedFrame(frame),
+      ),
+    );
   }
 
   /** Complete the closing handshake (CF best practice for Hibernation). */

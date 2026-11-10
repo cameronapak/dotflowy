@@ -156,15 +156,20 @@ function randomForest(next: () => number, depth = 0): OutlineFixture[] {
   const count = Math.floor(next() * (depth === 0 ? 5 : 3));
   const out: OutlineFixture[] = [];
   for (let i = 0; i < count; i++) {
-    // Kinds are mutually exclusive, so one roll picks all three buckets:
-    // task < 0.25 <= paragraph < 0.55 <= plain bullet.
+    // One roll picks mutually exclusive task, paragraph, numbered, or bullet.
     const roll = next();
     const isTask = roll < 0.25;
     out.push({
       text: TEXTS[Math.floor(next() * TEXTS.length)]!,
       isTask,
       completed: isTask && next() < 0.5,
-      kind: !isTask && roll < 0.55 ? "paragraph" : null,
+      kind: isTask
+        ? null
+        : roll < 0.55
+          ? "paragraph"
+          : roll < 0.75
+            ? "numbered"
+            : null,
       children: depth < 3 ? randomForest(next, depth + 1) : [],
     });
   }
@@ -346,6 +351,31 @@ describe("parse(outlineToMarkdown(t)) === t", () => {
 });
 
 // --- the grammar --------------------------------------------------------------
+
+test("ordinal markers retain numbered kind, except checkboxes take task precedence", () => {
+  const forest = parseMarkdownForest(
+    "9. first\n  8) nested\n2) [x] done\n3. [ ] open\n4.",
+  );
+  expect(forestFixture(forest)).toEqual([
+    outlineFixture(
+      "first",
+      [outlineFixture("nested", [], false, false, "numbered")],
+      false,
+      false,
+      "numbered",
+    ),
+    outlineFixture("done", [], true, true),
+    outlineFixture("open", [], true, false),
+    outlineFixture("", [], false, false, "numbered"),
+  ]);
+  expect(roundTrip(forestFixture(forest))).toEqual(forestFixture(forest));
+  expect(parseMarkdownForest("1. literal", { literal: true })[0]).toMatchObject(
+    {
+      text: "1. literal",
+      kind: null,
+    },
+  );
+});
 
 test.each<[string, string, string[]]>([
   [
@@ -591,6 +621,18 @@ describe("planMarkdownPaste", () => {
   });
 
   test.each<[string, string, string, PlannedAnchor]>([
+    [
+      "an ordinal on line 1 makes the anchor numbered when head is empty",
+      "8. first\n9. second",
+      "",
+      { text: "first", isTask: null, completed: null, kind: "numbered" },
+    ],
+    [
+      "an ordinal mid-sentence leaves the anchor kind alone",
+      "8. first\n9. second",
+      "prefix ",
+      { text: "prefix first", isTask: null, completed: null, kind: null },
+    ],
     [
       "a task marker on line 1 converts the anchor when head is empty",
       "- [x] done\nb",

@@ -67,6 +67,7 @@ import {
   type InviteBatchResult,
 } from "./invites";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
+import { legacyNumberedNode } from "./numbered-compat";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { resolveRestorePoint } from "./restore";
@@ -302,6 +303,11 @@ class StaleOutlineWrite extends Data.TaggedError("StaleOutlineWrite")<{}> {}
 /** An ordinary write would change owner-locked content. */
 class NodeLocked extends Data.TaggedError("NodeLocked")<{}> {}
 
+/** A legacy client cannot safely rewrite a numbered node it sees as a bullet. */
+class ClientUpgradeRequired extends Data.TaggedError(
+  "ClientUpgradeRequired",
+)<{}> {}
+
 // --- ensureSeededE ----------------------------------------------------------
 
 /**
@@ -425,12 +431,20 @@ function handleNodes(
   billingUserId: string,
 ): Effect.Effect<
   Response,
-  BadRequest | NodeLimitExceeded | StaleOutlineWrite | NodeLocked
+  | BadRequest
+  | NodeLimitExceeded
+  | StaleOutlineWrite
+  | NodeLocked
+  | ClientUpgradeRequired
 > {
   return Effect.gen(function* () {
+    const supportsNumbered =
+      request.headers.get("x-dotflowy-numbered") === "true";
     switch (request.method) {
-      case "GET":
-        return json(yield* Effect.promise(() => stub.getNodes()));
+      case "GET": {
+        const nodes = yield* Effect.promise(() => stub.getNodes());
+        return json(supportsNumbered ? nodes : nodes.map(legacyNumberedNode));
+      }
       case "POST": {
         const { ops, nodes, clientId, expectedSeq } = yield* decodeBody(
           request,
@@ -471,8 +485,11 @@ function handleNodes(
                 clientId,
                 expectedSeq,
                 true,
-              ) as Promise<number | null | "stale" | "locked">,
+                supportsNumbered,
+              ) as Promise<number | null | "stale" | "locked" | "upgrade">,
           );
+          if (seq === "upgrade")
+            return yield* Effect.fail(new ClientUpgradeRequired());
           if (seq === "stale")
             return yield* Effect.fail(new StaleOutlineWrite());
           if (seq === "locked") return yield* Effect.fail(new NodeLocked());
@@ -489,10 +506,15 @@ function handleNodes(
           const applied = yield* Effect.promise(
             // SAFETY: the generated RPC stub type predates this method's new locked sentinel; the deployed method returns this declared union.
             () =>
-              stub.upsertNodesGated(nodes, limit, clientId) as Promise<
-                boolean | "locked"
-              >,
+              stub.upsertNodesGated(
+                nodes,
+                limit,
+                clientId,
+                supportsNumbered,
+              ) as Promise<boolean | "locked" | "upgrade">,
           );
+          if (applied === "upgrade")
+            return yield* Effect.fail(new ClientUpgradeRequired());
           if (applied === "locked") return yield* Effect.fail(new NodeLocked());
           if (!applied) return yield* Effect.fail(new NodeLimitExceeded());
         }
@@ -506,19 +528,30 @@ function handleNodes(
         const seq = yield* Effect.promise(
           // SAFETY: the generated RPC stub type predates this method's new locked sentinel; the deployed method returns this declared union.
           () =>
-            stub.patchNodes(updates, clientId, true) as Promise<
-              number | "locked"
-            >,
+            stub.patchNodes(
+              updates,
+              clientId,
+              true,
+              supportsNumbered,
+            ) as Promise<number | "locked" | "upgrade">,
         );
+        if (seq === "upgrade")
+          return yield* Effect.fail(new ClientUpgradeRequired());
         if (seq === "locked") return yield* Effect.fail(new NodeLocked());
         return json({ ok: true, seq });
       }
       case "DELETE": {
         const { ids, clientId } = yield* decodeBody(request, NodesDeleteBody);
         if (ids.length) {
-          const deleted = yield* Effect.promise(() =>
-            stub.deleteNodes(ids, clientId),
+          const deleted = yield* Effect.promise(
+            () =>
+              // SAFETY: normalize Cloudflare RPC's distributed Promise union to the declared method result.
+              stub.deleteNodes(ids, clientId, supportsNumbered) as Promise<
+                boolean | "upgrade"
+              >,
           );
+          if (deleted === "upgrade")
+            return yield* Effect.fail(new ClientUpgradeRequired());
           if (!deleted) return yield* Effect.fail(new NodeLocked());
         }
         return json({ ok: true });
@@ -805,6 +838,7 @@ function handleApiRequest(
   | NodeLimitExceeded
   | NodeLocked
   | StaleOutlineWrite
+  | ClientUpgradeRequired
 > {
   return Effect.gen(function* () {
     // executionCtx lets auth ride transactional-email sends on waitUntil
@@ -1365,6 +1399,17 @@ const handler = {
         ),
         Effect.catchTag("StaleOutlineWrite", () =>
           Effect.succeed(json({ error: "stale_outline" }, 409)),
+        ),
+        Effect.catchTag("ClientUpgradeRequired", () =>
+          Effect.succeed(
+            json(
+              {
+                error: "client_upgrade_required",
+                message: "Reload to edit numbered lists.",
+              },
+              409,
+            ),
+          ),
         ),
       ),
     )

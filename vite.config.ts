@@ -26,6 +26,18 @@ export default defineConfig({
   // Emit source maps only when we're going to upload + delete them (below), so
   // they never ship to the CDN on a tokenless build.
   build: sentryAuthToken ? { sourcemap: true } : {},
+  // cf:dev crosses high-latency portals: one client bundle avoids many waves
+  // of chunk requests. Keep production and the Vite HMR loop unchanged.
+  environments:
+    process.env.DOTFLOWY_CF_DEV === "true"
+      ? {
+          client: {
+            build: {
+              rolldownOptions: { output: { codeSplitting: false } },
+            },
+          },
+        }
+      : undefined,
   server: {
     port: 3000,
     // Amp orb portals proxy the dev server through *.onamp.dev.

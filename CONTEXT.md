@@ -13,7 +13,7 @@ An owner-controlled state that prevents changes to a node's content and its full
 _Avoid_: read-only, frozen, protected
 
 **Kind**:
-Which of the mutually exclusive presentations a node has: bullet, task, paragraph, or Embed. Exactly one — converting between kinds is allowed, combining is not. Independent of Completed.
+Which of the mutually exclusive presentations a node has: bullet, task, paragraph, numbered, or Embed. Exactly one — converting between kinds is allowed, combining is not. Independent of Completed.
 _Avoid_: type, mode, style
 
 **Paragraph**:
@@ -21,8 +21,12 @@ A node that reads as prose rather than a list item — a paragraph glyph (an ali
 _Avoid_: text node, block, prose node
 
 **Quote**:
-A node whose text source starts with `> `. A presentation of the text, not a Kind: any node can be a quote, and removing the marker makes it plain again. A bar stands where a bullet shows its dot, carrying the same zoom and drag affordance.
+A node whose text source starts with `> `. A presentation of the text, not a Kind: any node can be a quote, and removing the marker makes it plain again. A bar stands where a bullet shows its dot, carrying the same zoom and drag affordance; a numbered node keeps its number instead.
 _Avoid_: blockquote (the Markdown construct), callout, quote block
+
+**Numbered node**:
+A node in an ordered list whose number is its zoom and drag signifier. Its number belongs to its position within a consecutive run of numbered siblings, not to its text or identity.
+_Avoid_: numbered bullet, ordinal node
 
 **Embed**:
 A node devoted to displaying one external resource identified by a URL. The external content is read-only and is not part of the outline's text; the node can have child notes, move, collapse, zoom, and be mirrored like other nodes.

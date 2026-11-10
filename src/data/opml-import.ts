@@ -91,8 +91,8 @@ export interface OpmlImportNode {
   text: string;
   completed: boolean;
   isTask: boolean;
-  /** `"paragraph"` from a `_kind="paragraph"` attribute (ADR 0045); null (a
-   *  bullet-or-task) for any other value, and for foreign OPML that has none. */
+  /** Recognized `_kind` identity; null (bullet-or-task) for unknown values
+   *  and foreign OPML without the attribute (ADR 0045). */
   kind: NodeKind;
   /** The document's `id` attribute (the dotflowy mirror dialect), if any. */
   opmlId: string | null;
@@ -592,7 +592,9 @@ function convertOutline(el: XmlElement, state: MapState): OpmlImportNode {
   // An unrecognized value reads as a bullet too, never as a decode failure.
   const rawKind = el.attributes["_kind"];
   const kind: NodeKind =
-    rawKind === "paragraph" || rawKind === "embed" ? rawKind : null;
+    rawKind === "paragraph" || rawKind === "embed" || rawKind === "numbered"
+      ? rawKind
+      : null;
   // Kind exclusivity (ADR 0045), enforced here because OPML is a trust boundary
   // like the MCP one: a hand-written or hostile document can carry BOTH
   // `_task="true"` and `_kind="paragraph"`, and `planOpmlImport` would persist

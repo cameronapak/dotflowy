@@ -142,7 +142,10 @@ function request(
     try: (signal) =>
       fetch(ENDPOINT, {
         method,
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-dotflowy-numbered": "true",
+        },
         body: JSON.stringify(body),
         signal,
       }),

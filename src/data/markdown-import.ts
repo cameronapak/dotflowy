@@ -41,8 +41,8 @@ export interface MdNode {
   text: string;
   isTask: boolean;
   completed: boolean;
-  /** `"paragraph"` for a marker-less line, `null` for everything with a marker
-   *  (list, task, heading, fence). See `stripLine` and ADR 0044's amendment. */
+  /** Marker-less prose is `"paragraph"`, ordinals are `"numbered"`, and
+   *  task/heading/bullet/fence lines use null. */
   kind: NodeKind;
   children: MdNode[];
   /** Fence content is literal during paste, including post-paste effects. */
@@ -284,7 +284,13 @@ function stripLine(content: string): [string, boolean, boolean, NodeKind] {
     return [quote + quoted, false, false, quote ? null : "paragraph"];
   const rest = quoted.slice(marker[0].length);
   const task = TASK_RE.exec(rest);
-  if (!task) return [quote + rest, false, false, null];
+  if (!task)
+    return [
+      quote + rest,
+      false,
+      false,
+      /^\d/.test(marker[0]) ? "numbered" : null,
+    ];
   return [
     quote + rest.slice(task[0].length),
     true,
@@ -348,9 +354,8 @@ export interface MdPasteInsert {
 export interface MdPastePlan {
   /** Fields to write onto the node the caret was in. `null` on `isTask` /
    *  `completed` / `kind` means "leave it alone" -- a paste mid-sentence never
-   *  changes what the anchor IS. `kind` can only ever be `"paragraph"` here, so
-   *  the overload is unambiguous: a paste never un-paragraphs a node, exactly as
-   *  a plain line never un-tasks one. */
+   *  changes what the anchor IS. Non-null `kind` carries paragraph or numbered
+   *  identity from the absorbed line. */
   anchor: {
     text: string;
     isTask: boolean | null;

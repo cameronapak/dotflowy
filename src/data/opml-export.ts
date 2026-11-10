@@ -289,8 +289,8 @@ function emitNode(
 
   let attrs = "";
   if (content.completed) attrs += ' _complete="true"';
-  if (content.isTask) attrs += ' _task="true"';
-  // ADR 0045. Present only for a paragraph, so an absent `_kind` means bullet:
+  if (content.kind === null && content.isTask) attrs += ' _task="true"';
+  // ADR 0045. Present for non-null kinds; an absent `_kind` means bullet:
   // foreign OPML and every export that predates this attribute import unchanged.
   if (content.kind !== null) attrs += ` _kind="${content.kind}"`;
   if (!inExpansion) {

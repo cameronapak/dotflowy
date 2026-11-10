@@ -158,7 +158,7 @@ export interface SeedNode {
   /** Provenance: agent harness name if created via MCP; omit/null for human. */
   origin?: string | null;
   /** Node kind (ADR 0045); omit/null for a bullet-or-task. */
-  kind?: "paragraph" | "embed" | null;
+  kind?: ApiNode["kind"];
   /** Optional timestamp for benchmark controls; ordinary tests default to zero. */
   updatedAt?: number;
 }

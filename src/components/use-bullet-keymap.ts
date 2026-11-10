@@ -6,6 +6,7 @@ import type { PluginContext } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
 import { selectSingle } from "../data/selection-state";
+import { getNodeOrdinal } from "../data/tree-store";
 import { dispatchClick, keymapSpecs } from "../plugins/registry";
 import {
   decorate,
@@ -141,7 +142,13 @@ export function useBulletKeymap({
         return;
       e.preventDefault();
       e.stopPropagation();
-      if (node.kind === null) {
+      if (node.kind === "numbered") {
+        const prefix = `${getNodeOrdinal(instanceId)}.`;
+        const text = prefix + readSource(el);
+        commands.onSetKind(node.id, "paragraph", text);
+        decorate(el, text, prefix.length, false);
+        setCaretOffset(el, prefix.length);
+      } else if (node.kind === null) {
         // Delete only the final Markdown marker character: `]` from a task,
         // or the space from `- `. The rest becomes editable source text.
         const prefix = node.isTask ? (node.completed ? "[x" : "[ ") : "-";
@@ -243,6 +250,12 @@ export function useBulletKeymap({
                 }
               }
               if (enterExitsEmptyQuote(el)) return;
+              if (el && node.kind === "numbered" && readSource(el) === "") {
+                commands.onSetKind(node.id, "paragraph");
+                decorate(el, "", 0, false);
+                setCaretOffset(el, 0);
+                return;
+              }
               commands.onEnter(
                 node.id,
                 (el && getSelectionRange(el)) ?? {

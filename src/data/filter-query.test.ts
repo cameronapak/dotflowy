@@ -631,6 +631,7 @@ describe("collectOperatorKeyInfos", () => {
       "bullet",
       "paragraph",
       "embed",
+      "numbered",
       "mirror",
       "complete",
       "agent",
@@ -706,6 +707,7 @@ describe("buildFilterSuggestions", () => {
       "is:bullet",
       "is:paragraph",
       "is:embed",
+      "is:numbered",
       "is:mirror",
       "is:complete",
       "is:agent",
@@ -795,6 +797,7 @@ describe("buildQueryFilter", () => {
       createNode({ id: "t", parentId: "r", text: "t", isTask: true }),
       createNode({ id: "b", parentId: "r", text: "b" }),
       createNode({ id: "p", parentId: "r", text: "p", kind: "paragraph" }),
+      createNode({ id: "n", parentId: "r", text: "n", kind: "numbered" }),
       // Illegal pair (stale client): kind wins, so this is a paragraph.
       createNode({
         id: "x",
@@ -809,6 +812,7 @@ describe("buildQueryFilter", () => {
     expect(ids("is:todo")).toEqual(new Set(["t"]));
     expect(ids("is:bullet")).toEqual(new Set(["b"]));
     expect(ids("is:paragraph")).toEqual(new Set(["p", "x"]));
+    expect(ids("is:numbered")).toEqual(new Set(["n"]));
   });
 
   test("is:mirror, is:complete, is:agent, has:link, highlight predicates", () => {

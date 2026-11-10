@@ -4,6 +4,9 @@ status: accepted
 
 # Quote nodes: derived from `> `, with a bar for a dot
 
+Amended by [ADR 0080](./0080-numbered-nodes.md): numbered Kind retains its
+number handle instead of the bar, while keeping quote marker editing rules.
+
 Cam decided on 2026-11-09, after reviewing four prototyped treatments: a quote
 is derived from its text, the bar replaces the dot, and Enter follows
 WorkFlowy.
