@@ -167,6 +167,14 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
         .code,
     ).toBe(0);
     expect(received).toEqual({ text: "α\nbeta" });
+    const numbered = await cli(server.url.origin, [
+      "add",
+      "step",
+      "--kind",
+      "numbered",
+    ]);
+    expect(numbered.code).toBe(0);
+    expect(received).toEqual({ text: "step", kind: "numbered" });
   } finally {
     server.stop(true);
   }
@@ -274,7 +282,7 @@ test("search --all validates and buffers real pages while raw search stays singl
   const node = (id: string) => ({
     id,
     text: `text ${id}`,
-    kind: null,
+    kind: id === "a" ? "numbered" : null,
     isTask: false,
     completed: false,
     locked: false,
@@ -357,8 +365,14 @@ test("search --all validates and buffers real pages while raw search stays singl
       structuredContent: { nodes: [node("a"), node("b")], nextCursor: null },
     });
     expect(searchCalls).toEqual([
-      { query: "project", nodeId: "root", limit: 1 },
-      { query: "project", nodeId: "root", limit: 1, cursor: "second" },
+      { query: "project", nodeId: "root", limit: 1, numbered: true },
+      {
+        query: "project",
+        nodeId: "root",
+        limit: 1,
+        cursor: "second",
+        numbered: true,
+      },
     ]);
 
     searchCalls.length = 0;

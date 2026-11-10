@@ -222,7 +222,7 @@ const unwrap = <A>(result: A): Effect.Effect<Exclude<A, Error>, ToolError> =>
       Effect.succeed(result as Exclude<A, Error>);
 
 const explicitText = (
-  kind: "paragraph" | "embed" | null | undefined,
+  kind: "paragraph" | "embed" | "numbered" | null | undefined,
   text: string,
 ): Effect.Effect<string, ToolError> => {
   if (kind !== "embed") return Effect.succeed(text);
@@ -558,9 +558,9 @@ const optional = <S extends Schema.Top>(schema: S) =>
 
 /** Core node kind. Omit it (or pass null) for an ordinary bullet/to-do. */
 const kindField = optional(
-  Schema.Literals(["paragraph", "embed"]).annotate({
+  Schema.Literals(["paragraph", "embed", "numbered"]).annotate({
     description:
-      "Create as paragraph prose or as an Embed. Embed text must be one HTTPS URL (a sole markdown link is accepted and normalized). Mutually exclusive with isTask.",
+      "Create as paragraph prose, an automatically numbered list item, or an Embed. Embed text must be one HTTPS URL (a sole markdown link is accepted and normalized). Mutually exclusive with isTask.",
   }),
 );
 
@@ -675,7 +675,7 @@ const UpdateNodeInput = Schema.Struct({
   isTask: optional(
     Schema.Boolean.annotate({
       description:
-        "Turn the checkbox on (true) or off (false). Either value also turns a paragraph back into a list item — a node is exactly one of bullet, to-do, or paragraph.",
+        "Turn the checkbox on (true) or off (false). Either value also clears paragraph, numbered, or Embed kind, unless kind is explicitly supplied.",
     }),
   ),
   completed: optional(
@@ -692,9 +692,9 @@ const UpdateNodeInput = Schema.Struct({
   // explicit null both decode to "no change" everywhere else in this schema set,
   // so null cannot also mean "make it a bullet". `"bullet"` says it out loud.
   kind: optional(
-    Schema.Literals(["paragraph", "embed", "bullet"]).annotate({
+    Schema.Literals(["paragraph", "embed", "numbered", "bullet"]).annotate({
       description:
-        "Turn the node into a paragraph, Embed, or plain bullet. Embed requires text in this call to contain one HTTPS URL. Overrides isTask.",
+        "Turn the node into a paragraph, automatically numbered list item, Embed, or plain bullet. Embed requires text in this call to contain one HTTPS URL. Overrides isTask.",
     }),
   ),
 });
@@ -978,7 +978,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     name: "add_node",
     title: "Add node",
     description:
-      'Add a new bullet to the outline — under a parent node or at the top level. Pass kind: "paragraph" for prose. Returns the new node id.',
+      'Add a new node to the outline — under a parent node or at the top level. Pass kind: "paragraph" for prose or "numbered" for automatic sibling numbering. Returns the new node id.',
     input: AddNodeInput,
     readOnly: false,
     destructive: false,
@@ -1132,7 +1132,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           changes.kind = "embed";
           changes.text = yield* explicitText("embed", input.text);
         } else if (input.kind != null) {
-          changes.kind = input.kind === "paragraph" ? "paragraph" : null;
+          changes.kind = input.kind === "bullet" ? null : input.kind;
         }
         if (!Object.keys(changes).length) {
           return yield* Effect.fail(

@@ -36,6 +36,33 @@ const runFail = (src: string, options?: { maxLength?: number }) =>
 const doc = (body: string): string =>
   `<?xml version="1.0"?>\n<opml version="2.0"><head></head><body>${body}</body></opml>`;
 
+test("numbered OPML kind normalizes task exclusivity before planning inserts", () => {
+  const result = run(
+    doc(
+      '<outline _kind="numbered" _task="true" _complete="true" text="step" />',
+    ),
+  );
+  expect(result.forest[0]).toMatchObject({
+    kind: "numbered",
+    isTask: false,
+    completed: true,
+  });
+  expect(result.report.unknownAttributes).toEqual({});
+  const plan = planOpmlImport(result.forest, {
+    parentId: null,
+    firstPrev: null,
+    origin: null,
+    timestamp: 1,
+    newId: () => "numbered",
+    maxNodes: 10,
+  });
+  if (plan instanceof Error) throw plan;
+  expect(plan.ops[0]).toMatchObject({
+    op: "insert",
+    value: { kind: "numbered", isTask: false, completed: true },
+  });
+});
+
 test("imports Embed identity and children, with kind outranking task", () => {
   const { forest } = run(
     doc(

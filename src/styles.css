@@ -1075,6 +1075,49 @@ h2 span.protection-indicator {
   @apply text-primary;
 }
 
+/* Keep the same content column as other Kinds. The wider number handle grows
+   into the left gutter, not into the gap before the text. Its period stays on
+   one axis, even when the ordinal gains digits. */
+.outline-row .bullet:has(.bullet-number) {
+  width: var(--number-width);
+  margin-inline-start: calc(16px - var(--number-width));
+  justify-content: flex-end;
+  height: var(--reading-line-box);
+  margin-top: 3px;
+  padding-inline: 2px;
+  border-radius: 4px;
+  font-size: var(--reading-font-size);
+}
+
+@media not (pointer: coarse) {
+  .outline-row .bullet:has(.bullet-number)::before {
+    min-height: 0;
+  }
+
+  .outline-row:has(.bullet-number) .collapse-toggle {
+    font-size: var(--reading-font-size);
+    left: calc(-15px + 16px - var(--number-width));
+  }
+}
+
+.bullet-number {
+  @apply text-muted-foreground;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--reading-line-box);
+}
+
+.bullet:hover .bullet-number,
+.bullet:focus-visible .bullet-number {
+  @apply text-primary;
+}
+
+.title-number {
+  @apply text-muted-foreground;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
 /*
  * A quote's bar (ADR 0079): it replaces the dot inside the same `.bullet`
  * button, so it is the zoom and drag target. The button stretches over the
@@ -1139,6 +1182,17 @@ h2 span.protection-indicator {
   @apply bg-muted-foreground/30;
 }
 
+.outline-list:focus-within .outline-row:not(:focus-within) .bullet-number {
+  @apply text-muted-foreground/50;
+}
+
+.outline-list:focus-within
+  .outline-row:not(:focus-within)
+  .bullet:hover
+  .bullet-number {
+  @apply text-primary;
+}
+
 /*
  * Leading-decoration vertical alignment (ADR 0029). Every glyph/pill before the
  * text aligns to the text's OPTICAL center (its x-height midline), NOT the
@@ -1164,6 +1218,10 @@ h2 span.protection-indicator {
 @media (pointer: coarse) {
   .outline-row {
     padding: 6px 4px;
+  }
+  .outline-row .bullet:has(.bullet-number) {
+    width: max(24px, var(--number-width));
+    margin-inline-start: calc(24px - max(24px, var(--number-width)));
   }
   .bullet {
     width: 24px;
@@ -1877,6 +1935,35 @@ body.dragging-active * {
 .zoomed-title .row-body > :not(.node-text) {
   position: relative;
   z-index: 1;
+}
+
+/* Keep the row's content column and gap, with the title's larger typography
+   for both the number and its text. The marker never floats into wrapped text. */
+h2.zoomed-title:has(.title-number) {
+  position: relative;
+  padding-inline-start: 30px;
+}
+
+h2.zoomed-title .row-body > .title-number {
+  position: absolute;
+  inset-inline-end: calc(100% - 24px);
+  top: 3px;
+  float: none;
+  margin: 0;
+  padding-inline: 2px;
+  font-size: calc(var(--reading-font-size) * 1.4);
+  line-height: 1.3;
+  text-align: end;
+}
+
+@media (pointer: coarse) {
+  h2.zoomed-title:has(.title-number) {
+    padding-inline-start: 34px;
+  }
+
+  h2.zoomed-title .row-body > .title-number {
+    inset-inline-end: calc(100% - 28px);
+  }
 }
 
 /* During a zoom, the pivot's text box wraps its text tightly so the title

@@ -3,9 +3,16 @@ import { Data, DateTime, Effect, Schema } from "effect";
 import { localDateKey } from "../src/data/date-links";
 import { redactSpoilers } from "../src/data/spoiler";
 import { childrenOf, type TreeIndex } from "../src/data/tree";
+import { legacyNumberedNode } from "./numbered-compat";
 import { searchNodes } from "./outline-ops";
 
 export const SearchInput = Schema.Struct({
+  numbered: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "Include numbered Kind values. Omit for legacy bullet-compatible output.",
+    }),
+  ),
   query: Schema.String.annotate({
     description:
       "DQL: spaces mean AND, uppercase OR joins adjacent terms, - negates, and quotes preserve phrases. Example: is:todo -is:complete #dotflowy. Unknown operators match literal text.",
@@ -34,7 +41,7 @@ export const SearchPage = Schema.Struct({
     Schema.Struct({
       id: Schema.String,
       text: Schema.String,
-      kind: Schema.NullOr(Schema.Literals(["paragraph", "embed"])),
+      kind: Schema.NullOr(Schema.Literals(["paragraph", "embed", "numbered"])),
       isTask: Schema.Boolean,
       completed: Schema.Boolean,
       locked: Schema.Boolean,
@@ -112,6 +119,7 @@ export const searchPage = Effect.fn("Search.page")(function* (
       input.query,
       rootId,
       limit,
+      input.numbered === true,
       today,
       snapshot,
       childrenOf(index, null).map((node) => node.id),
@@ -149,7 +157,9 @@ export const searchPage = Effect.fn("Search.page")(function* (
       }),
     );
   }
-  const nodes = hits.slice(0, limit);
+  const selected = hits.slice(0, limit);
+  const nodes =
+    input.numbered === true ? selected : selected.map(legacyNumberedNode);
   const nextCursor =
     hits.length > limit
       ? btoa(

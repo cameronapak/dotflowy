@@ -178,11 +178,17 @@ function withHarness(
   return Effect.runPromise(program.pipe(Effect.scoped, Effect.provide(layer)));
 }
 
-const helloOf = (ws: FakeWebSocket): { type: string; since: number | null } => {
+const helloOf = (
+  ws: FakeWebSocket,
+): { type: string; since: number | null; numbered: boolean } => {
   const first = ws.sent[0];
   if (first === undefined) throw new Error("no hello frame was sent");
-  // SAFETY: the stream's first send is the JSON hello frame { type, since } it serializes itself.
-  return JSON.parse(first) as { type: string; since: number | null };
+  // SAFETY: the stream's first send is the JSON hello frame it serializes itself.
+  return JSON.parse(first) as {
+    type: string;
+    since: number | null;
+    numbered: boolean;
+  };
 };
 
 describe("createSyncStream", () => {
@@ -216,6 +222,7 @@ describe("createSyncStream", () => {
           expect(helloOf(nth(sockets, 0))).toEqual({
             type: "hello",
             since: 99,
+            numbered: true,
           });
 
           yield* resync;
@@ -229,6 +236,7 @@ describe("createSyncStream", () => {
           expect(helloOf(nth(sockets, 1))).toEqual({
             type: "hello",
             since: null,
+            numbered: true,
           });
           // Another acknowledged write times out while recovery is connecting.
           // It must not cancel the connection already fetching server truth.

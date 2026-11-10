@@ -10,6 +10,7 @@ import { isSyncReady, nodesCollection, subscribeSyncReady } from "./collection";
 import { parseDateLinkKeys } from "./date-links";
 import { isMirrorsEnabled } from "./flags";
 import { parseNodeLinks } from "./node-links";
+import { numberedOrdinals } from "./numbering";
 import { parseTags } from "./tags";
 import {
   buildTreeIndex,
@@ -64,6 +65,8 @@ let index: TreeIndex = {
 };
 const listeners = new Set<() => void>();
 let started = false;
+// Per-parent ordinal caches survive text, collapse, and completion edits.
+const ordinalCache = new Map<string, Map<string, number>>();
 
 // Keep only the latest batch, not a history of index wrappers. Readers that
 // missed a notification must rebuild rather than reuse an incomplete delta.
@@ -151,6 +154,10 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
       // SAFETY: this collection's keys are node ids (getKey: node.id), so a delete change key is a string.
       const prev = index.byId.get(change.key as string);
       if (!prev) continue;
+      for (const id of index.mirrorsBySource.get(prev.id) ?? []) {
+        const mirror = index.byId.get(id);
+        if (mirror) ordinalCache.delete(parentKeyOf(mirror));
+      }
       index.byId.delete(prev.id);
       const key = parentKeyOf(prev);
       removeChildId(key, prev.id);
@@ -177,6 +184,14 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
     const prev = index.byId.get(next.id);
     if (prev) updated.push({ before: prev, after: next });
     index.byId.set(next.id, next);
+    if (prev?.kind !== next.kind || prev?.mirrorOf !== next.mirrorOf) {
+      ordinalCache.delete(parentKeyOf(next));
+      // A source Kind edit also changes the runs containing its mirrors.
+      for (const id of index.mirrorsBySource.get(next.id) ?? []) {
+        const mirror = index.byId.get(id);
+        if (mirror) ordinalCache.delete(parentKeyOf(mirror));
+      }
+    }
     if ((prev?.text ?? "") !== next.text) {
       const before = prev ? parseNodeLinks(prev.text) : [];
       const after = parseNodeLinks(next.text);
@@ -260,6 +275,7 @@ function applyChanges(changes: ReadonlyArray<ChangeMessage<Node>>) {
     // else: a field-only edit (text / completed / ...) -- byId.set above is all.
   }
   for (const key of dirty) {
+    ordinalCache.delete(key);
     const ids = index.childrenByParent.get(key);
     if (ids) index.childrenByParent.set(key, orderChildIds(index.byId, ids));
   }
@@ -491,6 +507,26 @@ export function useTreeIndex(): TreeIndex {
  */
 export function useNode(id: string): Node | undefined {
   const getSnapshot = useCallback(() => getTreeIndex().byId.get(id), [id]);
+  return useSyncExternalStore(subscribeTree, getSnapshot, () => undefined);
+}
+
+/** Position-local ordinal, including hidden siblings. Shared by rows, titles,
+ * and marker reveal; each affected parent is scanned once after a Kind/move edit. */
+export function getNodeOrdinal(id: string): number | undefined {
+  const tree = getTreeIndex();
+  const node = tree.byId.get(id);
+  if (!node) return undefined;
+  const key = parentKeyOf(node);
+  let ordinals = ordinalCache.get(key);
+  if (!ordinals) {
+    ordinals = numberedOrdinals(tree, tree.childrenByParent.get(key) ?? []);
+    ordinalCache.set(key, ordinals);
+  }
+  return ordinals.get(id);
+}
+
+export function useNodeOrdinal(id: string): number | undefined {
+  const getSnapshot = useCallback(() => getNodeOrdinal(id), [id]);
   return useSyncExternalStore(subscribeTree, getSnapshot, () => undefined);
 }
 

@@ -26,6 +26,34 @@ const exportNodes = (nodes: Node[], rootId: string | null = null): string =>
 const reimport = (opml: string): OpmlImportResult =>
   Effect.runSync(parseOpml(opml));
 
+test("numbered kinds and mirrors round-trip without contradictory task flags", () => {
+  const out = exportNodes([
+    createNode({
+      id: "source",
+      text: "step",
+      kind: "numbered",
+      isTask: true,
+      completed: true,
+    }),
+    createNode({ id: "mirror", prevSiblingId: "source", mirrorOf: "source" }),
+  ]);
+  expect(out.match(/_kind="numbered"/g)).toHaveLength(2);
+  expect(out).not.toContain('_task="true"');
+  const { forest, report } = reimport(out);
+  expect(forest[0]).toMatchObject({
+    text: "step",
+    kind: "numbered",
+    isTask: false,
+    completed: true,
+  });
+  expect(forest[1]).toMatchObject({
+    kind: "numbered",
+    isTask: false,
+    mirrorOfOpmlId: "source",
+  });
+  expect(report.mirrorsLinked).toBe(1);
+});
+
 test("document shape: shell, present-iff-true flags, no view state, zoom scope", () => {
   const nodes = [
     createNode({

@@ -140,6 +140,11 @@ Serves the built SPA and the Worker from a single origin on :8787 — closer to
 prod, slower (~1–2s full build per save). Use it when you're debugging the real
 Worker/DO/asset path rather than UI. See `scripts/cf-dev.ts` for the details.
 
+This preview combines client JavaScript into one bundle to avoid chunk-request
+waves over high-latency portals. It downloads more code up front, including
+rarely used routes. Normal `build` and `build:cf` keep production code splitting;
+the preview-only setting is passed by `scripts/cf-dev.ts` to its build process.
+
 ### Landing page
 
 `bun run --cwd landing dev` serves the separate marketing site on :3100.

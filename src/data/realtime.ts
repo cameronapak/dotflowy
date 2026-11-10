@@ -207,7 +207,7 @@ export const createSyncStream = (
           const run = Effect.gen(function* () {
             const pull = yield* Socket.readerString(socket);
             yield* writer
-              .write(JSON.stringify({ type: "hello", since }))
+              .write(JSON.stringify({ type: "hello", since, numbered: true }))
               .pipe(Effect.ignore);
             while (true) {
               const batch = yield* pull;

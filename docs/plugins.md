@@ -76,6 +76,11 @@ Chrome and is unavailable in Safari and on phones.
 
 **Still core-wired (deliberately, awaiting future seams):** fade-inheritance (`faded`/`ancestorCompleted`) and Backspace kind demotion still read `completed`/`isTask`/`kind` in the row and its keymap; the bullet-vs-paragraph glyph and paragraph-to-bullet `- ` autoformat read `kind` there too (core's own field, ADR 0045), and the quote bar reads `isQuoteText` on the text (ADR 0079), as do the quote's Enter and Backspace rules; the `/` palette still runs `useSlashMenu` (only its command _list_ is registry-driven).
 
+Numbered nodes are core-owned too: `/numbered`, row-only `1. ` conversion,
+Enter/Backspace, and the position-local number handle follow
+[ADR 0080](./adr/0080-numbered-nodes.md). Numbered Kind takes glyph precedence
+over a quote bar; quote marker editing still takes keyboard precedence.
+
 **Constraints when touching this:** keep token `render` output byte-stable (the `decorate` cache compares strings) and allocation-light (runs per keystroke); never hand the core raw HTML (return `El`/`WidgetEl`); don't reintroduce N separate token scans. **Shared token helpers live in `src/plugins/token-kit.ts`** (`isRevealed` fold/reveal predicate, verbatim-match-or-drop write-back, `spliceToken` re-export) — use them, don't re-copy the predicate; `spliceToken` itself lives in the dependency-free `token-splice.ts` so worker-reachable data modules can import it without dragging DOM types into the Workers tsconfig. **Plugin UI comes from `src/plugins/kit.ts`** — the curated shadcn surface a Lane-A plugin may use (ADR 0031); a plugin importing `@/components/ui/*` directly is an oxlint error (`no-restricted-imports` override on `src/plugins/**`). Add a component to the kit when a plugin needs it; there is no plugin `styles` seam (style via Tailwind utilities on your `El`/JSX).
 
 Add a new side-collection to `KV_COLLECTIONS` in `worker/index.ts`. The e2e kv mock accepts any name.

@@ -2,14 +2,15 @@ import type { Node } from "./schema";
 
 import { bibleRefsToMarkdownLinks } from "../plugins/route-bible/bible";
 import { paragraphRoundTrips } from "./markdown-import";
-import { childrenOf, type TreeIndex } from "./tree";
+import { numberedOrdinals } from "./numbering";
+import { childrenOf, trueSourceOf, type TreeIndex } from "./tree";
 
 /** Two spaces per depth level (CommonMark-friendly, readable). */
 const INDENT = "  ";
 
 /**
- * The line prefix for a node: a GFM task checkbox when it's a task, nothing at
- * all for a paragraph, else a plain bullet.
+ * The line prefix: an ordinal for numbered nodes, a GFM checkbox for tasks,
+ * nothing for paragraphs, otherwise a plain bullet.
  *
  * A paragraph emits markdown's own paragraph syntax -- a bare line -- but ONLY
  * when that line reads back as the same paragraph (ADR 0044's amendment).
@@ -19,9 +20,14 @@ const INDENT = "  ";
  * bible-ref projection), not `node.text` -- the guard has to see what the parser
  * will see. Kind outranks `isTask` here as it does in the renderer.
  */
-function prefixFor(node: Node, text: string): string {
+function prefixFor(
+  node: Node,
+  text: string,
+  ordinal: number | undefined,
+): string {
   if (node.kind === "embed") return "- ";
   if (node.kind === "paragraph") return paragraphRoundTrips(text) ? "" : "- ";
+  if (node.kind === "numbered") return `${ordinal ?? 1}. `;
   if (node.isTask) return node.completed ? "- [x] " : "- [ ] ";
   return "- ";
 }
@@ -32,6 +38,7 @@ function emit(
   depth: number,
   lines: string[],
   path: Set<string>,
+  ordinalsFor: (parentId: string | null) => Map<string, number>,
 ): void {
   const node = index.byId.get(id);
   if (!node) return;
@@ -42,14 +49,18 @@ function emit(
   // the exporter emits an empty childless bullet for every mirror, silently
   // losing the windowed content from every copy. A broken mirror (source gone)
   // falls back to its own stored snapshot text.
-  const content = index.byId.get(node.mirrorOf ?? id) ?? node;
+  const content = index.byId.get(trueSourceOf(index, id)) ?? node;
   // `content.text` is mostly already the markdown source (links `[label](url)`,
   // `#tags`, inline `code`). Route-bible chips are the exception: they store
   // plain reference text and derive the URL at render time, so export projects
   // them to portable markdown links. Empty text yields a bare `- ` bullet,
   // preserving structure. See ADR 0017.
   const text = bibleRefsToMarkdownLinks(content.text);
-  lines.push(INDENT.repeat(depth) + prefixFor(content, text) + text);
+  const ordinal =
+    content.kind === "numbered"
+      ? ordinalsFor(node.parentId).get(id)
+      : undefined;
+  lines.push(INDENT.repeat(depth) + prefixFor(content, text, ordinal) + text);
   // A mirror nested inside its own source's subtree would recurse forever: its
   // text is emitted once (above) and the walk does not descend. `path` is the
   // ANCESTOR chain, not a global seen-set -- one source mirrored into two
@@ -59,7 +70,7 @@ function emit(
   // Full subtree, regardless of collapsed/completed/filter: childrenOf returns
   // the raw ordered children (view state never reaches here).
   for (const child of childrenOf(index, content.id)) {
-    emit(index, child.id, depth + 1, lines, path);
+    emit(index, child.id, depth + 1, lines, path, ordinalsFor);
   }
   path.delete(content.id);
 }
@@ -68,7 +79,8 @@ function emit(
  * Serialize one or more subtrees to a nested markdown list. Each id in `rootIds`
  * becomes a top-level line; its full subtree is emitted beneath it, indented two
  * spaces per level. Never headings, so depth never changes a node's syntax: a
- * bullet is `- `, a task `- [ ] `, a paragraph a bare line (ADR 0045). Pure and
+ * bullet is `- `, a task `- [ ] `, a numbered item `N. `, a paragraph a bare line.
+ * See ADR 0045. Pure and
  * view-agnostic -- its only inputs are the index and the roots. See ADR 0017.
  *
  * The inverse is `markdown-import.ts`; the pair is held to
@@ -77,6 +89,20 @@ function emit(
  */
 export function outlineToMarkdown(index: TreeIndex, rootIds: string[]): string {
   const lines: string[] = [];
-  for (const id of rootIds) emit(index, id, 0, lines, new Set());
+  // Cache full sibling sequences, not selected roots: copying item 3 alone
+  // still emits `3.`, including when preceding siblings are completed/hidden.
+  const byParent = new Map<string | null, Map<string, number>>();
+  const ordinalsFor = (parentId: string | null): Map<string, number> => {
+    let ordinals = byParent.get(parentId);
+    if (!ordinals) {
+      ordinals = numberedOrdinals(
+        index,
+        childrenOf(index, parentId).map((node) => node.id),
+      );
+      byParent.set(parentId, ordinals);
+    }
+    return ordinals;
+  };
+  for (const id of rootIds) emit(index, id, 0, lines, new Set(), ordinalsFor);
   return lines.join("\n");
 }

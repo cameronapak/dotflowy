@@ -165,6 +165,77 @@ test("Embed writes normalize URLs, preserve kind and child notes, and never sche
   ).toHaveLength(4);
 });
 
+test("numbered kinds survive all authoring tools, updates, outline and structured search", async () => {
+  const { store, nodes } = makeStore();
+  for (const [name, args] of [
+    ["add_node", { text: "numbered root", kind: "numbered", isTask: true }],
+    [
+      "add_subtree",
+      {
+        nodes: [
+          {
+            text: "numbered parent",
+            kind: "numbered",
+            children: [
+              { text: "numbered child", kind: "numbered", isTask: true },
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      "add_to_today",
+      {
+        date: "2026-11-09",
+        text: "numbered today",
+        kind: "numbered",
+        isTask: true,
+      },
+    ],
+  ] satisfies Array<[string, RpcParams]>) {
+    const response = await callTool(store, name, args);
+    expect(response.error).toBeUndefined();
+    expect(response.result?.isError).not.toBe(true);
+  }
+  const numbered = [...nodes.values()].filter(
+    (node) => node.kind === "numbered",
+  );
+  expect(numbered).toHaveLength(4);
+  expect(numbered.every((node) => !node.isTask)).toBe(true);
+  const root = numbered.find((node) => node.text === "numbered root")!;
+  for (const kind of ["bullet", "numbered"] as const) {
+    const response = await callTool(store, "update_node", {
+      nodeId: root.id,
+      kind,
+      isTask: true,
+    });
+    expect(response.result?.isError).not.toBe(true);
+    expect(nodes.get(root.id)?.kind).toBe(
+      kind === "bullet" ? null : "numbered",
+    );
+  }
+  expect(nodes.get(root.id)?.isTask).toBe(false);
+  expect(toolText(await callTool(store, "get_outline", {}))).toContain(
+    "numbered",
+  );
+  const search = await callTool(store, "search_nodes", {
+    query: "is:numbered",
+  });
+  expect(search.result?.structuredContent?.nodes).toHaveLength(4);
+  expect(
+    search.result?.structuredContent?.nodes.every((node) => node.kind === null),
+  ).toBe(true);
+  const modernSearch = await callTool(store, "search_nodes", {
+    query: "is:numbered",
+    numbered: true,
+  });
+  expect(
+    modernSearch.result?.structuredContent?.nodes.every(
+      (node) => node.kind === "numbered" && !node.isTask,
+    ),
+  ).toBe(true);
+});
+
 interface FakeStore {
   store: OutlineStore;
   nodes: Map<string, Node>;
@@ -397,6 +468,9 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
     expect(JSON.stringify(tool(name).inputSchema.properties.kind)).toContain(
       "paragraph",
     );
+    expect(JSON.stringify(tool(name).inputSchema.properties.kind)).toContain(
+      "numbered",
+    );
     expect(tool(name).inputSchema.required).not.toContain("kind");
   }
   // update_node names the reset explicitly rather than overloading null.
@@ -404,6 +478,7 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
     tool("update_node").inputSchema.properties.kind,
   );
   expect(updateKind).toContain("paragraph");
+  expect(updateKind).toContain("numbered");
   expect(updateKind).toContain("bullet");
 
   // The recursive SubtreeNode shape is emitted as a referenced $def, and it
@@ -411,6 +486,7 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
   const addSubtree = tool("add_subtree").inputSchema;
   expect(addSubtree.required).toEqual(["nodes"]);
   expect(JSON.stringify(addSubtree.$defs.SubtreeNode)).toContain("paragraph");
+  expect(JSON.stringify(addSubtree.$defs.SubtreeNode)).toContain("numbered");
   expect(JSON.stringify(addSubtree)).toContain("#/$defs/SubtreeNode");
 
   // search_nodes publishes both its input bounds and its output contract.
@@ -525,6 +601,12 @@ test("DQL search returns validated structured pages and explicit continuation", 
   expect(JSON.stringify(first)).not.toContain("secret-");
   expect(JSON.stringify(first)).not.toContain("hidden-parent");
   if (!data.nextCursor) throw new Error("Expected continuation");
+  const changedMode = await callTool(fake.store, "search_nodes", {
+    ...input,
+    numbered: true,
+    cursor: data.nextCursor,
+  });
+  expect(changedMode.result?.isError).toBe(true);
   const second = await callTool(fake.store, "search_nodes", {
     ...input,
     cursor: data.nextCursor,

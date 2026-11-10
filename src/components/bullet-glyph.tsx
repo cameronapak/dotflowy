@@ -12,8 +12,8 @@ import type { NodeKind } from "../data/schema";
  * quote's bar still zoom on click and reorder on press-and-drag (ADR 0029: the
  * dot is the sole touch zoom target). The quote bar stretches the button to the
  * quote's own lines, which makes a taller target, not a second one. A quote is
- * derived from the text, not a Kind, so it outranks `kind` here: a paragraph
- * whose text starts with `> ` shows the bar. All glyphs are a `<span>` carrying
+ * derived from the text, not a Kind, so it outranks paragraph Kind here;
+ * numbered Kind keeps its number handle even for quoted text. All glyphs are a `<span>` carrying
  * `data-has-children`/`data-collapsed`, because the collapsed-ring rule selects
  * `.bullet:has(span[data-has-children][data-collapsed])`.
  */
@@ -23,13 +23,28 @@ export function BulletGlyph({
   completed,
   hasChildren,
   collapsed,
+  ordinal,
 }: {
   kind: NodeKind;
   quote: boolean;
   completed: boolean;
   hasChildren: boolean;
   collapsed: boolean;
+  ordinal?: number;
 }) {
+  // Numbered Kind keeps its handle even when its text is a quotation.
+  if (kind === "numbered") {
+    return (
+      <span
+        className="bullet-number"
+        data-has-children={hasChildren}
+        data-collapsed={collapsed}
+        aria-hidden="true"
+      >
+        {ordinal}.
+      </span>
+    );
+  }
   if (quote) {
     return (
       <span
@@ -73,10 +88,21 @@ export function BulletGlyph({
 export function TitleGlyph({
   kind,
   quote,
+  ordinal,
 }: {
   kind: NodeKind;
   quote: boolean;
+  ordinal?: number;
 }) {
+  if (kind === "numbered")
+    return (
+      <span
+        className="title-number"
+        style={{ width: `${String(ordinal).length + 1}ch` }}
+      >
+        {ordinal}.
+      </span>
+    );
   if (quote) return <span className="title-quote" aria-hidden="true" />;
   if (kind !== "paragraph") return null;
   return (
