@@ -350,6 +350,7 @@ test("numbered typing, splitting, exiting, marker reveal, and undo keep node ide
   await expect(paragraphGlyph(page, "literal")).toBeVisible();
   await expect(text(page, "literal")).toHaveText("1. literal");
   await page.reload();
+  await text(page, "p").waitFor({ state: "visible" });
   await expect(row(page, "b").locator(".bullet-number")).toHaveText("1.");
   await expect(text(page, "p")).toHaveText("First thought");
   await placeCaret(text(page, "b"), 6);
@@ -510,6 +511,9 @@ test("number handles renumber after moves, zoom, and preserve quote editing", as
   await expect(page.locator(".zoomed-title .title-number")).toHaveText("3.");
   await expect(row(page, "nested").locator(".bullet-number")).toHaveText("1.");
   await page.reload();
+  await page
+    .getByRole("textbox", { name: "Title", exact: true })
+    .waitFor({ state: "visible" });
   await expect(page.locator(".zoomed-title .title-number")).toHaveText("3.");
 });
 
@@ -560,7 +564,7 @@ test("numbering retains hidden siblings and invalidates mirror runs when source 
       kind: "numbered",
     },
   ]);
-  await page.goto("/?q=keep");
+  await openSeededOutline(page, { path: "/?q=keep", anchorId: "last" });
   await expect(row(page, "hidden")).toHaveCount(0);
   await expect(row(page, "last").locator(".bullet-number")).toHaveText("3.");
   await expect(row(page, "mirror").locator(".bullet-number")).toHaveText("1.");
