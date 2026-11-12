@@ -363,10 +363,26 @@ function FocusSurface({
       <Reflection key={session.id} session={session} card={card} />
     ) : (
       <>
-        {(up || breaking) && (
+        {/* Between rounds, starting the next one is the expected step; Done
+            ends the whole Pomodoro session, so it steps back (ADR 0074). */}
+        {session.phase === "ready" && (
           <Button
             size="sm"
             className={primary}
+            onClick={() =>
+              updateSession((current) =>
+                current ? nextRound(current, Date.now()) : null,
+              )
+            }
+          >
+            Start round {session.round + 1}
+          </Button>
+        )}
+        {(up || breaking) && (
+          <Button
+            size="sm"
+            variant={session.phase === "ready" ? "outline" : "default"}
+            className={session.phase === "ready" ? outline : primary}
             onClick={() => endSession(true)}
           >
             {task && (
@@ -407,20 +423,6 @@ function FocusSurface({
             onClick={() => endSession(false)}
           >
             Let go
-          </Button>
-        )}
-        {session.phase === "ready" && (
-          <Button
-            size="sm"
-            variant="outline"
-            className={outline}
-            onClick={() =>
-              updateSession((current) =>
-                current ? nextRound(current, Date.now()) : null,
-              )
-            }
-          >
-            Start round {session.round + 1}
           </Button>
         )}
         {!up && session.phase !== "ready" && (
@@ -497,13 +499,15 @@ function FocusSurface({
         <div className="relative flex h-full flex-col gap-2 p-3">
           <div className="flex min-w-0 items-center gap-2">
             <p className="min-w-0 flex-1 truncate text-xs opacity-70">
-              {breaking
-                ? "Break · "
-                : up
-                  ? "Time is up · "
-                  : session.pausedAt !== null
-                    ? "Paused · "
-                    : ""}
+              {session.phase === "ready"
+                ? "Next · "
+                : breaking
+                  ? "Break · "
+                  : up
+                    ? "Time is up · "
+                    : session.pausedAt !== null
+                      ? "Paused · "
+                      : ""}
               {parent ? display(parent.text) : "Home"}
             </p>
             {rounds}
@@ -610,13 +614,15 @@ function FocusSurface({
                 />
               )}
               <span className={cn("shrink-0 font-medium", !up && "opacity-75")}>
-                {breaking
-                  ? "Break"
-                  : away
-                    ? "You set out to"
-                    : up
-                      ? "Time is up"
-                      : "Now"}
+                {session.phase === "ready"
+                  ? "Next"
+                  : breaking
+                    ? "Break"
+                    : away
+                      ? "You set out to"
+                      : up
+                        ? "Time is up"
+                        : "Now"}
               </span>
               <button
                 // dir="auto" truncates a right-to-left title at its end.
@@ -633,7 +639,7 @@ function FocusSurface({
               className="shrink-0 font-medium tabular-nums"
               aria-label="Focus time remaining"
             >
-              {session.phase === "ready" ? "Ready when you are" : timer(ms)}
+              {session.phase === "ready" ? "Ready" : timer(ms)}
               {session.pausedAt !== null && (
                 <span className="ml-2 text-xs opacity-75">Paused</span>
               )}
