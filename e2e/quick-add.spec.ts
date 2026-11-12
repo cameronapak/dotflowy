@@ -43,7 +43,7 @@ async function openQuickAdd(page: Page) {
   await pressQuickAddKey(page);
   await expect(dialog(page)).toBeVisible();
   await expect(destChip(page)).toHaveAttribute("data-quick-add-dest", "Today");
-  await editor(page).click();
+  await expect(editor(page)).toBeFocused();
 }
 
 async function type(page: Page, text: string) {
@@ -621,6 +621,47 @@ test.describe("quick-add mobile FAB (coarse pointer)", () => {
 
   const fab = (page: Page) => page.locator("[data-quick-add-fab]");
 
+  test("a tap focuses the draft synchronously, for both header and FAB", async ({
+    page,
+  }) => {
+    await load(page);
+    for (const width of [390, 820]) {
+      await page.setViewportSize({ width, height: 900 });
+      const trigger =
+        width === 390
+          ? page
+              .locator(".outline-header")
+              .getByRole("button", { name: "Quick add", exact: true })
+          : fab(page);
+      await expect(trigger).toBeVisible();
+      // Observe at the end of the same click dispatch, before promises or rAF.
+      // Eventual DOM focus alone cannot catch iOS's keyboard activation boundary.
+      await page.evaluate(() => {
+        document.addEventListener(
+          "click",
+          () => {
+            document.body.dataset.quickAddFocusedInTap = String(
+              document.activeElement?.matches(
+                '[role="textbox"][aria-label="Quick add"]',
+              ) ?? false,
+            );
+          },
+          { once: true },
+        );
+      });
+      await trigger.tap();
+      await expect(page.locator("body")).toHaveAttribute(
+        "data-quick-add-focused-in-tap",
+        "true",
+      );
+      await expect(editor(page)).toBeFocused();
+      await page.keyboard.type(`Thought at ${width}`);
+      await expect(editor(page)).toHaveText(`Thought at ${width}`);
+      await page.keyboard.press("Enter");
+      await expect(dialog(page)).toBeHidden();
+    }
+  });
+
   test("the overlay follows keyboard resize and pan, then restores its bottom anchor", async ({
     page,
   }) => {
@@ -665,6 +706,7 @@ test.describe("quick-add mobile FAB (coarse pointer)", () => {
   test("is hidden while a bullet is being edited (complement of the mobile bar)", async ({
     page,
   }) => {
+    await page.setViewportSize({ width: 820, height: 900 });
     await load(page);
     await expect(fab(page)).toBeVisible();
     // Focus a bullet -> editing -> the FAB yields to the mobile actions bar.

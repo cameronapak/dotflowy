@@ -39,6 +39,12 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], browserName: "webkit" },
     },
     {
+      name: "quick-add-webkit",
+      testMatch: "quick-add.spec.ts",
+      grep: /quick-add mobile FAB/,
+      use: { ...devices["iPhone 13"] },
+    },
+    {
       name: "mobile-toolbar-webkit",
       testMatch: "mobile-actions-bar.spec.ts",
       grep: /mobile actions bar \(coarse pointer\)/,

@@ -33,6 +33,24 @@ The overlay is rendered in the shared shadcn `Dialog` frame (the same one the Cm
 - **Desktop:** the bare **`q`** hotkey (Todoist parity) + a Cmd+K action. `q` fires only when you're not typing (no modifier, focus not in a contentEditable/input, no dialog open), so it can't misfire mid-edit. It **superseded `Opt+Cmd+N`** (Workflowy parity): that chord is swallowed by browsers and macOS — including the in-app browser — so it never reliably fired, while single-key capture is the established web-app idiom (Todoist/Linear/Gmail) and needs no chord the browser can claim. **No new desktop header button** — Cmd+K already has one and quick-add is a Cmd+K action, so the header stays exactly as it is.
 - **Mobile:** below 768px, a trailing Quick-add button in the outline header replaces the floating capture button ([ADR 0076](./0076-mobile-navigation-dock.md)). The FAB remains on wider touch screens and pages without that header, shown when not editing. Full rapid-fire parity, keyboard-anchored like the mobile actions bar (ADR 0030).
 
+## Opening focus on touch
+
+Once account preferences are ready, opening Quick-add synchronously mounts the
+portaled editor and focuses it before the opening tap returns. Do not put that
+focus behind a promise, a passive effect, or an animation frame: iOS Safari
+requires the user gesture to raise its software keyboard. Focus runs immediately
+after the flushed mount, once the portal and editor focus handlers exist.
+Quick-add opts out of the Dialog's
+deferred initial focus, but retains its focus trap and close-focus restoration.
+Desktop openers use the same path. Keyboard viewport positioning is unchanged.
+
+The initial preference gate from [ADR 0064](./0064-account-wide-editor-feature-preferences.md)
+remains: if the first account read is still pending, wait before opening rather
+than guessing a destination. That delayed first open cannot promise to raise the
+iOS keyboard; subsequent taps use the synchronous path. Browser regression tests
+observe focus before the opening click finishes and cover both the mobile header
+and wider-touch FAB. Emulated WebKit cannot prove a physical iPhone keyboard opens.
+
 ## Non-goals (v1) and deferred
 
 - **In-app only.** A web SPA can't do OS-global capture the way Workflowy's Electron app does (`Opt+Cmd+N` fires app-unfocused there). The stated pain is in-app anyway. True from-anywhere capture (desktop shell / browser extension) is a separate, much larger effort.
