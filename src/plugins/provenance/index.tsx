@@ -4,21 +4,20 @@
 // zoomed title), like the daily date badge.
 //
 // Data model: the write-once `origin` field on the Node (null = the user typed
-// it, which is every client-side create and every pre-provenance row; a harness
-// name like "Claude" = an agent made it over MCP, stamped server-side at the one
-// write choke point in worker/outline-ops.ts). Provenance is set at creation and
-// only ever READ here — never a semantic branch, purely display. No side
-// collection, no per-node subscription: `origin` never changes after birth, so
-// reading it off the node the slot is handed is enough.
+// it, which is every client-side create and every pre-provenance row; an app
+// name like "Claude" = an agent made it over MCP, from the write tool's required
+// `sourceApp`, stamped server-side at the one write choke point in
+// worker/outline-ops.ts). Provenance is set at creation and only ever READ here
+// — never a semantic branch, purely display. No side collection, no per-node
+// subscription: `origin` never changes after birth, so reading it off the node
+// the slot is handed is enough.
 //
-// Visual: a small reserved-indigo diamond just before the text — indigo reads as
-// "system / not-you" without the alarm of red/green, and a diamond (not a ring)
-// so it can't be misread as a second bullet dot. Static (no animation: an agent
-// marker that pulsed would read as exactly the AI-generated noise we're avoiding)
-// and single-hued (the one accessory). The harness name + creation time show on
-// hover; the mark itself stays quiet.
-
-import { SparkleIcon } from "lucide-react";
+// Visual (ADR 0081): the source app's own logo just before the text, so a reader
+// sees WHICH app wrote a node, not only that an agent did. Muted and the same
+// 16px slot for every app, so rows never shift; OpenAI's and xAI's marks take
+// the text color their brand rules require. An unlisted app gets a bot, not the
+// old sparkle, which reads as Gemini's star at this size. Static, no animation.
+// The app name + creation time show on hover.
 
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/plugins/kit";
@@ -27,6 +26,7 @@ import type { Node } from "../../data/tree";
 
 import { definePlugin } from "../types";
 import { PROVENANCE_FILTER_OPERATORS } from "./filter-operators";
+import { markFor, SourceAppGlyph } from "./marks";
 
 /** A compact "when", for the hover attribution. Set-once at creation, so this is
  *  read at render time against the wall clock — good enough for a tooltip. */
@@ -56,20 +56,25 @@ function ProvenanceMark({
 }) {
   if (!node.origin) return null;
   const label = `Created by ${node.origin} · ${relativeTime(node.createdAt)}`;
+  const mark = markFor(node.origin);
   return (
     <Tooltip>
       <TooltipTrigger>
-        <SparkleIcon
+        <span
+          role="img"
           className={cn([
-            "text-muted-foreground",
+            "inline-flex shrink-0 items-center justify-center",
+            mark.fullTone ? "text-foreground" : "text-muted-foreground",
             // Row vertical alignment is the shared `.outline-row [data-origin]`
-            // rule (scales with reading size, ADR 0029); only fix the icon size.
-            placement === "row" && "size-4",
-            placement === "title" && "mt-2 mr-2 size-5",
+            // rule (scales with reading size, ADR 0029); only fix the box size.
+            placement === "row" && "h-4 min-w-4",
+            placement === "title" && "mt-2 mr-2 h-5 min-w-5",
           ])}
           aria-label={label}
           data-origin={node.origin}
-        />
+        >
+          <SourceAppGlyph mark={mark} placement={placement} />
+        </span>
       </TooltipTrigger>
       <TooltipContent>
         <p>{label}</p>

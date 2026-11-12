@@ -12,6 +12,11 @@ lands through the same atomic per-user Durable Object path as the editor, so
 open tabs see agent edits live. Design + rejected alternatives:
 [the agent-native MCP server](./adr/0026-agent-native-mcp-server.md).
 
+Tools that create nodes require `sourceApp`: the app the agent runs in, such as
+`Claude`, `ChatGPT`, or `Cursor`. Pick a listed app or give any name. The editor
+shows that app's logo on each node the call creates, and `is:agent` finds them.
+See [ADR 0081](./adr/0081-source-app-attribution.md).
+
 For terminal access, use the [Dotflowy CLI](../cli/README.md). Settings →
 Connections has separate setup actions for MCP apps and the CLI. Both require
 Unlimited or Founding and preserve spoiler redaction. Turning Daily notes off
@@ -75,8 +80,8 @@ Design: [ADR 0063](./adr/0063-dql-search-parity.md).
 The OPML pair speaks the Workflowy dialect through the same shared core as the
 app's own import/export ([ADR 0037](./adr/0037-opml-import-export.md)):
 `import_opml` takes an OPML string (targeted like `add_subtree` — `parentId`,
-`date`, or the top level), lands it as one atomic batch with the agent's
-provenance stamp, and answers with a compact receipt (root ids, counts, the
+`date`, or the top level), lands it as one atomic batch with the caller's
+`sourceApp` stamp, and answers with a compact receipt (root ids, counts, the
 fidelity-degradation tally) — `dryRun: true` previews that receipt without
 writing; `export_opml` mirrors `get_outline` scoping and returns the raw OPML
 string. Both are capped at 5,000 nodes and reject rather than truncate — a

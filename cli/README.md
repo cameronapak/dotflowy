@@ -144,6 +144,11 @@ use `--time-zone` on remote machines or `--date YYYY-MM-DD` for an explicit day.
 Raw `call` never inserts defaults: an omitted date/timezone retains MCP's UTC
 behavior. Subtree and OPML daily targeting require an explicit `date`.
 
+Commands that create nodes (`add`, `subtree`, `today`, `mirror`, `mirror-today`,
+`import-opml`) send `sourceApp: "Dotflowy CLI"`, which the app shows as a
+terminal icon. An agent driving the CLI should name its own app with
+`--source-app "Claude Code"`. Raw `call` requires `sourceApp` in its arguments.
+
 ## Safety and output
 
 - Deletion includes the entire subtree and requires `--yes`, including through

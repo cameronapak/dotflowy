@@ -65,7 +65,8 @@ const SERVER_INSTRUCTIONS =
   'Dotflowy is the user\'s personal outline (nested bullets; some are to-dos; daily notes live under a "Daily" container). ' +
   "Read with get_outline / search_nodes — every line carries the node id the write tools need. " +
   "add_to_today and mirror_to_today are the fastest ways to put something on the user's daily note; " +
-  'pass `timeZone` (e.g. "America/New_York") so an omitted `date` resolves to the user\'s own today.';
+  'pass `timeZone` (e.g. "America/New_York") so an omitted `date` resolves to the user\'s own today. ' +
+  "Every tool that creates nodes requires `sourceApp`: the app you are running in (not the model), shown as its logo on those nodes.";
 
 // JSON-RPC 2.0 error codes.
 const PARSE_ERROR = -32700;
@@ -243,7 +244,6 @@ function handleToolCall(
   id: JsonRpcId,
   params: RpcJson,
   store: OutlineStore,
-  origin: string | null,
   afterTextWrite?: AfterTextWrite,
 ): Effect.Effect<Response> {
   const call = decodeOrNull(CallToolParamsSchema, params);
@@ -262,7 +262,7 @@ function handleToolCall(
   return decodeInput(call.arguments ?? {}).pipe(
     Effect.mapError((issue) => rpcError(id, INVALID_PARAMS, issue.message)),
     Effect.flatMap((input) =>
-      tool.handle(input, store, origin, afterTextWrite).pipe(
+      tool.handle(input, store, afterTextWrite).pipe(
         Effect.map((result) =>
           rpcResult(
             id,
@@ -295,7 +295,6 @@ function handleToolCall(
 function dispatch(
   message: typeof JsonRpcMessageSchema.Type,
   store: OutlineStore,
-  origin: string | null,
   agentAccess: boolean,
   afterTextWrite?: AfterTextWrite,
 ): Effect.Effect<Response> {
@@ -316,7 +315,7 @@ function dispatch(
       // connection can handshake and see WHY, but every tool call — read AND
       // write — is refused until the plan includes agent access (#170).
       return agentAccess
-        ? handleToolCall(id, message.params, store, origin, afterTextWrite)
+        ? handleToolCall(id, message.params, store, afterTextWrite)
         : Effect.succeed(rpcError(id, UPGRADE_REQUIRED, UPGRADE_MESSAGE));
     default:
       return Effect.succeed(
@@ -332,10 +331,8 @@ function dispatch(
  * Total: every failure mode becomes a well-formed HTTP/JSON-RPC response, so
  * the caller (worker/index.ts) can treat this as infallible routing.
  *
- * `origin` is the caller's provenance stamp — the resolved harness name of the
- * OAuth client behind the bearer token (worker/index.ts), written onto every
- * node a write tool creates. Null when it can't be resolved (falls back to a
- * generic marker there).
+ * Provenance comes from each write tool's required `sourceApp` argument
+ * (ADR 0081), not from the bearer token.
  *
  * `agentAccess` is the caller's entitlement (#170): false for a free plan, which
  * refuses every tools/call with an upgrade error while leaving the handshake +
@@ -344,7 +341,6 @@ function dispatch(
 export function handleMcp(
   request: Request,
   store: OutlineStore,
-  origin: string | null,
   agentAccess: boolean,
   afterTextWrite?: AfterTextWrite,
 ): Effect.Effect<Response> {
@@ -387,7 +383,7 @@ export function handleMcp(
         rpcError(null, INVALID_REQUEST, issue.message),
       ),
     );
-    return yield* dispatch(message, store, origin, agentAccess, afterTextWrite);
+    return yield* dispatch(message, store, agentAccess, afterTextWrite);
   }).pipe(
     // The typed error channel only ever carries already-built error Responses.
     Effect.catch((response) => Effect.succeed(response)),

@@ -198,10 +198,10 @@ export function Footer() {
        * is lawful, but state plainly that we're independent and unaffiliated. */}
       <div className="mx-auto w-full max-w-2xl px-6 pb-6">
         <p className="text-xs leading-relaxed text-muted-foreground/70">
-          Workflowy, Amp, ChatGPT, Claude, Cursor, Kody, and other product names
-          are trademarks of their respective owners. Dotflowy is an independent,
-          open-source project and is not affiliated with, sponsored by, or
-          endorsed by them.
+          Workflowy, Amp, ChatGPT, Claude, Cursor, Gemini, Grok, Kody, and other
+          product names and logos are trademarks of their respective owners.
+          Dotflowy is an independent, open-source project and is not affiliated
+          with, sponsored by, or endorsed by them.
         </p>
       </div>
       <div className="mx-auto w-full max-w-2xl px-6 pb-10">

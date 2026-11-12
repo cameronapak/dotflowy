@@ -155,10 +155,12 @@ test("friendly today uses local time; raw call preserves UTC defaults", async ()
   expect(mergeInput(today, {}, "America/Chicago")).toEqual({
     text: "hello",
     timeZone: "America/Chicago",
+    sourceApp: "Dotflowy CLI",
   });
   expect(mergeInput(today, { date: "2026-09-27" }, "America/Chicago")).toEqual({
     text: "hello",
     date: "2026-09-27",
+    sourceApp: "Dotflowy CLI",
   });
   expect(
     mergeInput(today, { timeZone: "Asia/Tokyo" }, "America/Chicago").timeZone,
@@ -170,6 +172,22 @@ test("friendly today uses local time; raw call preserves UTC defaults", async ()
       "America/Chicago",
     ),
   ).toEqual({ text: "hello" });
+});
+
+test("friendly writes name the CLI as their source app unless told otherwise", async () => {
+  const add = await parsed(["add", "hi", "--source-app", "Claude Code"]);
+  expect(mergeInput(add, {}, "UTC").sourceApp).toBe("Claude Code");
+  expect(
+    mergeInput(await parsed(["add", "hi"]), { sourceApp: "Cursor" }, "UTC")
+      .sourceApp,
+  ).toBe("Cursor");
+  expect(mergeInput(await parsed(["mirror", "n"]), {}, "UTC").sourceApp).toBe(
+    "Dotflowy CLI",
+  );
+  // Reads and edits never create nodes, so they never send it.
+  expect(
+    mergeInput(await parsed(["update", "n", "--text", "x"]), {}, "UTC"),
+  ).not.toHaveProperty("sourceApp");
 });
 
 test("rejects duplicate input sources and ambiguous field merging", async () => {
