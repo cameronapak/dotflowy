@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.0.3
+
+### Patch Changes
+
+- 3478b73: Stop drag auto-scroll outside the outline so nodes can be dropped onto calendar days without the outline continuing to scroll.
+
 ## 3.0.2
 
 ### Patch Changes
