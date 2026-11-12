@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.0.1
+
+### Patch Changes
+
+- 52c2cde: Fix the extra second-line indent on agent-created nodes while preserving wrapping underneath checkboxes and source marks.
+
 ## 3.0.0
 
 ### Major Changes
