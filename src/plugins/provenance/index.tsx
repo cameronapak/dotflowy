@@ -59,7 +59,9 @@ function ProvenanceMark({
   const mark = markFor(node.origin);
   return (
     <Tooltip>
-      <TooltipTrigger>
+      {/* Avoid an inline baseline adding height to this floated trigger:
+          only the first text line should wrap around the source mark. */}
+      <TooltipTrigger className="flex">
         <span
           role="img"
           className={cn([

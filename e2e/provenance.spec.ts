@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // The provenance plugin marks nodes an agent created via MCP (the write-once
 // `origin` field) apart from what the user typed. The mark is a Seam F slot in
@@ -24,6 +29,50 @@ const TREE: SeedNode[] = [
 // its alignment rule on.
 const mark = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row [data-origin]`);
+
+test("agent task continuation lines wrap underneath the checkbox and source mark", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 540, height: 800 });
+  await seedOutline(page, [
+    {
+      id: "wrapped",
+      parentId: null,
+      prevSiblingId: null,
+      text: "Ask Brian for a final review of the Platform Developer Hub CI/CD speedup; my pipeline reruns fail with a permissions error since his preview-auth fix",
+      isTask: true,
+      origin: "Unknown app",
+    },
+  ]);
+  await openSeededOutline(page, { anchorId: "wrapped" });
+  for (const size of ["small", "default", "large"]) {
+    await page.evaluate(
+      (size) => (document.documentElement.dataset.textSize = size),
+      size,
+    );
+    await expect(async () => {
+      const { left, lines } = await text(page, "wrapped").evaluate((el) => {
+        const source = el.firstChild!;
+        const starts = new Map<number, number>();
+        for (let i = 0; i < source.textContent!.length; i++) {
+          if (!source.textContent![i]!.trim()) continue;
+          const range = document.createRange();
+          range.setStart(source, i);
+          range.setEnd(source, i + 1);
+          const rect = range.getBoundingClientRect();
+          if (!starts.has(rect.top)) starts.set(rect.top, rect.left);
+        }
+        return {
+          left: el.getBoundingClientRect().left,
+          lines: [...starts.values()],
+        };
+      });
+      expect(lines.length).toBeGreaterThanOrEqual(3);
+      expect(lines[0]).toBeGreaterThan(left);
+      for (const start of lines.slice(1)) expect(start).toBeCloseTo(left, 0);
+    }).toPass({ timeout: 2000 });
+  }
+});
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
