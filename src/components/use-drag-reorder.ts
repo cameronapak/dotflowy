@@ -440,14 +440,23 @@ export function useDragReorder(deps: DragDeps) {
     }
   }, []);
 
-  // Auto-scroll loop: while the pointer sits in a viewport edge band, scroll
-  // the editor vertically or the outline canvas horizontally, then re-project
-  // so off-screen drop targets and depths become reachable.
+  // Auto-scroll loop: while the pointer sits inside the editor's edge band,
+  // scroll vertically or horizontally, then re-project so off-screen drop
+  // targets and depths become reachable. Outside the editor, leave scrolling
+  // alone so chrome drop targets (such as calendar days) stay reachable.
   const tickScroll = useCallback(() => {
     const s = state.current;
     if (!s || !s.dragging) return;
+    s.raf = requestAnimationFrame(tickScroll);
     const scroller = getOutlineScroller()!;
     const bounds = scroller.getBoundingClientRect();
+    if (
+      s.lastX < bounds.left ||
+      s.lastX >= bounds.right ||
+      s.lastY < bounds.top ||
+      s.lastY >= bounds.bottom
+    )
+      return;
     const y = s.lastY;
     let dy = 0;
     if (y < bounds.top + EDGE)
@@ -469,7 +478,6 @@ export function useDragReorder(deps: DragDeps) {
     if (dx !== 0 || dy !== 0) {
       project(s.lastX, s.lastY);
     }
-    s.raf = requestAnimationFrame(tickScroll);
   }, [project]);
 
   function onMove(e: PointerEvent) {
