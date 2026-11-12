@@ -52,6 +52,7 @@ import {
   Fragment,
   type CSSProperties,
   type ReactNode,
+  type RefObject,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -60,6 +61,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { flushSync } from "react-dom";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
@@ -72,7 +74,11 @@ import type {
 } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
-import { loadEditorFeatures, useEditorFeatures } from "../data/editor-features";
+import {
+  loadEditorFeatures,
+  peekEditorFeatures,
+  useEditorFeatures,
+} from "../data/editor-features";
 import {
   capture,
   finishHistoryScope,
@@ -688,9 +694,14 @@ function makeDraft(resolveParent: () => Promise<string | null>): DraftState {
   };
 }
 
-function QuickAddOverlay({ onClose }: { onClose: () => void }) {
+function QuickAddOverlay({
+  onClose,
+  editorRef,
+}: {
+  onClose: () => void;
+  editorRef: RefObject<MiniEditorHandle | null>;
+}) {
   const { daily } = useEditorFeatures();
-  const editorRef = useRef<MiniEditorHandle | null>(null);
   const [overlay, setOverlay] = useState<ReactNode>(null);
   // The off-page toast's "Go there" zooms to the destination (ADR 0049
   // amendment). Quick-add is mounted in `__root.tsx`, inside the router, so the
@@ -755,10 +766,8 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
   const createChainRef = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {
     mountedRef.current = true;
-    const raf = requestAnimationFrame(() => editorRef.current?.focus());
     return () => {
       mountedRef.current = false;
-      cancelAnimationFrame(raf);
     };
   }, []);
 
@@ -949,7 +958,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
         setDraftId(d.id);
         editorRef.current?.restore(d.text, plan.location?.caret);
       }),
-    [],
+    [editorRef],
   );
 
   // Start a FRESH draft for the next capture: destination back to the DEFAULT
@@ -964,7 +973,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
     setDest(destination);
     editorRef.current?.clear();
     editorRef.current?.focus();
-  }, []);
+  }, [editorRef]);
 
   // Enter = commit & next. Snapshot the current draft, RESET immediately (so a
   // fast follow-up keystroke lands in a new draft), then file the snapshot into
@@ -996,7 +1005,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       d.finished = true;
       void startBorn(d).then(file);
     }
-  }, [discardDraftIfEmpty, finishDraft, resetDraft, startBorn]);
+  }, [discardDraftIfEmpty, editorRef, finishDraft, resetDraft, startBorn]);
 
   const close = useCallback(() => {
     // A non-empty draft is already committed to its destination; only an empty
@@ -1051,7 +1060,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       else void startBorn(d).then(notify);
     }
     close();
-  }, [close, startBorn, navigate]);
+  }, [close, editorRef, startBorn, navigate]);
 
   // Retarget the CURRENT draft (the input's destination popover). Update BOTH the
   // resolver (for a born that hasn't resolved yet) AND `desiredParent` (for one
@@ -1067,7 +1076,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       if (d.id) relocate(d.id, target.parentId, d.scope);
       requestAnimationFrame(() => editorRef.current?.focus());
     },
-    [relocate],
+    [editorRef, relocate],
   );
 
   // Relocate a committed session row (its own destination popover). The node is
@@ -1146,7 +1155,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
         );
       },
     }),
-    [commands],
+    [commands, editorRef],
   );
 
   const onAfterPaste: typeof afterPaste = (input, ctx) => {
@@ -1218,6 +1227,7 @@ function QuickAddOverlay({ onClose }: { onClose: () => void }) {
       <DialogContent
         showCloseButton={false}
         animate={false}
+        initialFocus={false}
         aria-label="Quick add"
         className={cn(
           // `sm:max-w-lg` (not a bare `max-w-*`): the DialogContent base carries
@@ -1413,6 +1423,7 @@ function QuickAddFab({ onOpen }: { onOpen: () => void }) {
  */
 export function QuickAdd() {
   const [open, setOpen] = useState(false);
+  const editorRef = useRef<MiniEditorHandle | null>(null);
   const mounted = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -1421,10 +1432,21 @@ export function QuickAdd() {
   const openRef = useRef(open);
   openRef.current = open;
   const requestOpen = useCallback(() => {
+    const show = () => {
+      // iOS opens the keyboard only when focus stays inside the user's tap.
+      // Mount the portaled editor now; neither a promise nor rAF can own focus.
+      flushSync(() => setOpen(true));
+      editorRef.current?.focus();
+    };
+    if (peekEditorFeatures().ready) {
+      show();
+      return;
+    }
+    // Preserve the initial preference gate: never guess a write destination.
     void Effect.runPromise(
       Effect.tryPromise(() => loadEditorFeatures()).pipe(
         Effect.match({
-          onSuccess: () => setOpen(true),
+          onSuccess: show,
           onFailure: () =>
             toast.error(
               "Couldn't load your feature settings. Try again in Settings.",
@@ -1468,7 +1490,9 @@ export function QuickAdd() {
   return (
     <>
       {!open && <QuickAddFab onOpen={requestOpen} />}
-      {open && <QuickAddOverlay onClose={() => setOpen(false)} />}
+      {open && (
+        <QuickAddOverlay editorRef={editorRef} onClose={() => setOpen(false)} />
+      )}
     </>
   );
 }
