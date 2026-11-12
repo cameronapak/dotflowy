@@ -51,9 +51,8 @@ test("text-authoring MCP tools notify after commit with old and new source", asy
     const response = await rpc(
       store,
       "tools/call",
-      { name, arguments: args },
+      { name, arguments: withSourceApp(args) },
       1,
-      "TestAgent",
       true,
       undefined,
       notify,
@@ -84,7 +83,6 @@ test("text-authoring MCP tools notify after commit with old and new source", asy
       },
     },
     1,
-    "TestAgent",
     true,
     undefined,
     notify,
@@ -105,7 +103,6 @@ test("text-authoring MCP tools notify after commit with old and new source", asy
       arguments: { nodeId: first.nodeId, completed: true },
     },
     1,
-    "TestAgent",
     true,
     undefined,
     notify,
@@ -130,9 +127,8 @@ test("Embed writes normalize URLs, preserve kind and child notes, and never sche
     const response = await rpc(
       store,
       "tools/call",
-      { name, arguments: args },
+      { name, arguments: withSourceApp(args) },
       1,
-      "TestAgent",
       true,
       undefined,
       (batch) => writes.push(...batch),
@@ -301,15 +297,21 @@ interface RpcRequestBody {
   params?: RpcParams;
 }
 
+/** Every node-creating tool requires `sourceApp` (ADR 0081). Tool calls in
+ *  these tests name a fixed test app, so the stamping assertions have something
+ *  to check; read tools ignore the extra key. The requirement itself is tested
+ *  through `raw`, which sends arguments untouched. */
+const withSourceApp = (args: RpcParams) => ({
+  sourceApp: "TestAgent",
+  ...args,
+});
+
 // Each test request is its own stateless HTTP exchange, so a fixed id is fine.
 async function rpc(
   store: OutlineStore,
   method: string,
   params?: RpcParams,
   id: number | null = 1,
-  // The provenance stamp the Worker resolves from the bearer token in prod; a
-  // fixed harness name here so the stamping assertions have something to check.
-  origin: string | null = "TestAgent",
   agentAccess = true,
   // Pins "now" through Effect's TestClock; omit for the real clock.
   now?: number,
@@ -323,13 +325,7 @@ async function rpc(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const program = handleMcp(
-    request,
-    store,
-    origin,
-    agentAccess,
-    afterTextWrite,
-  );
+  const program = handleMcp(request, store, agentAccess, afterTextWrite);
   if (now === undefined) return Effect.runPromise(program);
   return Effect.runPromise(
     Effect.gen(function* () {
@@ -349,9 +345,8 @@ async function callTool(
   const res = await rpc(
     store,
     "tools/call",
-    { name, arguments: args },
+    { name, arguments: withSourceApp(args) },
     1,
-    "TestAgent",
     true,
     now,
   );
@@ -389,7 +384,7 @@ function fixture(): Node[] {
 /** POST (or any method) a raw body straight at the handler. */
 function raw(store: OutlineStore, init: RequestInit) {
   return Effect.runPromise(
-    handleMcp(new Request("http://test/api/mcp", init), store, null, true),
+    handleMcp(new Request("http://test/api/mcp", init), store, true),
   );
 }
 
@@ -438,7 +433,7 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
     json.result.tools.find((t: any) => t.name === name);
 
   expect(tool("add_node").inputSchema.type).toBe("object");
-  expect(tool("add_node").inputSchema.required).toEqual(["text"]);
+  expect(tool("add_node").inputSchema.required).toEqual(["sourceApp", "text"]);
   const expectedHints = {
     get_outline: [true, false],
     search_nodes: [true, false],
@@ -484,7 +479,7 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
   // The recursive SubtreeNode shape is emitted as a referenced $def, and it
   // carries `kind` so a whole forest can land as prose (ADR 0028).
   const addSubtree = tool("add_subtree").inputSchema;
-  expect(addSubtree.required).toEqual(["nodes"]);
+  expect(addSubtree.required).toEqual(["sourceApp", "nodes"]);
   expect(JSON.stringify(addSubtree.$defs.SubtreeNode)).toContain("paragraph");
   expect(JSON.stringify(addSubtree.$defs.SubtreeNode)).toContain("numbered");
   expect(JSON.stringify(addSubtree)).toContain("#/$defs/SubtreeNode");
@@ -528,9 +523,7 @@ test("a free plan (no agent access) refuses tools/call but keeps discovery open 
   const { store, batches } = makeStore(fixture());
   const free = async (method: string, params: RpcParams) =>
     // SAFETY: parsed from the JSON-RPC body our own handler serializes; fields checked by the expects below.
-    (await (
-      await rpc(store, method, params, 1, "TestAgent", false)
-    ).json()) as any;
+    (await (await rpc(store, method, params, 1, false)).json()) as any;
 
   // tools/call, the only entitlement-gated method, is refused, and no write
   // reaches the store.
@@ -650,10 +643,60 @@ test("add_node writes one atomic batch, stamps origin, and reports the new id", 
   expect(fake.batches).toHaveLength(1);
   const insert = inserts(fake.batches[0]!)[0]!;
   expect(insert.parentId).toBe("a");
-  // Provenance: the resolved harness name is stamped onto the created node, so
+  // Provenance: the caller's source app is stamped onto the created node, so
   // the editor can mark an agent's edit apart from the user's own (write-once).
   expect(insert.origin).toBe("TestAgent");
   expect(toolText(json)).toContain(insert.id);
+});
+
+test("every node-creating tool requires sourceApp and stamps its canonical name (ADR 0081)", async () => {
+  const { store } = makeStore();
+  // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
+  const list = (await (await rpc(store, "tools/list")).json()) as any;
+  const creating = [
+    "add_node",
+    "add_subtree",
+    "add_to_today",
+    "mirror_node",
+    "mirror_to_today",
+    "import_opml",
+  ];
+  for (const t of list.result.tools) {
+    const required: string[] = t.inputSchema.required ?? [];
+    expect(required.includes("sourceApp")).toBe(creating.includes(t.name));
+  }
+  // Published as "a listed app, or any name": the enum offers the logos.
+  const field = list.result.tools.find((t: any) => t.name === "add_node")
+    .inputSchema.properties.sourceApp;
+  expect(field.anyOf[0].enum).toContain("ChatGPT");
+  expect(field.anyOf[1]).toMatchObject({ type: "string", minLength: 1 });
+
+  const fake = makeStore(fixture());
+  const send = async (args: Record<string, string>) => {
+    const res = await raw(fake.store, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "add_node", arguments: args },
+      }),
+    });
+    // SAFETY: parsed from the JSON-RPC body our own handler serializes; fields checked by the expects below.
+    return (await res.json()) as any;
+  };
+  // Missing or blank is refused before anything is written.
+  expect((await send({ text: "x" })).error.code).toBe(-32602);
+  expect((await send({ text: "x", sourceApp: "  " })).error.code).toBe(-32602);
+  expect(fake.batches).toHaveLength(0);
+
+  // A listed app is stored in its canonical spelling whatever the casing; an
+  // unlisted app is stored as given.
+  await send({ text: "listed", sourceApp: "claude code" });
+  await send({ text: "unlisted", sourceApp: "Goose" });
+  const origins = fake.batches.map((b) => inserts(b)[0]!.origin);
+  expect(origins).toEqual(["Claude Code", "Goose"]);
 });
 
 test("write receipts redact spoilers without changing stored text", async () => {

@@ -17,6 +17,10 @@ const parent = { parent: string("parentId") };
 const kind = { task: boolean("isTask"), kind: string("kind") };
 const daily = { date: string("date"), "time-zone": string("timeZone") };
 const position = { position: string("position") };
+// Node-creating tools require the app the caller runs in. Friendly commands
+// default it to the CLI itself; an agent driving the CLI passes its own app.
+const source = { "source-app": string("sourceApp") };
+const CLI_SOURCE_APP = "Dotflowy CLI";
 
 export const commands = {
   outline: {
@@ -36,11 +40,11 @@ export const commands = {
   add: {
     tool: "add_node",
     positional: "text",
-    fields: { ...parent, ...position, ...kind },
+    fields: { ...parent, ...position, ...kind, ...source },
   },
   subtree: {
     tool: "add_subtree",
-    fields: { ...parent, ...position, ...daily },
+    fields: { ...parent, ...position, ...daily, ...source },
   },
   update: {
     tool: "update_node",
@@ -62,17 +66,26 @@ export const commands = {
   today: {
     tool: "add_to_today",
     positional: "text",
-    fields: { ...kind, ...daily },
+    fields: { ...kind, ...daily, ...source },
   },
-  mirror: { tool: "mirror_node", positional: "nodeId", fields: parent },
+  mirror: {
+    tool: "mirror_node",
+    positional: "nodeId",
+    fields: { ...parent, ...source },
+  },
   "mirror-today": {
     tool: "mirror_to_today",
     positional: "nodeId",
-    fields: daily,
+    fields: { ...daily, ...source },
   },
   "import-opml": {
     tool: "import_opml",
-    fields: { ...parent, ...daily, "dry-run": boolean("dryRun") },
+    fields: {
+      ...parent,
+      ...daily,
+      "dry-run": boolean("dryRun"),
+      ...source,
+    },
   },
   "export-opml": { tool: "export_opml", positional: "nodeId", fields: {} },
 } satisfies Record<string, Definition>;
@@ -285,6 +298,11 @@ export function mergeInput(
     args.date == null
   )
     args.timeZone = timeZone;
+  const definition = Object.entries<Definition>(commands).find(
+    ([name]) => name === parsed.command,
+  )?.[1];
+  if (definition && "source-app" in definition.fields && args.sourceApp == null)
+    args.sourceApp = CLI_SOURCE_APP;
   if (parsed.tool === "delete_node" && !parsed.yes)
     throw fail(
       "Deletion includes the whole subtree. Pass --yes to confirm.",

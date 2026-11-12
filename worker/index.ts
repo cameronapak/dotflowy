@@ -183,27 +183,6 @@ const ExternalEmbedsPreference = Schema.Struct({
   enabled: Schema.Literal(true),
 });
 
-/**
- * The provenance stamp for an MCP write: the human-facing name of the OAuth
- * client behind the bearer token. Dynamic client registration records it in
- * `oauthApplication.name` ("Claude", "MCP Inspector", …), so a node an agent
- * creates carries WHICH agent made it. One indexed lookup, on the MCP path only.
- * Falls back to a generic `'agent'` when the token carries no client id or the
- * client registered no name — the marker still reads as "not the user", unnamed.
- */
-async function resolveMcpOrigin(
-  env: Env,
-  clientId: string | null,
-): Promise<string> {
-  if (!clientId) return "agent";
-  const row = await env.DB.prepare(
-    "SELECT name FROM oauthApplication WHERE clientId = ?",
-  )
-    .bind(clientId)
-    .first<{ name: string }>();
-  return row?.name?.trim() || "agent";
-}
-
 function rowToNode(r: NodeRow): Node {
   return {
     id: r.id,
@@ -1116,31 +1095,19 @@ function handleApiRequest(
           },
         });
       }
-      // Provenance: which agent is calling. The bearer token's OAuth client maps
-      // to a registered harness name; every node its write tools create is
-      // stamped with it, so the editor can mark agent edits apart from the user's.
-      // SAFETY: optional read of Better Auth's MCP session token; a missing clientId falls to null.
-      const clientId = (token as { clientId?: string }).clientId ?? null;
       // MCP (agent access) is a paid capability (#152/#170). Resolve the plan
       // from the token's `userId` — the Better Auth id the subscription table is
       // keyed on (never the resolved DO id, which collapses the owner to
       // 'default'). A free token gets a clean in-protocol error on tool calls
       // (handleMcp), not a 500. An operator comps themselves with a manual
       // subscription row (getPlan treats it as paid).
-      const [origin, mcpPlan] = yield* Effect.all(
-        [
-          Effect.promise(() => resolveMcpOrigin(env, clientId)),
-          Effect.promise(() => getPlan(token.userId, env)),
-        ],
-        { concurrency: "unbounded" },
-      );
+      const mcpPlan = yield* Effect.promise(() => getPlan(token.userId, env));
       const classicStub = env.USER_OUTLINE.get(
         env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
       );
       return yield* handleMcp(
         request,
         classicStub,
-        origin,
         mcpPlan !== "free",
         (writes) => {
           executionCtx.waitUntil(

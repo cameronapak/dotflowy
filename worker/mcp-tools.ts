@@ -35,6 +35,7 @@ import {
   parseOpml,
   planOpmlImport,
 } from "../src/data/opml-import";
+import { SOURCE_APPS, knownSourceApp } from "../src/data/source-apps";
 import { redactSpoilers } from "../src/data/spoiler";
 import { childrenOf, createId } from "../src/data/tree";
 import { WeekStartPreferenceSchema } from "../src/data/wire-schema";
@@ -136,14 +137,9 @@ export interface ToolDef {
   readOnly: boolean;
   /** True when the tool can delete or overwrite existing node content. */
   destructive: boolean;
-  /** `origin` is the caller's provenance stamp — the OAuth client's harness name
-   *  (worker/index.ts resolves it from the bearer token), written onto every node
-   *  a write tool creates so the editor can tell agent edits from the user's own.
-   *  Read-only tools ignore it. */
   handle: (
     input: any,
     store: OutlineStore,
-    origin: string | null,
     afterTextWrite?: AfterTextWrite,
   ) => Effect.Effect<string | ToolResult, ToolError>;
 }
@@ -583,6 +579,26 @@ const timeZoneField = optional(
   }),
 );
 
+/** Required on every tool that creates nodes (ADR 0081): the app the agent is
+ *  running in, stamped write-once into `Node.origin` so the editor can show that
+ *  app's logo. Published as "one of the listed apps, or any short name". */
+const sourceAppField = Schema.Union([
+  Schema.Literals(SOURCE_APPS),
+  Schema.String.check(
+    Schema.isTrimmed(),
+    Schema.isMinLength(1),
+    Schema.isMaxLength(64),
+  ),
+]).annotate({
+  description:
+    "The app you are running in (not the model), e.g. Claude, ChatGPT, Cursor. Pick a listed app when one matches; otherwise give the app's name. Shown as that app's logo on every node this call creates.",
+});
+
+/** The provenance stamp for a write: a listed app's canonical spelling, or the
+ *  agent's own name for an unlisted app. */
+const originOf = (sourceApp: string): string =>
+  knownSourceApp(sourceApp) ?? sourceApp;
+
 const GetOutlineInput = Schema.Struct({
   nodeId: optional(
     Schema.String.annotate({
@@ -598,6 +614,7 @@ const GetOutlineInput = Schema.Struct({
 });
 
 const AddNodeInput = Schema.Struct({
+  sourceApp: sourceAppField,
   text: Schema.String.annotate({ description: "The bullet text." }),
   parentId: optional(
     Schema.String.annotate({
@@ -639,6 +656,7 @@ const SubtreeNodeInput: Schema.Codec<SubtreeInput> = Schema.Struct({
 }).annotate({ identifier: "SubtreeNode" });
 
 const AddSubtreeInput = Schema.Struct({
+  sourceApp: sourceAppField,
   nodes: Schema.Array(SubtreeNodeInput).annotate({
     description:
       "The bullets to create, as a nested forest. Each node may carry its own `children`, so a whole outline lands in one call.",
@@ -724,6 +742,7 @@ const MoveNodesInput = Schema.Struct({
 });
 
 const AddToTodayInput = Schema.Struct({
+  sourceApp: sourceAppField,
   text: Schema.String.annotate({
     description: "The bullet text to add to the daily note.",
   }),
@@ -738,6 +757,7 @@ const AddToTodayInput = Schema.Struct({
 });
 
 const MirrorNodeInput = Schema.Struct({
+  sourceApp: sourceAppField,
   nodeId: Schema.String.annotate({
     description: "The node to mirror (its subtree comes with it).",
   }),
@@ -749,6 +769,7 @@ const MirrorNodeInput = Schema.Struct({
 });
 
 const MirrorToTodayInput = Schema.Struct({
+  sourceApp: sourceAppField,
   nodeId: Schema.String.annotate({
     description: "The node to mirror onto the daily note.",
   }),
@@ -763,6 +784,7 @@ const MirrorToTodayInput = Schema.Struct({
 // re-treading unfurl.ts for territory the string argument already covers.
 
 const ImportOpmlInput = Schema.Struct({
+  sourceApp: sourceAppField,
   opml: Schema.String.annotate({
     description:
       "The OPML document to import, as an XML string (e.g. a Workflowy export).",
@@ -982,8 +1004,9 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: AddNodeInput,
     readOnly: false,
     destructive: false,
-    handle: (input: typeof AddNodeInput.Type, store, origin, afterTextWrite) =>
+    handle: (input: typeof AddNodeInput.Type, store, afterTextWrite) =>
       Effect.gen(function* () {
+        const origin = originOf(input.sourceApp);
         const text = yield* explicitText(input.kind, input.text);
         const index = yield* loadIndex(store);
         const timestamp = yield* Clock.currentTimeMillis;
@@ -1017,13 +1040,9 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: AddSubtreeInput,
     readOnly: false,
     destructive: false,
-    handle: (
-      input: typeof AddSubtreeInput.Type,
-      store,
-      origin,
-      afterTextWrite,
-    ) =>
+    handle: (input: typeof AddSubtreeInput.Type, store, afterTextWrite) =>
       Effect.gen(function* () {
+        const origin = originOf(input.sourceApp);
         if (input.parentId != null && input.date != null) {
           return yield* Effect.fail(
             new ToolError({ reason: "pass either parentId or date, not both" }),
@@ -1107,12 +1126,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: UpdateNodeInput,
     readOnly: false,
     destructive: true,
-    handle: (
-      input: typeof UpdateNodeInput.Type,
-      store,
-      _origin,
-      afterTextWrite,
-    ) =>
+    handle: (input: typeof UpdateNodeInput.Type, store, afterTextWrite) =>
       Effect.gen(function* () {
         // Built field by field: only present fields are edited (absent =
         // untouched); `"bullet"` is the explicit kind reset (stored nullable).
@@ -1226,13 +1240,9 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: AddToTodayInput,
     readOnly: false,
     destructive: false,
-    handle: (
-      input: typeof AddToTodayInput.Type,
-      store,
-      origin,
-      afterTextWrite,
-    ) =>
+    handle: (input: typeof AddToTodayInput.Type, store, afterTextWrite) =>
       Effect.gen(function* () {
+        const origin = originOf(input.sourceApp);
         const text = yield* explicitText(input.kind, input.text);
         const now = yield* Clock.currentTimeMillis;
         const dateKey = yield* resolveDateKey(input.date, input.timeZone, now);
@@ -1271,8 +1281,9 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: MirrorNodeInput,
     readOnly: false,
     destructive: false,
-    handle: (input: typeof MirrorNodeInput.Type, store, origin) =>
+    handle: (input: typeof MirrorNodeInput.Type, store) =>
       Effect.gen(function* () {
+        const origin = originOf(input.sourceApp);
         const index = yield* loadIndex(store);
         const timestamp = yield* Clock.currentTimeMillis;
         const plan = yield* unwrap(
@@ -1301,8 +1312,9 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: MirrorToTodayInput,
     readOnly: false,
     destructive: false,
-    handle: (input: typeof MirrorToTodayInput.Type, store, origin) =>
+    handle: (input: typeof MirrorToTodayInput.Type, store) =>
       Effect.gen(function* () {
+        const origin = originOf(input.sourceApp);
         const now = yield* Clock.currentTimeMillis;
         const dateKey = yield* resolveDateKey(input.date, input.timeZone, now);
         const scaffold = yield* claimDailyScaffold(store, dateKey);
@@ -1332,8 +1344,9 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: ImportOpmlInput,
     readOnly: false,
     destructive: false,
-    handle: (input: typeof ImportOpmlInput.Type, store, origin) =>
+    handle: (input: typeof ImportOpmlInput.Type, store) =>
       Effect.gen(function* () {
+        const origin = originOf(input.sourceApp);
         if (input.parentId != null && input.date != null) {
           return yield* Effect.fail(
             new ToolError({ reason: "pass either parentId or date, not both" }),

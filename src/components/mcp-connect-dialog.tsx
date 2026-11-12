@@ -392,6 +392,14 @@ export function McpConnectDialog({
             </AnimateHeight>
           </div>
         </Tabs>
+
+        {/* Nominative-use notice for the app names and logos shown here and on
+            agent-created nodes (ADR 0081); mirrors the landing footer. */}
+        <p className="border-t px-5 py-3 text-xs text-muted-foreground">
+          Claude, ChatGPT, Cursor, Gemini, Grok, and other app names and logos
+          are trademarks of their respective owners. Dotflowy is not affiliated
+          with, sponsored by, or endorsed by them.
+        </p>
       </DialogContent>
     </Dialog>
   );

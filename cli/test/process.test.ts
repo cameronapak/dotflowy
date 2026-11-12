@@ -166,7 +166,7 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
       (await cli(server.url.origin, ["add", "--text-file", "-"], "α\nbeta"))
         .code,
     ).toBe(0);
-    expect(received).toEqual({ text: "α\nbeta" });
+    expect(received).toEqual({ text: "α\nbeta", sourceApp: "Dotflowy CLI" });
     const numbered = await cli(server.url.origin, [
       "add",
       "step",
@@ -174,7 +174,11 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
       "numbered",
     ]);
     expect(numbered.code).toBe(0);
-    expect(received).toEqual({ text: "step", kind: "numbered" });
+    expect(received).toEqual({
+      text: "step",
+      kind: "numbered",
+      sourceApp: "Dotflowy CLI",
+    });
   } finally {
     server.stop(true);
   }

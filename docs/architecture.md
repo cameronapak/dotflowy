@@ -42,7 +42,7 @@ Node {
   bookmarkedAt,                       // null, or the ms it was pinned (also the bookmark sort key)
   locked,                             // direct owner lock; effective state inherits through subtrees and mirrors
   mirrorOf,                           // null, or the id of the node this one windows
-  origin,                             // null if you wrote it; the agent's name if MCP created it
+  origin,                             // null if you wrote it; the MCP caller's sourceApp if an agent created it (ADR 0081)
   createdAt, updatedAt
 }
 ```

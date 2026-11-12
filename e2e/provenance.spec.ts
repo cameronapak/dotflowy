@@ -6,7 +6,7 @@ import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 // `origin` field) apart from what the user typed. The mark is a Seam F slot in
 // both render paths (list bullet + zoomed title). This spec locks that a
 // human-authored node stays unmarked, an agent-authored one shows the mark with
-// its harness attribution, and the mark rides the zoom into the title.
+// its app attribution, and the mark rides the zoom into the title.
 
 const TREE: SeedNode[] = [
   { id: "mine", parentId: null, prevSiblingId: null, text: "i typed this" },
@@ -19,8 +19,9 @@ const TREE: SeedNode[] = [
   },
 ];
 
-// The mark is a SparkleIcon carrying `data-origin` (the harness name) and an
-// aria-label attribution -- the same hook styles.css keys its alignment rule on.
+// The mark is the source app's logo (ADR 0081) in a box carrying `data-origin`
+// (the app name) and an aria-label attribution -- the same hook styles.css keys
+// its alignment rule on.
 const mark = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row [data-origin]`);
 
@@ -37,7 +38,7 @@ test("agent attribution appears on its row and zoomed title, not the user's node
   // The user's node carries no mark.
   await expect(mark(page, "mine")).toHaveCount(0);
 
-  // The agent's node does, tagged with the harness name plus an aria-label
+  // The agent's node does, tagged with the app name plus an aria-label
   // attribution (the visible copy lives in the hover tooltip).
   const agentMark = mark(page, "ai");
   await expect(agentMark).toBeVisible();
