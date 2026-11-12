@@ -33,6 +33,10 @@ function lastChoice() {
   }
 }
 
+// The selected length takes the primary fill so it never reads like a hover.
+const CHOICE =
+  "h-10 min-w-0 aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90";
+
 function FocusPicker({ id, ctx }: { id: string; ctx: PluginContext }) {
   const prefs = useEditorFeatures();
   const current = useSession();
@@ -57,7 +61,8 @@ function FocusPicker({ id, ctx }: { id: string; ctx: PluginContext }) {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Focus session</DialogTitle>
-          <DialogDescription>
+          {/* Node text is unbounded; a bare URL must wrap, not widen the dialog. */}
+          <DialogDescription className="wrap-anywhere">
             {flattenInline(redactSpoilers(node?.text ?? "Untitled"))}
           </DialogDescription>
         </DialogHeader>
@@ -92,16 +97,30 @@ function FocusPicker({ id, ctx }: { id: string; ctx: PluginContext }) {
             onValueChange={(values) => {
               if (values[0]) setChoice(values[0]);
             }}
-            className="flex-wrap"
+            className="grid w-full grid-cols-4"
             variant="outline"
           >
             {["15", "25", "45", "60"].map((value) => (
-              <ToggleGroupItem key={value} value={value}>
-                {value} min
+              <ToggleGroupItem
+                key={value}
+                value={value}
+                className={`${CHOICE} h-16 flex-col gap-0`}
+              >
+                <span className="text-xl font-semibold tabular-nums">
+                  {value}
+                </span>{" "}
+                <span className="text-xs opacity-70">min</span>
               </ToggleGroupItem>
             ))}
-            <ToggleGroupItem value="pomodoro">Pomodoro</ToggleGroupItem>
-            <ToggleGroupItem value="custom">Custom</ToggleGroupItem>
+            <ToggleGroupItem
+              value="pomodoro"
+              className={`${CHOICE} col-span-2`}
+            >
+              Pomodoro
+            </ToggleGroupItem>
+            <ToggleGroupItem value="custom" className={`${CHOICE} col-span-2`}>
+              Custom
+            </ToggleGroupItem>
           </ToggleGroup>
           {isCustom && (
             <Field>
@@ -126,7 +145,7 @@ function FocusPicker({ id, ctx }: { id: string; ctx: PluginContext }) {
             </p>
           )}
           {current && current.phase !== "reflect" && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm wrap-anywhere text-muted-foreground">
               Replaces:{" "}
               {flattenInline(redactSpoilers(oldNode?.text ?? "Untitled"))}
             </p>

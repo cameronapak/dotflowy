@@ -58,7 +58,9 @@ a session never dims the outline.
 - **Pomodoro.** Breaks start on their own; each focus round waits for a click so
   starting stays intentional. Defaults: 25 min focus, 5 min break, 15 min long
   break after 4 rounds. Done ends the whole Pomodoro session, with one
-  reflection.
+  reflection. When a break ends, the band reads "Next … Ready" and Start
+  round N is the filled button, with Done outlined beside it: continuing is
+  the expected step, and ending the whole session is the quieter choice.
 - **Sounds** use Cuelume (MIT, Web Audio synthesis, no audio files): "attention"
   when time is up, "success" on Done, "ready" when a break ends. On by default,
   one switch, no countdown ticking. When the tab is hidden and no PiP window is
