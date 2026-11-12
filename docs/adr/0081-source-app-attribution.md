@@ -14,6 +14,9 @@ editor.
 The provenance plugin shows the source app's logo in the slot the generic
 sparkle used, at the same 16px size, so rows never shift. Unlisted apps, and
 nodes stamped before this change with an unmatched name, show a bot icon.
+The floated tooltip trigger uses flex layout so an inline baseline cannot add
+extra height and indent a second text line. Continuation lines still wrap
+underneath the checkbox and source mark.
 
 ## Why the app, not the model
 
