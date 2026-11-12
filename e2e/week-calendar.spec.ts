@@ -441,6 +441,113 @@ test("dragging a node onto a day pill moves its subtree, stays put, and undoes i
   ).toBeVisible();
 });
 
+test("drag auto-scroll stops outside the outline and resumes on re-entry before a calendar drop", async ({
+  page,
+}) => {
+  const OTHER = "2030-06-11";
+  await load(
+    page,
+    [
+      ...STANDARD_TREE,
+      {
+        id: "the-day",
+        parentId: null,
+        prevSiblingId: "charlie",
+        text: "A day",
+      },
+      {
+        id: "other-day",
+        parentId: null,
+        prevSiblingId: "the-day",
+        text: "Another day",
+      },
+      ...Array.from({ length: 80 }, (_, i) => ({
+        id: `entry-${i}`,
+        parentId: "the-day",
+        prevSiblingId: i === 0 ? null : `entry-${i - 1}`,
+        text: `Calendar drop entry ${i}`,
+      })),
+    ],
+    {
+      kv: dailyIndexKv([
+        { key: DAY, nodeId: "the-day" },
+        { key: OTHER, nodeId: "other-day" },
+      ]),
+    },
+  );
+  await clientNavigate(page, "/the-day");
+  await expect(strip(page)).toBeVisible();
+  const scroller = page.locator(".outline-scroll");
+  await scroller.evaluate((el) => {
+    el.scrollTop = 600;
+  });
+  const bullet = page.locator('li[data-node-id="entry-20"] .bullet');
+  await bullet.scrollIntoViewIfNeeded();
+  const source = await bullet.boundingBox();
+  const bounds = await scroller.boundingBox();
+  const target = await pill(page, OTHER).boundingBox();
+  if (!source || !bounds || !target) throw new Error("drag endpoints missing");
+
+  // Sample multiple animation frames with a stationary pointer. A single
+  // scrollTop read could miss the still-running auto-scroll loop.
+  const scrollSamples = () =>
+    scroller.evaluate(async (el) => {
+      const samples: number[] = [];
+      for (let i = 0; i < 12; i++) {
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => resolve()),
+        );
+        samples.push(el.scrollTop);
+      }
+      return samples;
+    });
+  const x = source.x + source.width / 2;
+  await page.mouse.move(x, source.y + source.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(x + 10, source.y + source.height / 2 + 10);
+  await expect(page.locator(".drag-pill")).toBeVisible();
+
+  // Just inside the top edge, scrolling is still useful.
+  await page.mouse.move(x, bounds.y + 20);
+  const inside = await scrollSamples();
+  expect(inside[0]! - inside.at(-1)!).toBeGreaterThan(30);
+
+  // Outside the bottom and top edges, neither direction may keep scrolling.
+  await page.mouse.move(x, bounds.y + bounds.height + 2);
+  const below = await scrollSamples();
+  expect(Math.max(...below) - Math.min(...below)).toBe(0);
+  await page.mouse.move(
+    target.x + target.width / 2,
+    target.y + target.height / 2,
+  );
+  await expect(pill(page, OTHER)).toHaveAttribute(
+    "data-external-drop-active",
+    "",
+  );
+  const overCalendar = await scrollSamples();
+  expect(overCalendar[0]).toBeGreaterThan(0);
+  expect(Math.max(...overCalendar) - Math.min(...overCalendar)).toBe(0);
+
+  // Re-entering the bottom edge restarts scrolling, without a new drag.
+  await page.mouse.move(x, bounds.y + bounds.height - 20);
+  const reentered = await scrollSamples();
+  expect(reentered.at(-1)! - reentered[0]!).toBeGreaterThan(30);
+  await page.mouse.move(
+    target.x + target.width / 2,
+    target.y + target.height / 2,
+  );
+  await expect(pill(page, OTHER)).toHaveAttribute(
+    "data-external-drop-active",
+    "",
+  );
+  await page.mouse.up();
+  await expect(page.locator('li[data-node-id="entry-20"]')).toHaveCount(0);
+  await pill(page, OTHER).click();
+  await expect(
+    page.locator('li[data-node-id="entry-20"][data-parent-id="other-day"]'),
+  ).toBeVisible();
+});
+
 test("a selected run can be dragged by a descendant into a missing day in order", async ({
   page,
 }) => {

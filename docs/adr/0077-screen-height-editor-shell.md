@@ -21,7 +21,10 @@ This changes the vertical scroll owner in
 The existing flat virtual list uses the editor element's dimensions and offset.
 Day navigation, reading holds, drag projection and auto-scroll, completion
 animation, spotlight, and caret reveal use that same scroll surface. Horizontal
-canvas scrolling and the visible-row model are unchanged.
+canvas scrolling and the visible-row model are unchanged. Drag auto-scroll runs
+only while the pointer is inside the editor's bounds, in an edge band. Leaving
+the editor for header or subheader drop targets stops both axes; re-entering an
+edge band resumes scrolling within the same drag.
 
 The router resets `.outline-scroll` on new navigation and restores it on history
 navigation. Day stream search-param updates retain `resetScroll: false`.
