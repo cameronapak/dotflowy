@@ -1,5 +1,16 @@
 # dotflowy
 
+## 0.3.0
+
+### Minor Changes
+
+- 41b3a5d: Commands that create nodes now send `sourceApp: "Dotflowy CLI"`, which the server requires. Pass `--source-app` to name another app, for example when an agent drives the CLI. Earlier CLI versions cannot create nodes once the server requires `sourceApp`; update to this version.
+
+### Patch Changes
+
+- f7249dc: Report permanent credential-lock filesystem failures immediately instead of waiting as though another process owns the lock.
+- a2c5cc2: Support numbered node kinds in paginated search results and document creating and updating automatically numbered items.
+
 ## 0.2.0
 
 ### Minor Changes
