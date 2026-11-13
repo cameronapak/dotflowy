@@ -1,25 +1,25 @@
 import type { ComponentProps, ReactElement } from "react";
 
 import { Avatar } from "@base-ui/react/avatar";
+import { useNavigate, useParams } from "@tanstack/react-router";
+
 import {
-  ArrowShrinkIcon,
-  ArrowExpandIcon,
-  Bookmark01Icon,
-  BubbleChatNotificationIcon,
-  CheckmarkCircle01Icon,
-  Copy01Icon,
-  File01Icon,
+  BookmarkIcon,
+  CircleCheckIcon,
+  CollapseIcon,
+  CopyIcon,
+  ExpandIcon,
+  FileIcon,
   FocusIcon,
-  Logout01Icon,
-  Settings01Icon,
-  Search01Icon,
+  LogoutIcon,
+  MessageWarningIcon,
+  SearchIcon,
+  SettingsIcon,
   ShieldCheckIcon,
-  SlidersHorizontalIcon,
+  SlidersIcon,
   SparklesIcon,
   UserIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+} from "@/lib/icons";
 
 import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { openFeedbackReport } from "../data/feedback";
@@ -51,8 +51,8 @@ import {
 } from "./ui/responsive-menu";
 
 /**
- * GitHub's brand glyph (Simple Icons). lucide-react dropped its Github icon, so
- * we inline the mark here -- fill-based (not lucide's stroke), currentColor, and
+ * GitHub's brand glyph (Simple Icons), preserved separately from UI icons.
+ * The mark is fill-based, currentColor, and
  * left unsized so the menu item's `[&_svg]:size-4` rule matches it to the rest.
  */
 function GitHubIcon() {
@@ -88,7 +88,7 @@ function ViewMenuItems() {
       </div>
       {mobile && (
         <DropdownMenuItem onAfterClose={openFilterInput}>
-          <HugeiconsIcon icon={Search01Icon} />
+          <SearchIcon />
           Filter this view
         </DropdownMenuItem>
       )}
@@ -97,27 +97,27 @@ function ViewMenuItems() {
           checked={current.bookmarkedAt != null}
           onCheckedChange={(checked) => toggleBookmark(current.id, checked)}
         >
-          <HugeiconsIcon icon={Bookmark01Icon} />
+          <BookmarkIcon />
           Bookmark this page
         </DropdownMenuCheckboxItem>
       )}
 
       <DropdownMenuItem onClick={() => setViewCollapsed(getViewRootId(), true)}>
-        <HugeiconsIcon icon={ArrowShrinkIcon} />
+        <CollapseIcon />
         Collapse all
       </DropdownMenuItem>
 
       <DropdownMenuItem
         onClick={() => setViewCollapsed(getViewRootId(), false)}
       >
-        <HugeiconsIcon icon={ArrowExpandIcon} />
+        <ExpandIcon />
         Expand all
       </DropdownMenuItem>
 
       <DropdownMenuItem
         onClick={() => void copyOutlineAsMarkdown(getViewRootId())}
       >
-        <HugeiconsIcon icon={Copy01Icon} />
+        <CopyIcon />
         Copy as Markdown
       </DropdownMenuItem>
 
@@ -133,7 +133,7 @@ function ViewMenuItems() {
         checked={showCompleted}
         onCheckedChange={setShowCompleted}
       >
-        <HugeiconsIcon icon={CheckmarkCircle01Icon} />
+        <CircleCheckIcon />
         Show completed
       </DropdownMenuCheckboxItem>
 
@@ -141,7 +141,7 @@ function ViewMenuItems() {
         checked={spotlight}
         onCheckedChange={setSpotlightEnabled}
       >
-        <HugeiconsIcon icon={FocusIcon} />
+        <FocusIcon />
         Spotlight mode
       </DropdownMenuCheckboxItem>
 
@@ -181,7 +181,7 @@ export function HeaderViewMenu() {
       <DropdownMenuTrigger
         render={
           <Button variant="ghost" size="icon-sm" title="View options">
-            <HugeiconsIcon icon={SlidersHorizontalIcon} />
+            <SlidersIcon />
             <span className="sr-only">View options</span>
           </Button>
         }
@@ -202,9 +202,7 @@ function AccountAvatar() {
       className="inline-flex size-6 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-medium text-muted-foreground"
     >
       <Avatar.Fallback className="flex size-full items-center justify-center">
-        {session?.user.email?.charAt(0).toUpperCase() || (
-          <HugeiconsIcon icon={UserIcon} />
-        )}
+        {session?.user.email?.charAt(0).toUpperCase() || <UserIcon />}
       </Avatar.Fallback>
       <Avatar.Image
         src={session?.user.image ?? undefined}
@@ -231,7 +229,7 @@ function AppMenuItems() {
             : void navigate({ to: "/settings", hash: "billing" })
         }
       >
-        <HugeiconsIcon icon={SparklesIcon} />
+        <SparklesIcon />
         {paid ? `${PLAN_LABELS[plan]} member` : "Membership"}
         {!paid && plan === "free" && (
           <span className="ml-auto text-xs text-muted-foreground">Free</span>
@@ -239,7 +237,7 @@ function AppMenuItems() {
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem onAfterClose={() => void navigate({ to: "/settings" })}>
-        <HugeiconsIcon icon={Settings01Icon} />
+        <SettingsIcon />
         Settings
       </DropdownMenuItem>
 
@@ -251,7 +249,7 @@ function AppMenuItems() {
         data-unseen={unseen > 0 ? "" : undefined}
         className={unseen > 0 ? "font-medium" : undefined}
       >
-        <HugeiconsIcon icon={SparklesIcon} />
+        <SparklesIcon />
         What's new
         {unseen > 0 && (
           // `text-primary-foreground!` is deliberate: the DropdownMenuItem's
@@ -266,7 +264,7 @@ function AppMenuItems() {
       </DropdownMenuItem>
 
       <DropdownMenuItem onAfterClose={() => openFeedbackReport()}>
-        <HugeiconsIcon icon={BubbleChatNotificationIcon} />
+        <MessageWarningIcon />
         {paid ? "Send feedback" : "Report a bug"}
       </DropdownMenuItem>
 
@@ -288,14 +286,14 @@ function AppMenuItems() {
       <DropdownMenuItem
         onClick={() => window.open("/terms", "_blank", "noopener,noreferrer")}
       >
-        <HugeiconsIcon icon={File01Icon} />
+        <FileIcon />
         Terms
       </DropdownMenuItem>
 
       <DropdownMenuItem
         onClick={() => window.open("/privacy", "_blank", "noopener,noreferrer")}
       >
-        <HugeiconsIcon icon={ShieldCheckIcon} />
+        <ShieldCheckIcon />
         Privacy Policy
       </DropdownMenuItem>
 
@@ -305,7 +303,7 @@ function AppMenuItems() {
         variant="destructive"
         onClick={() => signOutAndReload()}
       >
-        <HugeiconsIcon icon={Logout01Icon} />
+        <LogoutIcon />
         Sign out
       </DropdownMenuItem>
     </>

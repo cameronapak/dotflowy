@@ -85,6 +85,22 @@ over a quote bar; quote marker editing still takes keyboard precedence.
 
 Add a new side-collection to `KV_COLLECTIONS` in `worker/index.ts`. The e2e kv mock accepts any name.
 
+## Icons
+
+App UI and plugin icons come from `src/lib/icons.tsx`: free Hugeicons Stroke
+Rounded artwork, rendered at its default 1.5 stroke. The shared module binds icon
+data to components once, so command and plugin contracts still accept ordinary
+components. Use those exports rather than new per-plugin wrappers or stroke
+adjustments. Sizes and hitboxes remain owned by their existing surfaces.
+
+`components.json` selects Hugeicons for new shadcn components. Route generated
+icons through the shared module and remove any generated `strokeWidth={2}`.
+The two text-free CSS masks in `src/styles.css` use the matching Hugeicons pencil
+and highlighter paths at 1.5; masks keep token markup and caret offsets unchanged.
+Brand marks and the live Focus progress pie are not UI-library icons. The
+separate landing package is outside this app convention. License notices live
+in [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
+
 ## Optional editor features
 
 Settings → Plugins controls Bible references, Daily notes, Embeds, and Focus

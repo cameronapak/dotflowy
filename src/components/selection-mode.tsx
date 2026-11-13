@@ -1,11 +1,5 @@
 import { Menu } from "@base-ui/react/menu";
 import {
-  ClipboardCopyIcon,
-  CopyPlusIcon,
-  CornerUpRightIcon,
-  Trash2Icon,
-} from "lucide-react";
-import {
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -14,6 +8,8 @@ import {
   type RefObject,
 } from "react";
 import { toast } from "sonner";
+
+import { CopyIcon, CopyPlusIcon, ForwardIcon, TrashIcon } from "@/lib/icons";
 
 import type { CommandSpec, PluginContext } from "../plugins/types";
 import type { MenuListItem } from "./slash-menu-list";
@@ -665,14 +661,14 @@ function buildItems(
       id: "sel-copy",
       label: "Copy as Markdown",
       description: "Copy the selected nodes",
-      icon: ClipboardCopyIcon,
+      icon: CopyIcon,
       run: ops.copy,
     },
     {
       id: "sel-move",
       label: "Move",
       description: "Move the selection under another node",
-      icon: CornerUpRightIcon,
+      icon: ForwardIcon,
       run: ops.move,
     },
   ];
@@ -713,7 +709,7 @@ function buildItems(
     id: "sel-delete",
     label: "Delete",
     description: "Delete the selected nodes",
-    icon: Trash2Icon,
+    icon: TrashIcon,
     run: ops.remove,
   };
   return [...core, ...pluginItems, del];

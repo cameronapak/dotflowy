@@ -15,7 +15,7 @@
 // carry-forward are core editor behavior too (`quote-marker.ts`, the row
 // keymap, and `OutlineEditor`'s `onEnter`).
 
-import { TextQuoteIcon } from "lucide-react";
+import { TextQuoteIcon } from "@/lib/icons";
 
 import {
   decorate,

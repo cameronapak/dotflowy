@@ -1,5 +1,4 @@
-import { FocusIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { StopwatchIcon } from "@/lib/icons";
 
 import { getNodeActionBridge } from "../../data/command-bridge";
 import {
@@ -59,10 +58,6 @@ subscribeEditorFeatures(() => {
   });
 });
 
-function FocusSessionIcon({ className }: { className?: string }) {
-  return <HugeiconsIcon icon={FocusIcon} className={className} />;
-}
-
 export default definePlugin({
   id: "focus",
   commands: [
@@ -70,7 +65,7 @@ export default definePlugin({
       id: "focus",
       label: "Focus session…",
       description: "Choose time to work on this node",
-      icon: FocusSessionIcon,
+      icon: StopwatchIcon,
       keywords: ["focus", "session", "pomodoro", "timer"],
       available: () => true,
       run: (id, ctx) => openFocusPicker(id, ctx),
@@ -86,7 +81,7 @@ export default definePlugin({
         label: "Focus on this page…",
         menuLabel: "Focus on this page…",
         description: "Choose time to work on this page",
-        icon: FocusSessionIcon,
+        icon: StopwatchIcon,
         available: (rootId) => rootId !== null,
         run: (id) => {
           const bridge = getNodeActionBridge();
@@ -105,7 +100,7 @@ export default definePlugin({
             ? `Pause focus sound (${label})`
             : `Play focus sound (${label})`,
           description: "Ambient sound while you focus",
-          icon: FocusSessionIcon,
+          icon: StopwatchIcon,
           keywords: ["sound", "ambient", "noise", "music", "mute"],
           run: toggleAmbience,
         },
@@ -114,7 +109,7 @@ export default definePlugin({
             id: `sound-${option.id}`,
             label: `Focus sound: ${option.label}`,
             description: "Play while you focus",
-            icon: FocusSessionIcon,
+            icon: StopwatchIcon,
             keywords: ["sound", "ambient", "noise"],
             run: () => playAmbience(option.id),
           }),
@@ -127,7 +122,7 @@ export default definePlugin({
           id: "return",
           label: "Return to focus session",
           description: "Go back to the node you chose",
-          icon: FocusSessionIcon,
+          icon: StopwatchIcon,
           run: returnToFocus,
         },
         {
@@ -135,7 +130,7 @@ export default definePlugin({
           label: "End focus session",
           menuLabel: "End focus session",
           description: "Let go and optionally reflect",
-          icon: FocusSessionIcon,
+          icon: StopwatchIcon,
           run: () => endSession(false),
         },
       );

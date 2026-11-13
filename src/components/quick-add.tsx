@@ -41,13 +41,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { Cause, Effect } from "effect";
 import Fuse from "fuse.js";
 import {
-  ChevronDownIcon,
-  CornerDownLeftIcon,
-  HomeIcon,
-  PlusIcon,
-  SunIcon,
-} from "lucide-react";
-import {
   forwardRef,
   Fragment,
   type CSSProperties,
@@ -64,6 +57,13 @@ import {
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
 
+import {
+  ChevronDownIcon,
+  EnterIcon,
+  HomeIcon,
+  PlusIcon,
+  SunIcon,
+} from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -625,7 +625,7 @@ function SessionCaptureRow({
   const text = node.text.trim() || "Untitled";
   return (
     <li className="group flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted">
-      <CornerDownLeftIcon className="size-3.5 shrink-0 text-muted-foreground/60" />
+      <EnterIcon className="size-3.5 shrink-0 text-muted-foreground/60" />
       <span className="min-w-0 flex-1 truncate">{text}</span>
       <DestinationButton
         index={index}

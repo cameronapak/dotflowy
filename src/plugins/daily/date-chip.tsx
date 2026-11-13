@@ -12,8 +12,7 @@
 // `contenteditable="false"`: the caret jumps over it, backspace deletes the
 // whole token, copy reads back `data-src`.
 
-import { SunIcon } from "lucide-react";
-
+import { SunIcon } from "@/lib/icons";
 import { Badge } from "@/plugins/kit";
 
 import type { WidgetProps } from "../types";

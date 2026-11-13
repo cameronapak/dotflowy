@@ -1,5 +1,3 @@
-import { LinkSquare02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Duration, Effect, Schema } from "effect";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -10,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+
+import { EmbedIcon } from "@/lib/icons";
 
 import type { Node } from "../../data/schema";
 import type { PluginContext } from "../types";
@@ -44,10 +44,6 @@ import {
 import { cancelNodeUnfurl, unfurlNodeLinks } from "../links/unfurl";
 import { definePlugin } from "../types";
 import { requestPermission } from "./permission";
-
-function EmbedIcon({ className }: { className?: string }) {
-  return <HugeiconsIcon icon={LinkSquare02Icon} className={className} />;
-}
 
 interface XWidgets {
   widgets: {

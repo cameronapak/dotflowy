@@ -4,14 +4,6 @@ import {
   SiCursor,
 } from "@icons-pack/react-simple-icons";
 import {
-  BotIcon,
-  CheckIcon,
-  CopyIcon,
-  ExternalLinkIcon,
-  PuzzleIcon,
-  SquareCodeIcon,
-} from "lucide-react";
-import {
   useLayoutEffect,
   useRef,
   useState,
@@ -19,6 +11,15 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+
+import {
+  BotIcon,
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  PuzzleIcon,
+  SourceCodeIcon,
+} from "@/lib/icons";
 
 import { hasBtoa, hasWindow } from "../env";
 import { useIsMobile } from "../hooks/use-mobile";
@@ -140,7 +141,7 @@ function DeeplinkButton({ href, label }: { href: string; label: string }) {
 interface Client {
   id: string;
   name: string;
-  // Lucide icons and simple-icons brand icons both render an <svg> that inherits
+  // Hugeicons and Simple Icons brand marks both render an <svg> that inherits
   // size (tab CSS) and currentColor -- so they stay monochrome with the rail.
   icon: ComponentType<{ className?: string }>;
   content: ReactNode;
@@ -210,7 +211,7 @@ const CLIENTS: Client[] = [
   {
     id: "vscode",
     name: "VS Code",
-    icon: SquareCodeIcon,
+    icon: SourceCodeIcon,
     content: (
       <>
         <p className="text-sm text-muted-foreground">

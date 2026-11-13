@@ -1,14 +1,14 @@
+import { createElement, useState } from "react";
+
 import {
-  ArrowDown01Icon,
-  AudioWave01Icon,
-  CheckmarkCircle01Icon,
-  Clock01Icon,
-  CloudLittleRainIcon,
-  VolumeHighIcon,
+  AudioWaveIcon,
+  ChevronDownIcon,
+  CircleCheckIcon,
+  ClockIcon,
+  RainIcon,
+  VolumeIcon,
   VolumeOffIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
+} from "@/lib/icons";
 
 import { cn } from "../../lib/utils";
 import {
@@ -28,15 +28,16 @@ import {
 } from "./ambience";
 
 export const SOUND_ICON = {
-  tick: Clock01Icon,
-  rain: CloudLittleRainIcon,
-  brown: AudioWave01Icon,
-} satisfies Record<SoundId, typeof Clock01Icon>;
+  tick: ClockIcon,
+  rain: RainIcon,
+  brown: AudioWaveIcon,
+} satisfies Record<SoundId, typeof ClockIcon>;
 const labelOf = (id: SoundId) => SOUNDS.find((s) => s.id === id)!.label;
 
 /** One press plays or pauses; the name says what will play. */
 function PlayButton({ ghost, compact }: { ghost?: string; compact: boolean }) {
   const { sound, on } = useAmbience();
+  const SoundIcon = on ? SOUND_ICON[sound] : VolumeOffIcon;
   return (
     <Button
       size={compact ? "icon-sm" : "sm"}
@@ -47,10 +48,7 @@ function PlayButton({ ghost, compact }: { ghost?: string; compact: boolean }) {
       title={on ? `Pause ${labelOf(sound)}` : `Play ${labelOf(sound)}`}
       onClick={toggleAmbience}
     >
-      <HugeiconsIcon
-        icon={on ? SOUND_ICON[sound] : VolumeOffIcon}
-        data-icon={compact ? undefined : "inline-start"}
-      />
+      <SoundIcon data-icon={compact ? undefined : "inline-start"} />
       {!compact && <span className="max-sm:hidden">{labelOf(sound)}</span>}
     </Button>
   );
@@ -60,7 +58,7 @@ function VolumeSlider({ className }: { className?: string }) {
   const { volume } = useAmbience();
   return (
     <label className={cn("flex items-center gap-2", className)}>
-      <HugeiconsIcon icon={VolumeHighIcon} className="size-4 opacity-70" />
+      <VolumeIcon className="size-4 opacity-70" />
       <span className="sr-only">Focus sound volume</span>
       <input
         type="range"
@@ -93,7 +91,7 @@ export function BandSoundControl({ ghost }: { ghost?: string }) {
             "w-5",
           )}
         >
-          <HugeiconsIcon icon={ArrowDown01Icon} />
+          <ChevronDownIcon />
         </ResponsivePopoverTrigger>
         <ResponsivePopoverContent
           align="end"
@@ -108,13 +106,10 @@ export function BandSoundControl({ ghost }: { ghost?: string }) {
               className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
               onClick={() => playAmbience(option.id)}
             >
-              <HugeiconsIcon icon={SOUND_ICON[option.id]} className="size-4" />
+              {createElement(SOUND_ICON[option.id], { className: "size-4" })}
               <span className="flex-1">{option.label}</span>
               {sound === option.id && on && (
-                <HugeiconsIcon
-                  icon={CheckmarkCircle01Icon}
-                  className="size-4 text-muted-foreground"
-                />
+                <CircleCheckIcon className="size-4 text-muted-foreground" />
               )}
             </button>
           ))}

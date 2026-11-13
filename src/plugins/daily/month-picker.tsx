@@ -2,9 +2,9 @@
 // Purpose-built — no react-day-picker. Day pick → seed-free goToDate.
 
 import { Effect } from "effect";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { ChevronLeftIcon, ChevronRightIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import {
   ResponsivePopover as Popover,
@@ -94,7 +94,7 @@ export function MonthPickerButton({
               if (next) setViewMonth(next);
             }}
           >
-            <ChevronLeft className="size-4" />
+            <ChevronLeftIcon className="size-4" />
           </button>
           <div className="min-w-0 flex-1 truncate text-center text-xs font-medium">
             {viewLabel}
@@ -109,7 +109,7 @@ export function MonthPickerButton({
               if (next) setViewMonth(next);
             }}
           >
-            <ChevronRight className="size-4" />
+            <ChevronRightIcon className="size-4" />
           </button>
         </div>
         <div className="mb-1 grid grid-cols-7 gap-0.5">

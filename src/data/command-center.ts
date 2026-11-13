@@ -1,17 +1,17 @@
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  ChevronsDownUpIcon,
-  ChevronsUpDownIcon,
   CircleCheckIcon,
   CircleIcon,
+  CollapseIcon,
+  ExpandIcon,
   GitForkIcon,
-  IndentDecreaseIcon,
-  IndentIncreaseIcon,
+  IndentIcon,
   MaximizeIcon,
   MoveIcon,
-  Trash2Icon,
-} from "lucide-react";
+  OutdentIcon,
+  TrashIcon,
+} from "@/lib/icons";
 
 import type { CommandSpec } from "../plugins/types";
 import type { NodeActionBridge } from "./command-bridge";
@@ -80,7 +80,7 @@ export function buildNodeVerbActions(
       id: "node:indent",
       label: "Indent",
       description: "Nest under the previous sibling",
-      icon: IndentIncreaseIcon,
+      icon: IndentIcon,
       scope: "node",
       keywords: ["indent", "nest", "demote"],
       hotkey: ["Tab"],
@@ -93,7 +93,7 @@ export function buildNodeVerbActions(
       id: "node:outdent",
       label: "Outdent",
       description: "Lift out to the parent's level",
-      icon: IndentDecreaseIcon,
+      icon: OutdentIcon,
       scope: "node",
       keywords: ["outdent", "unnest", "promote"],
       hotkey: ["⇧", "Tab"],
@@ -151,7 +151,7 @@ export function buildNodeVerbActions(
       description: node.collapsed
         ? "Show this bullet's children"
         : "Hide this bullet's children",
-      icon: node.collapsed ? ChevronsUpDownIcon : ChevronsDownUpIcon,
+      icon: node.collapsed ? ExpandIcon : CollapseIcon,
       scope: "node",
       keywords: ["collapse", "expand", "fold", "unfold"],
       run: () => {
@@ -197,7 +197,7 @@ export function buildNodeVerbActions(
     id: "node:delete",
     label: "Delete",
     description: "Delete this bullet and its subtree",
-    icon: Trash2Icon,
+    icon: TrashIcon,
     scope: "node",
     keywords: ["delete", "remove", "trash"],
     run: () => commands.onDeleteNode(id),

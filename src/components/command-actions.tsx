@@ -1,29 +1,30 @@
 import { useParams } from "@tanstack/react-router";
+import { useMemo } from "react";
+
 import {
-  ALargeSmallIcon,
   BookmarkIcon,
-  ChevronsDownUpIcon,
-  ChevronsUpDownIcon,
   CircleCheckIcon,
-  ClipboardCopyIcon,
+  CollapseIcon,
+  CopyIcon,
   DownloadIcon,
+  ExpandIcon,
   ExternalLinkIcon,
-  FileUpIcon,
+  FileUploadIcon,
   FilterIcon,
   FocusIcon,
-  LogOutIcon,
-  MessageSquareWarningIcon,
+  LogoutIcon,
+  MessageWarningIcon,
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
-  PlugZapIcon,
+  PlugIcon,
   PlusIcon,
-  Undo2Icon,
-  Redo2Icon,
+  RedoIcon,
   SparklesIcon,
   SunIcon,
-} from "lucide-react";
-import { useMemo } from "react";
+  TextSizeIcon,
+  UndoIcon,
+} from "@/lib/icons";
 
 import type { CommandCenterAction } from "../data/command-center";
 
@@ -91,7 +92,7 @@ export function useGlobalActions(opts: {
         id: "g:undo",
         label: history.undoLabel,
         description: "Undo your last outline edit",
-        icon: Undo2Icon,
+        icon: UndoIcon,
         scope: "global",
         keywords: ["undo", "history"],
         hotkey: ["⌘", "Z"],
@@ -102,7 +103,7 @@ export function useGlobalActions(opts: {
         id: "g:redo",
         label: history.redoLabel,
         description: "Redo your last undone edit",
-        icon: Redo2Icon,
+        icon: RedoIcon,
         scope: "global",
         keywords: ["redo", "history"],
         hotkey: ["⌘", "⇧", "Z"],
@@ -132,7 +133,7 @@ export function useGlobalActions(opts: {
         id: "g:copy-md",
         label: "Copy as Markdown",
         description: "Copy the current view as a markdown list",
-        icon: ClipboardCopyIcon,
+        icon: CopyIcon,
         scope: "global",
         keywords: ["copy", "markdown", "export", "clipboard"],
         run: () => {
@@ -143,7 +144,7 @@ export function useGlobalActions(opts: {
         id: "g:import-opml",
         label: "Import OPML…",
         description: "Import a Workflowy OPML export",
-        icon: FileUpIcon,
+        icon: FileUploadIcon,
         scope: "global",
         keywords: ["import", "opml", "workflowy", "migrate", "file"],
         run: () => openOpmlImport(),
@@ -161,7 +162,7 @@ export function useGlobalActions(opts: {
         id: "g:collapse-all",
         label: "Collapse all",
         description: "Fold every bullet in the current view",
-        icon: ChevronsDownUpIcon,
+        icon: CollapseIcon,
         scope: "global",
         keywords: ["collapse", "fold", "all"],
         run: () => setViewCollapsed(getViewRootId(), true),
@@ -170,7 +171,7 @@ export function useGlobalActions(opts: {
         id: "g:expand-all",
         label: "Expand all",
         description: "Unfold every bullet in the current view",
-        icon: ChevronsUpDownIcon,
+        icon: ExpandIcon,
         scope: "global",
         keywords: ["expand", "unfold", "all"],
         run: () => setViewCollapsed(getViewRootId(), false),
@@ -293,7 +294,7 @@ export function useGlobalActions(opts: {
           textSize === s
             ? "Current text size"
             : `Use ${label.toLowerCase()} text`,
-        icon: ALargeSmallIcon,
+        icon: TextSizeIcon,
         scope: "global",
         keywords: ["text", "size", "font", "zoom", s],
         run: () => setTextSize(s),
@@ -308,7 +309,7 @@ export function useGlobalActions(opts: {
           ? "Connect an AI agent to your outline"
           : "Included with Pro",
         disabled: membershipState !== "ready",
-        icon: PlugZapIcon,
+        icon: PlugIcon,
         scope: "global",
         keywords: ["mcp", "connect", "apps", "agent", "ai", "claude"],
         run: () => (paid ? openConnect() : openMembership("connections")),
@@ -326,7 +327,7 @@ export function useGlobalActions(opts: {
         id: "g:feedback",
         label: paid ? "Send feedback" : "Report a bug",
         description: "Send a private note to Cam without leaving Dotflowy",
-        icon: MessageSquareWarningIcon,
+        icon: MessageWarningIcon,
         scope: "global",
         keywords: ["feedback", "bug", "report", "issue", "problem", "github"],
         run: () => openFeedbackReport(),
@@ -349,7 +350,7 @@ export function useGlobalActions(opts: {
         id: "g:signout",
         label: "Sign out",
         description: "Sign out of your account",
-        icon: LogOutIcon,
+        icon: LogoutIcon,
         scope: "global",
         keywords: ["sign out", "logout", "log out", "exit"],
         run: () => {

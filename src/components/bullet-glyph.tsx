@@ -1,4 +1,4 @@
-import { AlignLeftIcon } from "lucide-react";
+import { AlignLeftIcon } from "@/lib/icons";
 
 import type { NodeKind } from "../data/schema";
 
@@ -64,7 +64,7 @@ export function BulletGlyph({
         data-collapsed={collapsed}
         aria-hidden="true"
       >
-        <AlignLeftIcon size={14} strokeWidth={2.25} />
+        <AlignLeftIcon size={14} />
       </span>
     );
   }
@@ -107,7 +107,7 @@ export function TitleGlyph({
   if (kind !== "paragraph") return null;
   return (
     <span className="title-paragraph" aria-hidden="true">
-      <AlignLeftIcon size={18} strokeWidth={2.25} />
+      <AlignLeftIcon size={18} />
     </span>
   );
 }

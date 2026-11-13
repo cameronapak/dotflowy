@@ -1,6 +1,6 @@
-import { Tick02Icon, Loading03Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
+
+import { CheckIcon, LoaderIcon } from "@/lib/icons";
 
 import { startCheckout } from "../data/membership";
 import { COLOR_THEMES, useColorThemePreview } from "./color-theme";
@@ -79,10 +79,7 @@ export function MembershipDialog() {
             "Send ideas and feedback straight to Cam",
           ].map((benefit) => (
             <li key={benefit} className="flex items-start gap-2">
-              <HugeiconsIcon
-                icon={Tick02Icon}
-                className="mt-0.5 size-4 shrink-0 text-primary-ink"
-              />
+              <CheckIcon className="mt-0.5 size-4 shrink-0 text-primary-ink" />
               {benefit}
             </li>
           ))}
@@ -130,9 +127,7 @@ export function MembershipDialog() {
             Not now
           </Button>
           <Button disabled={busy} onClick={() => void checkout()}>
-            {busy && (
-              <HugeiconsIcon icon={Loading03Icon} className="animate-spin" />
-            )}
+            {busy && <LoaderIcon className="animate-spin" />}
             Continue to checkout
           </Button>
         </DialogFooter>

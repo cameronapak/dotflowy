@@ -1,6 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch } from "fuse.js";
-import { BookmarkIcon, HomeIcon } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -10,6 +9,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import { BookmarkIcon, HomeIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 import { capture } from "../data/history";

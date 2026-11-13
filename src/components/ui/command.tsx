@@ -1,7 +1,6 @@
 "use client";
 
 import { Command as CommandPrimitive } from "cmdk";
-import { SearchIcon, CheckIcon } from "lucide-react";
 import * as React from "react";
 
 import {
@@ -13,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon } from "@/components/ui/input-group";
 import { useKeyboardViewport } from "@/hooks/use-keyboard-viewport";
+import { CheckIcon, SearchIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 function Command({

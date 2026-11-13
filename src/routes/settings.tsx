@@ -1,28 +1,26 @@
-import {
-  Key01Icon,
-  SmartPhone01Icon,
-  TerminalIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { useState, type ReactNode } from "react";
+import { toast } from "sonner";
+
 import {
   ArrowLeftIcon,
   CheckIcon,
-  ClipboardCopyIcon,
+  CopyIcon,
   DownloadIcon,
-  FileUpIcon,
-  Link2Icon,
-  Loader2Icon,
-  LogOutIcon,
+  FileUploadIcon,
+  KeyIcon,
+  LinkIcon,
+  LoaderIcon,
+  LogoutIcon,
   MonitorIcon,
   MoonIcon,
-  PlugZapIcon,
+  PlugIcon,
+  SmartphoneIcon,
   SunIcon,
-  Trash2Icon,
-} from "lucide-react";
-import { useState, type ReactNode } from "react";
-import { toast } from "sonner";
+  TerminalIcon,
+  TrashIcon,
+} from "@/lib/icons";
 
 import { openAppleShortcut } from "../components/apple-shortcut-opener";
 import { ApiKeysDialog } from "../components/capture-keys-dialog";
@@ -321,7 +319,7 @@ function UpgradeCard({
         onClick={onUpgrade}
         disabled={busy}
       >
-        {busy && <Loader2Icon className="animate-spin" />}
+        {busy && <LoaderIcon className="animate-spin" />}
         {cta}
       </Button>
     </div>
@@ -384,7 +382,7 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
   if (state === "loading") {
     return (
       <div className="flex items-center gap-2 rounded-xl bg-card px-4 py-6 text-sm text-muted-foreground ring-1 ring-foreground/10">
-        <Loader2Icon className="size-4 animate-spin" />
+        <LoaderIcon className="size-4 animate-spin" />
         Loading your plan…
       </div>
     );
@@ -445,7 +443,7 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
               onClick={() => void manageBilling()}
               disabled={busy}
             >
-              {busy && <Loader2Icon className="animate-spin" />}
+              {busy && <LoaderIcon className="animate-spin" />}
               Manage billing
             </Button>
           )}
@@ -539,7 +537,7 @@ function AccountSection() {
           description="Add Google sign-in to this account."
           action={
             <Button variant="outline" size="sm" onClick={() => connectGoogle()}>
-              <Link2Icon />
+              <LinkIcon />
               Connect
             </Button>
           }
@@ -552,7 +550,7 @@ function AccountSection() {
               size="sm"
               onClick={() => signOutAndReload()}
             >
-              <LogOutIcon />
+              <LogoutIcon />
               Sign out
             </Button>
           }
@@ -566,7 +564,7 @@ function AccountSection() {
               size="sm"
               onClick={() => setDeleteOpen(true)}
             >
-              <Trash2Icon />
+              <TrashIcon />
               Delete
             </Button>
           }
@@ -592,7 +590,7 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
     >
       <RowGroup>
         <SettingRow
-          icon={<PlugZapIcon />}
+          icon={<PlugIcon />}
           title={
             <span className="flex flex-wrap items-center gap-2">
               Connect apps (MCP)
@@ -618,7 +616,7 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
           }
         />
         <SettingRow
-          icon={<HugeiconsIcon icon={TerminalIcon} />}
+          icon={<TerminalIcon />}
           title={
             <span className="flex flex-wrap items-center gap-2">
               Command line (CLI)
@@ -648,7 +646,7 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
         />
         <div id="capture-keys" className="scroll-mt-20">
           <SettingRow
-            icon={<HugeiconsIcon icon={Key01Icon} />}
+            icon={<KeyIcon />}
             title="API keys"
             description="Personal keys for shortcuts, MCP, and the CLI. Choose capture-only, read-only, or read and write access."
             action={
@@ -663,7 +661,7 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
           />
         </div>
         <SettingRow
-          icon={<HugeiconsIcon icon={SmartPhone01Icon} />}
+          icon={<SmartphoneIcon />}
           title="Apple Shortcut"
           description="Send text and links from other apps to today's note with the share sheet on iPhone or Mac. Available on every plan."
           action={
@@ -700,7 +698,7 @@ function DataSection() {
     >
       <RowGroup>
         <SettingRow
-          icon={<FileUpIcon />}
+          icon={<FileUploadIcon />}
           title="Import OPML"
           description="Bring in a Workflowy (or other) OPML export."
           action={
@@ -728,7 +726,7 @@ function DataSection() {
           }
         />
         <SettingRow
-          icon={<ClipboardCopyIcon />}
+          icon={<CopyIcon />}
           title="Copy as Markdown"
           description="Copy your entire outline as a markdown list."
           action={
@@ -773,7 +771,7 @@ function DailyNotesOptions() {
       >
         <span aria-live="polite" className="contents">
           {preferences.weekStartSaving ? (
-            <Loader2Icon
+            <LoaderIcon
               className="size-4 animate-spin text-muted-foreground"
               aria-label="Reorganizing Daily calendar"
             />

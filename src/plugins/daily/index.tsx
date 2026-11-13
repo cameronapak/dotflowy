@@ -18,19 +18,17 @@
 // -- NOT routed through `NodeCommands`, whose capture/pending-focus semantics are
 // editor-edit concerns a get-or-create that navigates away doesn't want.
 
-import { Calendar03Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { Effect } from "effect";
-import {
-  CalendarArrowDownIcon,
-  CalendarDaysIcon,
-  CalendarPlusIcon,
-  Loader2Icon,
-  SunIcon,
-} from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  CalendarAddIcon,
+  CalendarArrowDownIcon,
+  CalendarIcon,
+  LoaderIcon,
+  SunIcon,
+} from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { Badge, Button } from "@/plugins/kit";
 
@@ -114,7 +112,7 @@ function scaffoldProtection(
 ): NodeProtection {
   return {
     indicator: {
-      icon: CalendarDaysIcon,
+      icon: CalendarIcon,
       label: "Protected Daily scaffold",
     },
     reason: `This ${noun} groups your daily notes and can't be deleted.`,
@@ -239,11 +237,7 @@ function TodayButton({ getCtx }: { getCtx: () => PluginContext }) {
       data-daily-nav-pending={pending ? "" : undefined}
       onClick={() => openToday(getCtx, navigate)}
     >
-      {pending ? (
-        <Loader2Icon className="animate-spin" />
-      ) : (
-        <CalendarDaysIcon />
-      )}
+      {pending ? <LoaderIcon className="animate-spin" /> : <CalendarIcon />}
       <span className="sr-only">Today&apos;s daily note</span>
     </Button>
   );
@@ -392,7 +386,7 @@ export default definePlugin({
       mobileTab: {
         label: "Today",
         href: "/today",
-        icon: <HugeiconsIcon icon={Calendar03Icon} aria-hidden="true" />,
+        icon: <CalendarIcon aria-hidden="true" />,
         onSelect: openToday,
         isActive: (rootId, sectionKey) =>
           rootId !== null &&
@@ -516,7 +510,7 @@ export default definePlugin({
       id: "mirror-to-today",
       label: "Mirror to Today",
       description: "Show a live copy under today's daily note",
-      icon: CalendarPlusIcon,
+      icon: CalendarAddIcon,
       keywords: ["today", "daily", "mirror", "synced"],
       available: () => isMirrorsEnabled(),
       run: async (nodeId, ctx) => {
@@ -580,7 +574,7 @@ export default definePlugin({
       case "container":
         return {
           indicator: {
-            icon: CalendarDaysIcon,
+            icon: CalendarIcon,
             label: "Protected Daily scaffold",
           },
           reason:
@@ -718,7 +712,7 @@ export default definePlugin({
             : isToday
               ? "Creates today's daily note"
               : "Creates this daily note",
-          icon: CalendarDaysIcon,
+          icon: CalendarIcon,
           run: () => {
             if (isScaffold) {
               void getOrCreateScaffold(hit.key, {

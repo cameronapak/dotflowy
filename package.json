@@ -90,7 +90,6 @@
     "effect": "4.0.0",
     "fuse.js": "^7.5.0",
     "grab-bcv": "^0.1.8",
-    "lucide-react": "^1.46.0",
     "motion": "^13.3.0",
     "react": "^19.3.0",
     "react-aria-components": "1.22.0",

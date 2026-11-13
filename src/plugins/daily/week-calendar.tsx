@@ -17,7 +17,6 @@
 
 import { useParams } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import {
   useLayoutEffect,
@@ -27,6 +26,7 @@ import {
   type CSSProperties,
 } from "react";
 
+import { ChevronLeftIcon, ChevronRightIcon, RefreshIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 import type { PluginContext } from "../types";
@@ -172,7 +172,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
             setOffset((o) => o - 1);
           }}
         >
-          <ChevronLeft className="size-4" />
+          <ChevronLeftIcon className="size-4" />
         </button>
         <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
           {monthKey ? (
@@ -208,7 +208,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
                 setOffset(0);
               }}
             >
-              <RotateCcw className="size-3" />
+              <RefreshIcon className="size-3" />
               This week
             </button>
           ) : null}
@@ -222,7 +222,7 @@ export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
             setOffset((o) => o + 1);
           }}
         >
-          <ChevronRight className="size-4" />
+          <ChevronRightIcon className="size-4" />
         </button>
       </div>
 

@@ -18,7 +18,7 @@
 // Seams contributed: A (folding token), B (pen-click + right-click recolor),
 // C (slash command), D (keymap).
 
-import { HighlighterIcon } from "lucide-react";
+import { HighlighterIcon } from "@/lib/icons";
 
 import { readSource } from "../../components/inline-code";
 import { wrapSelectionOrInsert } from "../../components/wrap";

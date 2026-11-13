@@ -1,13 +1,14 @@
 "use client";
 
+import { Toaster as Sonner, type ToasterProps } from "sonner";
+
 import {
   CircleCheckIcon,
+  ErrorIcon,
   InfoIcon,
-  TriangleAlertIcon,
-  OctagonXIcon,
-  Loader2Icon,
-} from "lucide-react";
-import { Toaster as Sonner, type ToasterProps } from "sonner";
+  LoaderIcon,
+  WarningIcon,
+} from "@/lib/icons";
 
 import { useTheme } from "../theme-provider";
 
@@ -22,9 +23,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,
-        warning: <TriangleAlertIcon className="size-4" />,
-        error: <OctagonXIcon className="size-4" />,
-        loading: <Loader2Icon className="size-4 animate-spin" />,
+        warning: <WarningIcon className="size-4" />,
+        error: <ErrorIcon className="size-4" />,
+        loading: <LoaderIcon className="size-4 animate-spin" />,
       }}
       style={
         // SAFETY: CSS custom-property values React.CSSProperties does not type

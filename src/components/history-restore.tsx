@@ -1,8 +1,9 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { Data, Effect } from "effect";
-import { Loader2Icon } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+
+import { LoaderIcon } from "@/lib/icons";
 
 import { waitForPendingWritesE } from "../data/api";
 import { getAppliedSeq, resyncNodes, waitForSeqE } from "../data/collection";
@@ -502,7 +503,7 @@ export function HistoryRestoreDialog() {
             className="flex flex-col items-center gap-3 py-6"
             data-testid="history-restoring"
           >
-            <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+            <LoaderIcon className="size-6 animate-spin text-muted-foreground" />
             <DialogTitle>{stage.label}…</DialogTitle>
             <DialogDescription>
               {stage.applied < stage.total

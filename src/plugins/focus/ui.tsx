@@ -1,15 +1,15 @@
-import {
-  CheckmarkCircle01Icon,
-  Cancel01Icon,
-  PauseIcon,
-  PlayIcon,
-  PictureInPictureOnIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { toast } from "sonner";
+
+import {
+  CircleCheckIcon,
+  CloseIcon,
+  PauseIcon,
+  PictureInPictureIcon,
+  PlayIcon,
+} from "@/lib/icons";
 
 import type { Node } from "../../data/tree";
 
@@ -392,12 +392,7 @@ function FocusSurface({
             className={session.phase === "ready" ? outline : primary}
             onClick={() => endSession(true)}
           >
-            {task && (
-              <HugeiconsIcon
-                icon={CheckmarkCircle01Icon}
-                data-icon="inline-start"
-              />
-            )}
+            {task && <CircleCheckIcon data-icon="inline-start" />}
             Done
           </Button>
         )}
@@ -449,9 +444,7 @@ function FocusSurface({
                 )
               }
             >
-              <HugeiconsIcon
-                icon={session.pausedAt === null ? PauseIcon : PlayIcon}
-              />
+              {session.pausedAt === null ? <PauseIcon /> : <PlayIcon />}
             </Button>
             {!card && pipApi() && (
               <Button
@@ -465,7 +458,7 @@ function FocusSurface({
                   void popOut();
                 }}
               >
-                <HugeiconsIcon icon={PictureInPictureOnIcon} />
+                <PictureInPictureIcon />
               </Button>
             )}
           </>
@@ -478,7 +471,7 @@ function FocusSurface({
             aria-label="End focus session"
             onClick={() => endSession(false)}
           >
-            <HugeiconsIcon icon={Cancel01Icon} />
+            <CloseIcon />
           </Button>
         )}
       </>

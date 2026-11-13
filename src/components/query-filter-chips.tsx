@@ -1,6 +1,6 @@
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useRef, useState } from "react";
+
+import { ChevronDownIcon } from "@/lib/icons";
 
 import { tokenizeQuery } from "../data/filter-query";
 import { Button } from "./ui/button";
@@ -159,7 +159,7 @@ function QueryShortcut({
         }
       >
         {label}
-        <HugeiconsIcon icon={ArrowDown01Icon} data-icon="inline-end" />
+        <ChevronDownIcon data-icon="inline-end" />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         portalContainer={container ?? undefined}

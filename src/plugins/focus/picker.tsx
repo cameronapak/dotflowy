@@ -1,5 +1,4 @@
-import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
+import { createElement, useState } from "react";
 
 import type { PluginContext } from "../types";
 
@@ -180,7 +179,7 @@ function FocusPicker({ id, ctx }: { id: string; ctx: PluginContext }) {
                   value={option.id}
                   className={`${CHOICE} h-auto min-h-14 flex-col gap-1 px-1 py-2 text-center text-xs leading-tight whitespace-normal`}
                 >
-                  <HugeiconsIcon icon={SOUND_ICON[option.id]} />
+                  {createElement(SOUND_ICON[option.id])}
                   {option.label}
                 </ToggleGroupItem>
               ))}

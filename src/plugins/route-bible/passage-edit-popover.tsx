@@ -6,7 +6,6 @@ import {
   tryParsePassage,
   type OsisBookCode,
 } from "grab-bcv";
-import { ExternalLink } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -16,6 +15,8 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+
+import { ExternalLinkIcon } from "@/lib/icons";
 
 import type { NodeCommands } from "../../components/node-commands";
 import type { PluginContext } from "../types";
@@ -273,7 +274,7 @@ export function BiblePassageEditPopover({
           disabled={!normalized}
           onClick={openCurrent}
         >
-          <ExternalLink className="size-4" aria-hidden="true" />
+          <ExternalLinkIcon className="size-4" aria-hidden="true" />
         </Button>
       </div>
 

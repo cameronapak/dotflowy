@@ -1,13 +1,4 @@
 import {
-  ArrowDown01Icon,
-  ArrowLeft01Icon,
-  Home01Icon,
-  MoreHorizontalIcon,
-  PlusSignIcon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
   Button as GlassButton,
   Toolbar,
   ToolbarGroup,
@@ -19,6 +10,15 @@ import {
   type ComponentProps,
   type ReactNode,
 } from "react";
+
+import {
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  HomeIcon,
+  MoreIcon,
+  PlusIcon,
+  SearchIcon,
+} from "@/lib/icons";
 
 import type { HeaderSlotSpec, PluginContext } from "../plugins/types";
 
@@ -72,10 +72,6 @@ function Btn({
   );
 }
 
-const icon = (glyph: typeof Search01Icon) => (
-  <HugeiconsIcon icon={glyph} aria-hidden="true" />
-);
-
 /**
  * Narrow-screen header (ADR 0076): the zoomed page's way back on the leading
  * edge, then Search and More sharing one piece of glass, then Quick add as the
@@ -119,7 +115,7 @@ export default function MobileGlassHeader({
                     <Fragment key={slot.id}>{slot.render(getCtx)}</Fragment>
                   ))}
               <Btn
-                icon={icon(Search01Icon)}
+                icon={<SearchIcon />}
                 aria-label="Search"
                 onClick={() => openNodeSwitcher()}
               />
@@ -128,7 +124,7 @@ export default function MobileGlassHeader({
                   <Btn
                     icon={
                       <span className="glass-header-badge-host">
-                        {icon(MoreHorizontalIcon)}
+                        <MoreIcon />
                         {unseen > 0 && (
                           <span data-changelog-dot="" aria-hidden="true" />
                         )}
@@ -143,7 +139,7 @@ export default function MobileGlassHeader({
             </Group>
             <Btn
               variant="filled"
-              icon={icon(PlusSignIcon)}
+              icon={<PlusIcon />}
               aria-label="Quick add"
               onClick={openQuickAdd}
             />
@@ -170,7 +166,7 @@ function GlassBreadcrumb({
     <nav aria-label="Breadcrumb" className="glass-breadcrumb">
       <Group label="Breadcrumb">
         <Btn
-          icon={icon(ArrowLeft01Icon)}
+          icon={<ChevronLeftIcon />}
           className="glass-crumb"
           aria-label={`Back to ${parent?.label ?? "Home"}`}
           onClick={() => onNavigate(parent?.id ?? null)}
@@ -178,12 +174,12 @@ function GlassBreadcrumb({
           {parent ? (
             <span className="glass-crumb-label">{parent.label}</span>
           ) : (
-            icon(Home01Icon)
+            <HomeIcon />
           )}
         </Btn>
         {parent &&
           renderMenu(
-            <Btn icon={icon(ArrowDown01Icon)} aria-label="Show breadcrumbs" />,
+            <Btn icon={<ChevronDownIcon />} aria-label="Show breadcrumbs" />,
           )}
       </Group>
     </nav>

@@ -16,13 +16,6 @@ import {
 } from "@tanstack/react-virtual";
 import { Cause, Effect, Fiber, Predicate } from "effect";
 import {
-  ChevronRight,
-  HomeIcon,
-  LockIcon,
-  MoreHorizontal,
-  PlusIcon,
-} from "lucide-react";
-import {
   Fragment,
   memo,
   useCallback,
@@ -42,6 +35,14 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
+
+import {
+  ChevronRightIcon,
+  HomeIcon,
+  LockIcon,
+  MoreIcon,
+  PlusIcon,
+} from "@/lib/icons";
 
 import type { OutlineSearch } from "../data/tags";
 import type {
@@ -3941,7 +3942,7 @@ function Crumb({
 }) {
   return (
     <span className="crumb">
-      <ChevronRight className="sep" size={13} strokeWidth={2} />
+      <ChevronRightIcon className="sep" size={13} />
       <button
         type="button"
         className="crumb-link"
@@ -4010,7 +4011,7 @@ function CollapsedCrumbs({
               className="crumb-ellipsis"
               aria-label="Show hidden breadcrumbs"
             >
-              <MoreHorizontal size={14} strokeWidth={2} />
+              <MoreIcon size={14} />
             </button>
           )
         }
@@ -4045,7 +4046,7 @@ function CollapsedCrumbs({
   if (trigger) return menu;
   return (
     <span className="crumb crumb-collapsed">
-      <ChevronRight className="sep" size={13} strokeWidth={2} />
+      <ChevronRightIcon className="sep" size={13} />
       {menu}
     </span>
   );

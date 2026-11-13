@@ -1,7 +1,7 @@
-import { Ban } from "lucide-react";
 import { useRef } from "react";
 import { createPortal } from "react-dom";
 
+import { BanIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { Button } from "@/plugins/kit";
 
@@ -79,7 +79,7 @@ export function TagColorMenu({
           onClose();
         }}
       >
-        <Ban />
+        <BanIcon />
       </Button>
       {TAG_COLORS.map((color) => (
         <Button

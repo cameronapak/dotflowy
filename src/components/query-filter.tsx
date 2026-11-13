@@ -1,8 +1,5 @@
 import { autoUpdate } from "@floating-ui/react-dom";
-import { FilterIcon, Search01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { Pencil, Pin, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -14,6 +11,13 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import {
+  CloseIcon,
+  FilterIcon,
+  PencilIcon,
+  PinIcon,
+  SearchIcon,
+} from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 import type { ViewContext } from "../plugins/types";
@@ -141,7 +145,7 @@ export function QueryFilterEmptyState({ viewCtx }: { viewCtx: ViewContext }) {
         className="min-h-11 w-full md:w-fit"
         onClick={() => openNodeSwitcher({ query })}
       >
-        <HugeiconsIcon icon={Search01Icon} data-icon="inline-start" />
+        <SearchIcon data-icon="inline-start" />
         Find everywhere
         <Kbd className="ml-2 max-md:hidden">⌘K</Kbd>
       </Button>
@@ -268,7 +272,7 @@ export function FilterButton() {
       aria-label="Filter this view"
       aria-pressed={open}
     >
-      <HugeiconsIcon icon={FilterIcon} />
+      <FilterIcon />
       <span className="sr-only">Filter this view</span>
     </Button>
   );
@@ -445,7 +449,7 @@ function SavedQueriesSection({
                 onClick={() => startRename(row.id, row.name)}
                 className="text-muted-foreground"
               >
-                <Pencil />
+                <PencilIcon />
               </Button>
               <Button
                 type="button"
@@ -455,7 +459,7 @@ function SavedQueriesSection({
                 onClick={() => deleteSavedQuery(row.id)}
                 className="text-muted-foreground"
               >
-                <X />
+                <CloseIcon />
               </Button>
             </div>
           </div>
@@ -914,7 +918,7 @@ export function QueryFilterBar() {
           autoCapitalize="off"
         />
         <InputGroupAddon>
-          <HugeiconsIcon icon={FilterIcon} />
+          <FilterIcon />
         </InputGroupAddon>
         {showControls ? (
           <InputGroupAddon align="inline-end">
@@ -932,7 +936,7 @@ export function QueryFilterBar() {
               aria-pressed={isSaved}
               className={cn(isSaved ? "text-primary" : "text-muted-foreground")}
             >
-              <Pin className={cn(isSaved && "fill-current")} />
+              <PinIcon className={cn(isSaved && "fill-current")} />
             </Button>
             <Button
               type="button"
@@ -944,7 +948,7 @@ export function QueryFilterBar() {
               aria-label="Clear filter"
               className="text-muted-foreground"
             >
-              <X />
+              <CloseIcon />
             </Button>
           </InputGroupAddon>
         ) : null}
