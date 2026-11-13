@@ -94,6 +94,51 @@ test("a fresh account is seeded silently -- no badge for a release it never miss
   );
 });
 
+test("release notes fit narrow screens and keep older releases reachable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 314, height: 591 });
+  await load(page, cursor("0.1.0"));
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.keyboard.type("changelog");
+  await page.keyboard.press("Enter");
+  const popup = dialog(page);
+  await expect(popup).toBeVisible();
+
+  await expect(
+    popup.getByRole("complementary", { name: "About these updates" }),
+  ).toBeVisible();
+
+  for (const width of [314, 375, 390, 639, 640, 1280]) {
+    await page.setViewportSize({ width, height: 591 });
+    await expect
+      .poll(() =>
+        popup.evaluate((el) =>
+          [el, ...el.querySelectorAll<HTMLElement>(":not(.sr-only)")]
+            .filter((child) => child.scrollWidth > child.clientWidth + 1)
+            .map((child) => ({
+              tag: child.tagName,
+              text: child.textContent?.slice(0, 180),
+              client: child.clientWidth,
+              scroll: child.scrollWidth,
+            })),
+        ),
+      )
+      .toEqual([]);
+    const bounds = await popup.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(591);
+  }
+
+  await page.setViewportSize({ width: 314, height: 591 });
+  await page.getByTestId("changelog-release").last().scrollIntoViewIfNeeded();
+  await expect(page.getByTestId("changelog-release").last()).toBeInViewport();
+  await popup.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(popup).toBeHidden();
+});
+
 test("a caught-up account shows no badge, and does not re-seed", async ({
   page,
 }) => {
