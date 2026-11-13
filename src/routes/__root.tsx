@@ -74,7 +74,7 @@ const noFlashThemeScript = `
     var id = localStorage.getItem('${COLOR_THEME_KEY}');
     var c = id && Object.prototype.hasOwnProperty.call(colors, id) ? colors[id] : null;
     if (c) document.documentElement.classList.add('themed', 'theme-' + id);
-    var bg = c ? c.background[dark ? 1 : 0] : dark ? '#171717' : '#ffffff';
+    var bg = c ? c.background[dark ? 1 : 0] : dark ? '#171717' : '#f9f9f9';
     var metas = document.querySelectorAll('meta[name="theme-color"]');
     for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', bg);
   } catch (e) {}

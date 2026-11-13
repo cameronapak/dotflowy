@@ -58,7 +58,7 @@ export function NodeLinkChip({ source }: WidgetProps) {
 
   return (
     <span
-      className="inline-flex max-w-full cursor-pointer items-center gap-1 align-baseline text-[0.95em] font-medium text-primary-ink underline decoration-primary-ink/35 underline-offset-2 select-none hover:decoration-primary"
+      className="inline-flex max-w-full cursor-pointer items-center gap-1 align-baseline text-[0.95em] font-medium text-primary-ink underline decoration-primary-ink/35 underline-offset-2 select-none hover:decoration-primary-ink"
       title={title}
     >
       <Link2 className="size-[0.85em] shrink-0 opacity-80" aria-hidden="true" />

@@ -7,6 +7,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
 import {
+  peekEditorFeatures,
   setColorThemePreference,
   useEditorFeatures,
 } from "../data/editor-features";
@@ -65,13 +66,45 @@ function applyLocal(id: ColorThemeId) {
   for (const l of listeners) l();
 }
 
-/** Pick a theme: repaint now, then save it to the account. A failed save
- *  rolls the account row back, and {@link ColorThemeSync} repaints that. */
+// Saves in flight. While one runs, the local pick is newer than anything the
+// account snapshot shows, so adopting the snapshot would flash the old theme.
+let pendingSaves = 0;
+// The last theme the account reported. A row is never deleted, so once one
+// exists a missing row is a refetch in progress, not "back to default".
+let accountTheme: string | null = null;
+
+/** Repaint with the account's theme when it is known and nothing is saving. */
+function adoptAccountTheme() {
+  const { ready, colorTheme } = peekEditorFeatures();
+  if (!ready || pendingSaves > 0) return;
+  if (colorTheme === null && accountTheme !== null) return;
+  accountTheme = colorTheme;
+  const id = toColorThemeId(colorTheme);
+  if (id !== read()) applyLocal(id);
+}
+
+/** Pick a theme: repaint now, then save it to the account. */
 export function setColorTheme(id: ColorThemeId) {
+  const previous = read();
   applyLocal(id);
-  setColorThemePreference(id).catch(() =>
-    toast.error("Couldn't save your theme. Your previous theme was restored."),
-  );
+  pendingSaves += 1;
+  setColorThemePreference(id)
+    .then(() => {
+      accountTheme = id;
+    })
+    .catch(() => {
+      // A failed write rolls the account row back, and adopting it below
+      // repaints. A failed account load wrote nothing to roll back, so the
+      // previous theme comes back here.
+      if (!peekEditorFeatures().ready) applyLocal(previous);
+      toast.error(
+        "Couldn't save your theme. Your previous theme was restored.",
+      );
+    })
+    .finally(() => {
+      pendingSaves -= 1;
+      adoptAccountTheme();
+    });
 }
 
 /**
@@ -81,11 +114,7 @@ export function setColorTheme(id: ColorThemeId) {
  */
 export function ColorThemeSync() {
   const { colorTheme, ready } = useEditorFeatures();
-  useEffect(() => {
-    if (!ready) return;
-    const id = toColorThemeId(colorTheme);
-    if (id !== read()) applyLocal(id);
-  }, [ready, colorTheme]);
+  useEffect(adoptAccountTheme, [ready, colorTheme]);
   return null;
 }
 

@@ -70,7 +70,8 @@
   --muted-foreground: oklch(0.55 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  /* 0.56, not shadcn's 0.577: 4.5:1 on this background (ADR 0082). */
+  --destructive: oklch(0.56 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -372,6 +373,14 @@
   );
   --muted-l-min: 0;
   --muted-l-max: 0.5;
+  /* Destructive menu items and buttons are text and faint tints, so the
+     theme's red keeps its hue at a readable lightness, like tag ink. */
+  --destructive: oklch(
+    from var(--destructive-raw)
+      clamp(var(--destructive-l-min), l, var(--destructive-l-max)) c h
+  );
+  --destructive-l-min: 0;
+  --destructive-l-max: 0.5;
 }
 
 :root.themed.themed.dark {
@@ -380,6 +389,8 @@
   --spoiler-l-max: 1;
   --muted-l-min: 0.74;
   --muted-l-max: 1;
+  --destructive-l-min: 0.76;
+  --destructive-l-max: 1;
 }
 
 .themed,

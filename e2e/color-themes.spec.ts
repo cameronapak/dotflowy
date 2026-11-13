@@ -68,6 +68,13 @@ function contrastFailures(page: Page) {
       4.5,
     );
     check("menu text", "var(--popover-foreground)", ["var(--popover)"], 4.5);
+    check("destructive text", "var(--destructive)", [page], 4.5);
+    check(
+      "destructive menu item",
+      "var(--destructive)",
+      ["var(--popover)"],
+      4.5,
+    );
     check(
       "selected menu hint",
       "color-mix(in oklab, var(--accent-foreground) 85%, transparent)",
@@ -170,3 +177,32 @@ test("the color theme is the account's and survives cleared storage", async ({
     ),
   ).toHaveCount(0);
 });
+
+for (const failure of ["account load", "save"] as const)
+  test(`a failed ${failure} keeps the previous theme`, async ({ page }) => {
+    await seedOutline(page, TREE);
+    await page.route(
+      (url) =>
+        url.pathname === "/api/kv" &&
+        url.searchParams.get("collection") === "account-prefs",
+      (route) =>
+        route.request().method() === (failure === "save" ? "POST" : "GET")
+          ? route.fulfill({ status: 500, json: { error: "unavailable" } })
+          : route.fallback(),
+    );
+    await page.goto("/settings");
+    await page.getByRole("radio", { name: "Leaf" }).click();
+    await expect(
+      page.getByText(
+        "Couldn't save your theme. Your previous theme was restored.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("radio", { name: "Dotflowy" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await expect(page.locator("html")).not.toHaveClass(/\btheme-leaf\b/);
+    expect(
+      await page.evaluate(() => localStorage.getItem("dotflowy:color-theme")),
+    ).toBe("default");
+  });

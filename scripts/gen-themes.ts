@@ -32,7 +32,13 @@ const KEYS = [
 ];
 
 type Vars = Record<string, string>;
-const EXTRA = ["primary-raw", "primary-l-min", "primary-l-max", "link-source"];
+const EXTRA = [
+  "primary-raw",
+  "primary-l-min",
+  "primary-l-max",
+  "link-source",
+  "destructive-raw",
+];
 
 // Sources. tweakcn presets: github.com/jnsahaj/tweakcn @ a3b47b37,
 // utils/theme-presets.ts, Apache-2.0 (Catppuccin values are MIT, Catppuccin).
@@ -154,13 +160,21 @@ function derive(v: Vars) {
   out["primary-l-min"] = lightText ? "0" : "0.74";
   out["primary-l-max"] = lightText ? "0.54" : "1";
   if (lc(v.primary)[1] > 0.04) out["link-source"] = "var(--primary-raw)";
+  // Destructive keeps the theme's red; styles.css clamps its lightness like
+  // tag ink. A near-gray destructive (Claude-ish light ships near-black) loses
+  // its danger color, so it takes a plain red instead.
+  out["destructive-raw"] =
+    lc(v.destructive)[1] > 0.04 ? v.destructive : "oklch(0.6 0.22 27)";
   return out;
 }
 
 const block = (sel: string, v: Vars) =>
   `${sel} {\n${[...KEYS, ...EXTRA]
     .filter((k) => v[k])
-    .map((k) => `  --${k}: ${v[k]};`)
+    .map(
+      (k) =>
+        `  --${k}: ${v[k]!.replace(/#[0-9a-f]+/gi, (h) => h.toLowerCase())};`,
+    )
     .join("\n")}\n}`;
 
 const presets = await Bun.file(
@@ -207,7 +221,7 @@ export const THEME_COLORS = {
 ${Object.entries(themes)
   .map(
     ([id, t]) =>
-      `  "${id}": {\n    background: ["${hex(t.light.background!)}", "${hex(t.dark.background!)}"],\n    primary: "${hex(t.light.primary!)}",\n  },`,
+      `  ${/^[a-z]+$/.test(id) ? id : `"${id}"`}: {\n    background: ["${hex(t.light.background!)}", "${hex(t.dark.background!)}"],\n    primary: "${hex(t.light.primary!)}",\n  },`,
   )
   .join("\n")}
 } as const;
