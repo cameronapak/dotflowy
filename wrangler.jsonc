@@ -16,8 +16,12 @@
   // living only in the Cloudflare dashboard. Declaring `routes` without
   // `workers_dev: true` disables the *.workers.dev URL, so app.dotflowy.com is
   // the only origin that serves the app. Add `"workers_dev": true` to re-enable
-  // the fallback URL.
-  "routes": [{ "pattern": "app.dotflowy.com", "custom_domain": true }],
+  // the fallback URL. e.dotflowy.com is the faith.tools PostHog proxy
+  // (worker/posthog-proxy.ts, ADR 0084), served by this same Worker.
+  "routes": [
+    { "pattern": "app.dotflowy.com", "custom_domain": true },
+    { "pattern": "e.dotflowy.com", "custom_domain": true },
+  ],
   "assets": {
     // TanStack Start SPA build output. `build:cf` copies _shell.html ->
     // index.html in here so the root and the SPA fallback resolve.
