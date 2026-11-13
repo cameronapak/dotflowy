@@ -23,7 +23,7 @@ export const POSTHOG_PROXY_HOSTNAME = "e.dotflowy.com";
 const API_HOST = "us.i.posthog.com";
 const ASSET_HOST = "us-assets.i.posthog.com";
 
-const ALLOWED_METHODS = new Set(["GET", "POST", "OPTIONS"]);
+const ALLOWED_METHODS = new Set(["GET", "HEAD", "POST", "OPTIONS"]);
 
 /** True when the request arrived on the proxy subdomain. */
 export function isPostHogProxyRequest(url: URL): boolean {
