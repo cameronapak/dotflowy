@@ -38,7 +38,9 @@ const log = (msg: string) => console.log(`\x1b[36m[cf:dev]\x1b[0m ${msg}`);
 async function build(): Promise<boolean> {
   const proc = Bun.spawn(["bun", "run", "build:cf"], {
     cwd: ROOT,
-    env: { ...process.env, DOTFLOWY_CF_DEV: "true" },
+    // An empty VITE_SENTRY_DSN outranks .env.production, so this production
+    // build never reports local errors to the production Sentry project.
+    env: { ...process.env, DOTFLOWY_CF_DEV: "true", VITE_SENTRY_DSN: "" },
     stdio: ["inherit", "inherit", "inherit"],
   });
   const code = await proc.exited;
@@ -59,10 +61,14 @@ if (!ok) {
 
 // 2. wrangler dev (Worker + per-user DO + serves dist/client live).
 log("starting wrangler dev on :8787");
-const wrangler = Bun.spawn(["bunx", "wrangler", "dev", "--port", "8787"], {
-  cwd: ROOT,
-  stdio: ["inherit", "inherit", "inherit"],
-});
+// `--var SENTRY_DSN:` blanks the committed DSN so the local Worker stays silent.
+const wrangler = Bun.spawn(
+  ["bunx", "wrangler", "dev", "--port", "8787", "--var", "SENTRY_DSN:"],
+  {
+    cwd: ROOT,
+    stdio: ["inherit", "inherit", "inherit"],
+  },
+);
 
 // 3. Rebuild on src/ changes. Debounce the burst of fs events a save produces,
 // and never run two builds at once - if edits land mid-build, rebuild once after.
