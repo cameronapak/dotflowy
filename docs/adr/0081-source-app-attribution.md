@@ -58,6 +58,19 @@ with them, as OpenAI's terms ask. Per-node tooltips stay notice-free.
 A listed app without a logo is a type error in the plugin's table, so the list
 and the logos cannot drift.
 
+## Optional source logos
+
+Settings → Appearance offers **Show AI app icons**, on by default. The account
+preference `appearance:ai-app-icons` lives in `account-prefs`; a missing row
+means on. Like other account preferences, saves are optimistic with rollback
+on failure, and other tabs and devices refresh on focus.
+
+Turning it off replaces every source mark, including the unlisted-app bot,
+with one muted Hugeicons multi-sparkle in both outline rows and zoomed titles.
+Unlike the old single sparkle, this glyph is distinct from Gemini's star.
+This is an appearance choice, not a provenance switch: `Node.origin`, the
+source-and-time tooltip, and `is:agent` filtering remain unchanged.
+
 ## Rejected
 
 - **Named chip after the text**: always readable, but it adds width in the

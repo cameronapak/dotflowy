@@ -8,22 +8,23 @@
 // name like "Claude" = an agent made it over MCP, from the write tool's required
 // `sourceApp`, stamped server-side at the one write choke point in
 // worker/outline-ops.ts). Provenance is set at creation and only ever READ here
-// — never a semantic branch, purely display. No side collection, no per-node
-// subscription: `origin` never changes after birth, so reading it off the node
-// the slot is handed is enough.
+// — never a semantic branch, purely display. `origin` never changes after
+// birth; only the shared account appearance preference is subscribed to.
 //
 // Visual (ADR 0081): the source app's own logo just before the text, so a reader
 // sees WHICH app wrote a node, not only that an agent did. Muted and the same
 // 16px slot for every app, so rows never shift; OpenAI's and xAI's marks take
 // the text color their brand rules require. An unlisted app gets a bot, not the
-// old sparkle, which reads as Gemini's star at this size. Static, no animation.
-// The app name + creation time show on hover.
+// old sparkle, which reads as Gemini's star at this size. Turning off AI app
+// icons replaces every mark with a muted multi-sparkle. Static, no animation.
+// The app name + creation time show on hover in either style.
 
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/plugins/kit";
 
 import type { Node } from "../../data/tree";
 
+import { useEditorFeatures } from "../../data/editor-features";
 import { definePlugin } from "../types";
 import { PROVENANCE_FILTER_OPERATORS } from "./filter-operators";
 import { markFor, SourceAppGlyph } from "./marks";
@@ -54,9 +55,10 @@ function ProvenanceMark({
   node: Node;
   placement: "row" | "title";
 }) {
+  const { aiAppIcons } = useEditorFeatures();
   if (!node.origin) return null;
   const label = `Created by ${node.origin} · ${relativeTime(node.createdAt)}`;
-  const mark = markFor(node.origin);
+  const mark = markFor(node.origin, aiAppIcons);
   return (
     <Tooltip>
       {/* Avoid an inline baseline adding height to this floated trigger:
@@ -89,18 +91,20 @@ export default definePlugin({
   id: "provenance",
 
   // Seam F (row + title): the origin marker, between the bullet dot and the text
-  // in both render paths. Absent on user-authored nodes (ProvenanceMark returns
-  // null), so it costs a null check per non-agent row and nothing else.
+  // in both render paths. Skip user-authored nodes before mounting the mark,
+  // so they do not subscribe to appearance preferences.
   slots: [
     {
       id: "provenance-mark-row",
       position: "row:before-text",
-      render: (node) => <ProvenanceMark node={node} placement="row" />,
+      render: (node) =>
+        node.origin ? <ProvenanceMark node={node} placement="row" /> : null,
     },
     {
       id: "provenance-mark-title",
       position: "title:before-text",
-      render: (node) => <ProvenanceMark node={node} placement="title" />,
+      render: (node) =>
+        node.origin ? <ProvenanceMark node={node} placement="title" /> : null,
     },
   ],
 

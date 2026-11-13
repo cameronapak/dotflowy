@@ -20,7 +20,7 @@ import {
   SiZedindustries,
 } from "@icons-pack/react-simple-icons";
 
-import { BotIcon, TerminalIcon } from "@/lib/icons";
+import { BotIcon, SparklesIcon, TerminalIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 import { knownSourceApp, type SourceApp } from "../../data/source-apps";
@@ -74,7 +74,10 @@ const MARKS = {
  *  no listed app matches ("agent", "MCP Inspector"). */
 const FALLBACK: Mark = { icon: BotIcon, stroke: true };
 
-export function markFor(origin: string): Mark {
+const GENERIC_AI_MARK: Mark = { icon: SparklesIcon, stroke: true };
+
+export function markFor(origin: string, showAppIcons: boolean): Mark {
+  if (!showAppIcons) return GENERIC_AI_MARK;
   const app = knownSourceApp(origin);
   return app ? MARKS[app] : FALLBACK;
 }

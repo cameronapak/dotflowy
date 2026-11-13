@@ -22,6 +22,20 @@ const TREE: SeedNode[] = [
     text: "an agent added this",
     origin: "Claude",
   },
+  {
+    id: "amp",
+    parentId: null,
+    prevSiblingId: "ai",
+    text: "an Amp-created node",
+    origin: "Amp",
+  },
+  {
+    id: "unknown",
+    parentId: null,
+    prevSiblingId: "amp",
+    text: "a node from another AI app",
+    origin: "Unknown app",
+  },
 ];
 
 // The mark is the source app's logo (ADR 0081) in a box carrying `data-origin`
@@ -79,7 +93,7 @@ async function load(page: Page) {
   await openSeededOutline(page, { anchorId: "mine" });
 }
 
-test("agent attribution appears on its row and zoomed title, not the user's node", async ({
+test("AI app icons default on, switch to a shared sparkle, and keep attribution across reloads and failed saves", async ({
   page,
 }) => {
   await load(page);
@@ -101,4 +115,70 @@ test("agent attribution appears on its row and zoomed title, not the user's node
   const titleMark = page.locator(`.zoomed-title [data-origin]`);
   await expect(titleMark).toBeVisible();
   await expect(titleMark).toHaveAttribute("data-origin", "Claude");
+  const claudeLogo = await titleMark.locator("svg").innerHTML();
+
+  await page.goto("/settings#appearance");
+  const toggle = page.getByRole("switch", { name: "Show AI app icons" });
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toBeChecked();
+  await toggle.click();
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).not.toBeChecked();
+  await page.reload();
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).not.toBeChecked();
+  await page.getByRole("button", { name: "Back to outline" }).click();
+  await expect(mark(page, "mine")).toHaveCount(0);
+  const sparkle = await mark(page, "ai").locator("svg").innerHTML();
+  expect(sparkle.length).toBeGreaterThan(0);
+  expect(sparkle).not.toBe(claudeLogo);
+  for (const id of ["amp", "unknown"]) {
+    await expect(mark(page, id)).toBeVisible();
+    expect(await mark(page, id).locator("svg").innerHTML()).toBe(sparkle);
+  }
+  await mark(page, "ai").hover();
+  await expect(page.getByText(/^Created by Claude ·/)).toBeVisible();
+  await page.locator('li[data-node-id="ai"] .bullet').first().click();
+  await expect(titleMark).toBeVisible();
+  expect(await titleMark.locator("svg").innerHTML()).toBe(sparkle);
+  await expect(titleMark).toHaveAttribute("aria-label", /Created by Claude/);
+
+  // A failed change rolls back instead of silently restoring the logos.
+  await page.goto("/settings#appearance");
+  await expect(toggle).toBeEnabled();
+  await page.route("**/api/kv?collection=account-prefs", (route) => {
+    if (route.request().method() === "POST")
+      return route.fulfill({ status: 500, body: "save failed" });
+    return route.fallback();
+  });
+  await toggle.click();
+  await expect(page.getByText(/Couldn't save AI app icons/)).toBeVisible();
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).not.toBeChecked();
+  await page.unroute("**/api/kv?collection=account-prefs");
+  await toggle.click();
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toBeChecked();
+  await page.reload();
+  await expect(toggle).toBeChecked();
+  await page.getByRole("button", { name: "Back to outline" }).click();
+  expect(await mark(page, "ai").locator("svg").innerHTML()).toBe(claudeLogo);
+  expect(await mark(page, "amp").locator("svg").innerHTML()).not.toBe(
+    claudeLogo,
+  );
+
+  // An account change from another tab/device is picked up on focus.
+  await page.evaluate(async () => {
+    const key = "appearance:ai-app-icons";
+    const response = await fetch("/api/kv?collection=account-prefs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ rows: [{ key, value: { key, enabled: false } }] }),
+    });
+    if (!response.ok) throw new Error("preference update failed");
+    window.dispatchEvent(new Event("focus"));
+  });
+  await expect(async () => {
+    expect(await mark(page, "ai").locator("svg").innerHTML()).toBe(sparkle);
+  }).toPass();
 });
