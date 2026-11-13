@@ -51,7 +51,12 @@ import {
   backupTargets,
   isBackupDateKey,
 } from "./backup";
-import { handleCaptureKeys, handleCaptureRequest } from "./capture";
+import {
+  handleCaptureKeys,
+  handleCaptureRequest,
+  handleShareCapture,
+  handleShareLaunch,
+} from "./capture";
 import { authenticateCaptureKey } from "./capture-keys";
 import { lookupEmbedE } from "./embeds";
 import { withFramePolicy } from "./frame-policy";
@@ -1176,6 +1181,16 @@ function handleApiRequest(
 
     const userId = resolveUserId(session.user.id, env);
 
+    // The share target's Add to Today (ADR 0085): session-only, separate from
+    // the key-only /api/capture so neither credential authorizes the other.
+    if (url.pathname === "/api/share") {
+      return yield* handleShareCapture(request, env, executionCtx, {
+        userId: session.user.id,
+        stillAuthorized: async () =>
+          !!(await auth.api.getSession({ headers: request.headers })),
+      });
+    }
+
     if (url.pathname === "/api/keys" || url.pathname === "/api/capture-keys") {
       return yield* handleCaptureKeys(
         request,
@@ -1364,6 +1379,12 @@ const handler = {
     // them without instantiating auth — only the data API (and the token-gated
     // `/mcp`, handled in the pipeline below) is gated.
     // Framing is limited to the landing page's live demo (frame-policy.ts).
+    // The manifest's share_target action posts here (ADR 0085). It never
+    // saves; it hands the shared fields to the /share page in its fragment.
+    if (url.pathname === "/share" && request.method === "POST") {
+      return withFramePolicy(await handleShareLaunch(request, env));
+    }
+
     if (url.pathname !== "/mcp" && !url.pathname.startsWith("/api/")) {
       return withFramePolicy(await env.ASSETS.fetch(request));
     }

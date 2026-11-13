@@ -137,6 +137,125 @@ const respond = <R>(program: Effect.Effect<Response, CaptureHttpError, R>) =>
     ),
   );
 
+/** Who a capture belongs to, and how to recheck that they still may write. */
+interface CaptureOwner {
+  /** Better Auth `user.id`; the DO is keyed through `resolveUserId`. */
+  userId: string;
+  /** Rechecked before each background title upgrade, so a revoked key or an
+   *  ended session cannot edit the outline after the response. */
+  stillAuthorized: () => Promise<boolean>;
+}
+
+/** The authenticated half of capture: Markdown intake into one daily note,
+ *  shared by capture keys (`/api/capture`) and the share target's signed-in
+ *  page (`/api/share`). Callers authenticate and rate-limit first. */
+const saveCapture = (
+  request: Request,
+  env: CaptureEnv,
+  ctx: ExecutionContext,
+  owner: CaptureOwner,
+) =>
+  Effect.gen(function* () {
+    const input = yield* decodeBody(request, CaptureBody);
+    const normalized = normalizeCapture(input);
+    if (!normalized)
+      return yield* Effect.fail(
+        fail(
+          400,
+          "invalid_input",
+          "Use a real calendar date and nonblank text.",
+        ),
+      );
+    const attemptId = input.attemptId.toLowerCase();
+    const [fingerprint, plan] = yield* Effect.all(
+      [
+        Effect.promise(() =>
+          captureDigest(
+            JSON.stringify([input.date, input.text, input.title ?? null]),
+          ),
+        ),
+        Effect.promise(() => getPlan(owner.userId, env)),
+      ],
+      { concurrency: "unbounded" },
+    );
+    const stub = env.USER_OUTLINE.get(
+      env.USER_OUTLINE.idFromName(resolveUserId(owner.userId, env)),
+    );
+    const result = yield* Effect.promise<CaptureResult>(() =>
+      stub.captureDaily(
+        {
+          attemptId,
+          date: input.date,
+          text: normalized.text,
+          fingerprint,
+        },
+        nodeLimitForPlan(plan),
+      ),
+    );
+    if ("error" in result) {
+      return yield* Effect.fail(
+        result.error === "node_limit"
+          ? fail(
+              403,
+              "node_limit",
+              "Your outline has reached its node limit. Remove nodes or upgrade, then retry the same attempt.",
+            )
+          : fail(
+              409,
+              "attempt_conflict",
+              "This attempt ID belongs to a different capture. Start a new attempt.",
+            ),
+      );
+    }
+    // Title lookup must never turn a committed save into a failure.
+    if (!result.replayed) {
+      ctx.waitUntil(
+        Effect.runPromise(
+          Effect.gen(function* () {
+            // The planner mints ids in depth-first preorder, matching this
+            // walk. Keep literal lines in the walk, but never enrich them.
+            const stack = parseMarkdownForest(normalized.text).reverse();
+            for (const nodeId of result.nodeIds) {
+              const node = stack.pop()!;
+              stack.push(...[...node.children].reverse());
+              if (node.literal) continue;
+              // A supplied title only labels a standalone URL, never prose.
+              const before =
+                input.title?.trim() && bareHttpUrl(input.text) ? node.text : "";
+              const text = yield* unfurlTextE(before, node.text, (url) =>
+                rateLimitedTitleE(
+                  url,
+                  env.UNFURL_LIMIT,
+                  resolveUserId(owner.userId, env),
+                ),
+              );
+              if (text === node.text) continue;
+              if (!(yield* Effect.promise(owner.stillAuthorized))) return;
+              yield* Effect.promise(() =>
+                stub.upgradeCaptureText(attemptId, node.text, text, nodeId),
+              );
+            }
+          }),
+        ).catch(() => {
+          console.warn("capture title lookup failed");
+        }),
+      );
+    }
+    return json({ ...result.receipt, replayed: result.replayed });
+  });
+
+/** Origins a signed-in browser request may come from: this server and its
+ *  configured auth origins. */
+function trustedOrigins(request: Request, env: CaptureEnv) {
+  return new Set([
+    new URL(request.url).origin,
+    ...(env.BETTER_AUTH_URL ? [new URL(env.BETTER_AUTH_URL).origin] : []),
+    ...(env.BETTER_AUTH_TRUSTED_ORIGINS?.split(",").map((origin) =>
+      origin.trim(),
+    ) ?? []),
+  ]);
+}
+
 export const handleCaptureRequest = Effect.fn("Capture.request")(
   (request: Request, env: CaptureEnv, ctx: ExecutionContext) =>
     respond(
@@ -167,58 +286,12 @@ export const handleCaptureRequest = Effect.fn("Capture.request")(
             ),
           );
         yield* rateLimit(env, `capture:${key.userId}`);
-        const input = yield* decodeBody(request, CaptureBody);
-        const normalized = normalizeCapture(input);
-        if (!normalized)
-          return yield* Effect.fail(
-            fail(
-              400,
-              "invalid_input",
-              "Use a real calendar date and nonblank text.",
-            ),
-          );
-        const attemptId = input.attemptId.toLowerCase();
-        const [fingerprint, plan] = yield* Effect.all(
-          [
-            Effect.promise(() =>
-              captureDigest(
-                JSON.stringify([input.date, input.text, input.title ?? null]),
-              ),
-            ),
-            Effect.promise(() => getPlan(key.userId, env)),
-          ],
-          { concurrency: "unbounded" },
-        );
-        const stub = env.USER_OUTLINE.get(
-          env.USER_OUTLINE.idFromName(resolveUserId(key.userId, env)),
-        );
-        const result = yield* Effect.promise<CaptureResult>(() =>
-          stub.captureDaily(
-            {
-              attemptId,
-              date: input.date,
-              text: normalized.text,
-              fingerprint,
-            },
-            nodeLimitForPlan(plan),
-          ),
-        );
-        if ("error" in result) {
-          return yield* Effect.fail(
-            result.error === "node_limit"
-              ? fail(
-                  403,
-                  "node_limit",
-                  "Your outline has reached its node limit. Remove nodes or upgrade, then retry the same attempt.",
-                )
-              : fail(
-                  409,
-                  "attempt_conflict",
-                  "This attempt ID belongs to a different capture. Start a new attempt.",
-                ),
-          );
-        }
-        // Metadata and title lookup must never turn a committed save into a failure.
+        const response = yield* saveCapture(request, env, ctx, {
+          userId: key.userId,
+          stillAuthorized: async () =>
+            !!(await authenticateCaptureKey(env.DB, authorization, Date.now())),
+        });
+        // Metadata must never turn a committed save into a failure.
         ctx.waitUntil(
           env.DB.prepare("UPDATE capture_key SET lastUsedAt = ? WHERE id = ?")
             .bind(Date.now(), key.id)
@@ -227,45 +300,36 @@ export const handleCaptureRequest = Effect.fn("Capture.request")(
               console.warn("capture last-used update failed");
             }),
         );
-        if (!result.replayed) {
-          ctx.waitUntil(
-            Effect.runPromise(
-              Effect.gen(function* () {
-                // The planner mints ids in depth-first preorder, matching this
-                // walk. Keep literal lines in the walk, but never enrich them.
-                const stack = parseMarkdownForest(normalized.text).reverse();
-                for (const nodeId of result.nodeIds) {
-                  const node = stack.pop()!;
-                  stack.push(...[...node.children].reverse());
-                  if (node.literal) continue;
-                  // A supplied title only labels a standalone URL, never prose.
-                  const before =
-                    input.title?.trim() && bareHttpUrl(input.text)
-                      ? node.text
-                      : "";
-                  const text = yield* unfurlTextE(before, node.text, (url) =>
-                    rateLimitedTitleE(
-                      url,
-                      env.UNFURL_LIMIT,
-                      resolveUserId(key.userId, env),
-                    ),
-                  );
-                  if (text === node.text) continue;
-                  const liveKey = yield* Effect.promise(() =>
-                    authenticateCaptureKey(env.DB, authorization, Date.now()),
-                  );
-                  if (!liveKey) return;
-                  yield* Effect.promise(() =>
-                    stub.upgradeCaptureText(attemptId, node.text, text, nodeId),
-                  );
-                }
-              }),
-            ).catch(() => {
-              console.warn("capture title lookup failed");
-            }),
+        return response;
+      }),
+    ),
+);
+
+/** The share target's Add to Today (ADR 0085). The caller has already
+ *  validated the browser session; a capture key never reaches this route, and
+ *  this route never accepts one. */
+export const handleShareCapture = Effect.fn("Capture.share")(
+  (
+    request: Request,
+    env: CaptureEnv,
+    ctx: ExecutionContext,
+    owner: CaptureOwner,
+  ) =>
+    respond(
+      Effect.gen(function* () {
+        if (request.method !== "POST")
+          return json(
+            { error: "method_not_allowed", message: "Use POST." },
+            405,
           );
-        }
-        return json({ ...result.receipt, replayed: result.replayed });
+        if (
+          !trustedOrigins(request, env).has(request.headers.get("origin") ?? "")
+        )
+          return yield* Effect.fail(
+            fail(403, "invalid_origin", "Add shared items from Dotflowy."),
+          );
+        yield* rateLimit(env, `capture:${owner.userId}`);
+        return yield* saveCapture(request, env, ctx, owner);
       }),
     ),
 );
@@ -287,14 +351,9 @@ export const handleCaptureKeys = Effect.fn("Capture.keys")(
           )
         )
           return json({ error: "method_not_allowed" }, 405);
-        const origins = new Set([
-          new URL(request.url).origin,
-          ...(env.BETTER_AUTH_URL ? [new URL(env.BETTER_AUTH_URL).origin] : []),
-          ...(env.BETTER_AUTH_TRUSTED_ORIGINS?.split(",").map((origin) =>
-            origin.trim(),
-          ) ?? []),
-        ]);
-        if (!origins.has(request.headers.get("origin") ?? "")) {
+        if (
+          !trustedOrigins(request, env).has(request.headers.get("origin") ?? "")
+        ) {
           return yield* Effect.fail(
             fail(
               403,
@@ -361,3 +420,77 @@ export const handleCaptureKeys = Effect.fn("Capture.keys")(
       }),
     ),
 );
+
+/** What a share-sheet launch may carry: the manifest's three text fields, each
+ *  within the capture body's own limit. The manifest declares no files, so a
+ *  file under one of these names is refused and any other part is ignored. */
+const ShareLaunchBody = Schema.Struct({
+  title: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(10_000))),
+  text: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(10_000))),
+  url: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(10_000))),
+});
+
+const shareRedirect = (fragment: string) =>
+  new Response(null, {
+    status: 303,
+    headers: { location: `/share#${fragment}`, "cache-control": "no-store" },
+  });
+
+/** `POST /share`, the manifest's share_target action (ADR 0085). It saves
+ *  nothing: it moves the shared fields into the `/share` page's URL fragment,
+ *  which never reaches the server or its request logs, and the signed-in page
+ *  saves only after the person taps Add to Today. A launch from the share
+ *  sheet is browser-initiated or attributed to this app, so a form posted by
+ *  another site (`cross-site`) or a sibling subdomain (`same-site`) is
+ *  refused, as is a request without Fetch Metadata. */
+export async function handleShareLaunch(
+  request: Request,
+  env: CaptureEnv,
+): Promise<Response> {
+  const site = request.headers.get("sec-fetch-site");
+  const origin = request.headers.get("origin");
+  if (
+    (site !== "none" && site !== "same-origin") ||
+    (origin !== null &&
+      origin !== "null" &&
+      !trustedOrigins(request, env).has(origin))
+  )
+    return shareRedirect("error=rejected");
+  const contentType = request.headers.get("content-type") ?? "";
+  if (
+    !/^(multipart\/form-data|application\/x-www-form-urlencoded)(;|$)/i.test(
+      contentType,
+    )
+  )
+    return shareRedirect("error=invalid");
+  const reader = request.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  if (reader) {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        length += value.byteLength;
+        if (length > 131_072) return shareRedirect("error=invalid");
+        chunks.push(value);
+      }
+    } finally {
+      await reader.cancel();
+    }
+  }
+  const form = await new Response(new Blob(chunks), {
+    headers: { "content-type": contentType },
+  })
+    .formData()
+    .catch(() => null);
+  const decoded =
+    form &&
+    Schema.decodeUnknownOption(ShareLaunchBody)(Object.fromEntries(form));
+  if (!decoded || decoded._tag === "None")
+    return shareRedirect("error=invalid");
+  const fields = Object.entries(decoded.value).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+  return shareRedirect(new URLSearchParams(fields).toString());
+}

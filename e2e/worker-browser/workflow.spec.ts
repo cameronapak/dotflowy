@@ -452,3 +452,94 @@ test("legacy clients read numbered nodes without losing their Kind through write
   expect(converted?.isTask).toBe(true);
   expect(converted?.text).toBe("Legacy text edit");
 });
+
+test("a share survives sign-in, saves only on Add to Today, and a cross-site post or link never saves", async ({
+  page,
+  context,
+}) => {
+  const { origin } = backend;
+  const email = "share-target@worker-browser.test";
+  const password = "disposable-share-password";
+  const signup = await context.request.post(
+    `${origin}/api/auth/sign-up/email`,
+    { headers: { origin }, data: { email, name: "Share target", password } },
+  );
+  expect(signup.status()).toBe(200);
+  const { user } = await signup.json();
+  await backend.db
+    .prepare('UPDATE "user" SET emailVerified=1 WHERE id=?')
+    .bind(user.id)
+    .run();
+  const inspect = async (): Promise<OutlineSnapshot> =>
+    backend.control("inspect", user.id);
+
+  // Signed out: the share sheet's POST, as a top-level form submission from
+  // this origin (what Chrome 156+ reports for a share launch).
+  await page.goto(`${origin}/terms`);
+  await page.evaluate(() => {
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/share";
+    form.enctype = "multipart/form-data";
+    for (const [name, value] of [
+      ["title", "Shared page"],
+      ["text", "- [ ] follow up on the shared page\n  - with a note"],
+    ] as const) {
+      const input = document.createElement("textarea");
+      input.name = name;
+      input.value = value;
+      form.append(input);
+    }
+    document.body.append(form);
+    form.submit();
+  });
+  await expect(page.getByPlaceholder("Email")).toBeVisible();
+  // The shared text left the address bar before the sign-in screen rendered.
+  expect(new URL(page.url()).hash).toBe("");
+  expect(new URL(page.url()).pathname).toBe("/share");
+  await page.getByPlaceholder("Email").fill(email);
+  await page.getByPlaceholder("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  const preview = page.getByRole("figure", { name: "Shared content" });
+  await expect(preview).toContainText("follow up on the shared page");
+  await expect(
+    page.getByRole("button", { name: "Add to Today" }),
+  ).toBeVisible();
+  // Loading the page, signed in, saved nothing.
+  expect((await inspect()).nodes).toEqual([]);
+  await page.getByRole("button", { name: "Add to Today" }).click();
+  await expect(page.getByRole("status")).toHaveText("Added to Today.");
+  const saved = await inspect();
+  const task = saved.nodes.find(
+    (node) => node.text === "follow up on the shared page",
+  );
+  expect(task?.isTask).toBe(true);
+  expect(
+    saved.nodes.filter((node) => node.parentId === task!.id),
+  ).toMatchObject([{ text: "with a note" }]);
+  await page.getByRole("button", { name: "Open Today" }).click();
+  await expect(
+    page.locator(`li[data-node-id="${task!.id}"] .node-text`),
+  ).toHaveText("follow up on the shared page");
+  const after = saved.nodes.length;
+
+  // Signed in, another site posts a form to /share: refused before the page.
+  const hostile = await context.newPage();
+  await hostile.goto("about:blank");
+  await hostile.setContent(
+    `<form method="POST" action="${origin}/share" enctype="multipart/form-data"><textarea name="text">planted</textarea></form>`,
+  );
+  await hostile.evaluate(() => document.forms[0]!.submit());
+  await expect(hostile.getByText("ignored it")).toBeVisible();
+  await expect(
+    hostile.getByRole("button", { name: "Add to Today" }),
+  ).toHaveCount(0);
+  // A plain link can carry text in the fragment; it still waits for a tap.
+  await hostile.goto("about:blank");
+  await hostile.goto(`${origin}/share#text=planted%20by%20a%20link`);
+  await expect(
+    hostile.getByRole("figure", { name: "Shared content" }),
+  ).toHaveText("planted by a link");
+  expect((await inspect()).nodes).toHaveLength(after);
+});

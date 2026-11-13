@@ -84,6 +84,16 @@ export async function startBackend() {
               },
               DB: { type: "d1", id: "worker-browser-db" },
               BACKUPS: { type: "r2", name: "worker-browser-backups" },
+              CAPTURE_LIMIT: {
+                type: "rate-limit",
+                namespace: "1003",
+                simple: { limit: 60, period: 60 },
+              },
+              UNFURL_LIMIT: {
+                type: "rate-limit",
+                namespace: "1004",
+                simple: { limit: 30, period: 60 },
+              },
               BETTER_AUTH_SECRET: {
                 type: "text",
                 value: "disposable-worker-browser-secret-not-for-production",

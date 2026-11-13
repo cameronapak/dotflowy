@@ -127,6 +127,10 @@ _Avoid_: quick capture (fine as a synonym, but the action is "quick-add"), inbox
 A revocable credential that permits Quick-add to its owner's daily notes from outside the editor, without permission to read, edit, or delete existing outline content.
 _Avoid_: account key (implies broader access), MCP token (a different credential)
 
+**Share target**:
+The installed app's entry in the operating system's share sheet. Shared text or a link opens a preview, and Add to Today captures it the way Quick-add does. Nothing saves until that tap.
+_Avoid_: share extension (native-app term), inbox
+
 **Editor feature**:
 An optional reading or authoring convenience, such as Bible references or Daily notes. Turning it off changes the editor experience, not the outline's content or external tools' permissions.
 _Avoid_: plugin unloading, access control
