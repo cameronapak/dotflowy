@@ -36,7 +36,12 @@ Plugins and components paint with tokens, never literal colors
   `accent-foreground` with `accent`, not with the page.
 - `--quote-bar`, `--control-border`: the quote bar and an unchecked checkbox's
   edge, clamped to 3:1 on the page (WCAG 1.4.11).
-- `--link`, `--primary-ink`, `--spoiler`, `--atom-*`, `--mirror-*`.
+- `--primary-ink`: node-link text, breadcrumb hover text, and hovered node
+  handles (dots, paragraph glyphs, numbers, and quote bars). These marks need
+  readable ink on the page or a quiet halo, not the `--primary` fill used by
+  buttons. Leaf keeps its bright green filled controls and uses a deeper green
+  ink in light Mode.
+- `--link`, `--spoiler`, `--atom-*`, `--mirror-*`.
 
 Registry themes use `accent` as a brand color and ship popovers darker than the
 page or pure white, while Dotflowy uses `accent` as its quiet hover and
