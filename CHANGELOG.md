@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.6.1
+
+### Patch Changes
+
+- e5d3781: Use readable theme ink for hovered node handles and breadcrumb links instead of the bright button fill color.
+
 ## 3.6.0
 
 ### Minor Changes
