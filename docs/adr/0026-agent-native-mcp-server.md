@@ -78,7 +78,7 @@ wholesale: mirror content edits follow the true source, mirrors flatten and refu
 the daily container's protection rules ([ADR 0015](./0015-protected-nodes.md)) are enforced
 server-side — an agent can't delete, blank, task-ify, or complete it.
 
-**Amended by [ADR 0084](./0084-scoped-expiring-api-keys.md):** manually configured
+**Amended by [ADR 0086](./0086-scoped-expiring-api-keys.md):** manually configured
 personal API keys can also authenticate MCP, with server-enforced read-only or
 read/write permissions. OAuth discovery and browser-session separation remain.
 The paragraph below records the original OAuth-only decision.

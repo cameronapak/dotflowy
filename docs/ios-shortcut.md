@@ -4,7 +4,7 @@ The official template is the signed [`Dotflowy.shortcut`](../public/shortcuts/Do
 
 ## Scoped-key update
 
-[ADR 0084](./adr/0084-scoped-expiring-api-keys.md) promotes setup to Connections
+[ADR 0086](./adr/0086-scoped-expiring-api-keys.md) promotes setup to Connections
 and requires new keys to expire after 30 days by default, with a 90-day maximum.
 The Cherri source, unsigned input, and Apple-signed public file now use a gray
 circular glyph inspired by Dotflowy's dot logo and a dedicated invalid/expired-key
@@ -101,7 +101,7 @@ the private unsigned file returned the HTML fallback, not those files.
 At that release, Safari and Home Screen PWA handoff, setup-answer persistence on
 a fresh import, and the full iPhone share-sheet and failure-case checks remained
 unverified. The scoped-key update above verifies Mac setup persistence and
-promotes discovery under ADR 0084; the iPhone checks remain outstanding.
+promotes discovery under ADR 0086; the iPhone checks remain outstanding.
 
 The local template now asks only for a Dotflowy capture key. The repository
 contains only the placeholder `PASTE_CAPTURE_KEY_DURING_IMPORT`, never a working
@@ -286,7 +286,7 @@ separate unsigned input, so a changed source still requires signing before
 publication. Keep the final release sequence build, test, sign, validate.
 The static download headers specify an attachment named `Dotflowy.shortcut`.
 
-Before claiming iPhone verification, import the signed file on a current iPhone and verify both direct launch and the share sheet with text and a URL, blank/cancel, a valid key, an invalid key, a server error receipt, and an offline request. Confirm a successful run creates the expected nodes in the phone-local daily note, including a single Markdown task and a nested list. Discovery is promoted under ADR 0084; that decision does not establish these device results.
+Before claiming iPhone verification, import the signed file on a current iPhone and verify both direct launch and the share sheet with text and a URL, blank/cancel, a valid key, an invalid key, a server error receipt, and an offline request. Confirm a successful run creates the expected nodes in the phone-local daily note, including a single Markdown task and a nested list. Discovery is promoted under ADR 0086; that decision does not establish these device results.
 
 Before claiming that sharing clears the capture key:
 

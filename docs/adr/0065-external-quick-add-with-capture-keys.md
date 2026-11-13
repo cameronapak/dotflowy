@@ -4,7 +4,7 @@ status: accepted
 
 # External Quick-add with scoped capture keys
 
-**Amended by [ADR 0084](./0084-scoped-expiring-api-keys.md):** Cam reports the
+**Amended by [ADR 0086](./0086-scoped-expiring-api-keys.md):** Cam reports the
 feature works well and approved promoting discovery into Connections. API keys
 now have one management surface with capture-only, read-only, and read/write
 permissions. New keys default to 30 days, max 90 days; existing long-lived keys
