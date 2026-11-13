@@ -34,7 +34,8 @@ across devices. No App Store app is required; you can add it to your home screen
 - **One nested outline.** Nest, collapse, drag, and zoom into any node.
   Choose bullets, tasks, paragraphs, or embeds.
 - **Capture without losing your place.** Quick-add a thought to today's
-  daily note, then organize it when you're ready.
+  daily note, then organize it when you're ready. On Android and ChromeOS,
+  share text or a link to the installed app from any app.
 - **Find what matters.** Filter by `#tags`, connect nodes with `[[links]]`
   and backlinks, or press `Cmd/Ctrl+K` to jump anywhere.
 - **Keep one source in several places.** Mirror a node into another part of

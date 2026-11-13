@@ -2,6 +2,7 @@
   "name": "Dotflowy",
   "short_name": "Dotflowy",
   "description": "A fast, keyboard-first outliner you can own and extend.",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -31,5 +32,15 @@
       "sizes": "512x512",
       "purpose": "maskable"
     }
-  ]
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
 }

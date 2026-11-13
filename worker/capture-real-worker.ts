@@ -28,7 +28,11 @@ export default {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/api/") || url.pathname === "/mcp") {
+    if (
+      url.pathname.startsWith("/api/") ||
+      url.pathname === "/mcp" ||
+      url.pathname === "/share"
+    ) {
       const fetch = productionWorker.fetch;
       if (!fetch)
         throw new Error("production Worker fetch missing from fixture");

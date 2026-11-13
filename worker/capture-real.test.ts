@@ -1512,3 +1512,159 @@ test("API keys enforce MCP permissions, plan gates, capture scope, and live revo
   expect(failure.body?.message).toContain("Dotflowy Settings");
   expect(failure.body?.saved).not.toBe(true);
 });
+
+test("share target: launch hands text over without saving; Add to Today is session-only and keys stay separate", async () => {
+  const password = "disposable-share-password";
+  const userId = `share-${randomUUID()}`;
+  await fixture("seed", { userId, password: await hashPassword(password) });
+  const signin = await mf.dispatchFetch(
+    "http://fixture/api/auth/sign-in/email",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://fixture" },
+      body: JSON.stringify({ email: `${userId}@capture.test`, password }),
+    },
+  );
+  expect(signin.status).toBe(200);
+  const cookie = signin.headers
+    .getSetCookie()
+    .map((value) => value.split(";")[0])
+    .join("; ");
+  const { key } = await fixture<Key>("key", { userId });
+
+  // The share sheet's POST: Android's link-in-text shape, with a space and +.
+  // Miniflare's fetch takes undici's body type; serialize through a Request.
+  const launch = async (
+    headers: Record<string, string>,
+    form = new FormData(),
+  ) => {
+    const encoded = new Request("http://fixture/share", {
+      method: "POST",
+      body: form,
+    });
+    return mf.dispatchFetch("http://fixture/share", {
+      method: "POST",
+      headers: {
+        cookie,
+        "content-type": encoded.headers.get("content-type")!,
+        ...headers,
+      },
+      body: Buffer.from(await encoded.arrayBuffer()),
+      redirect: "manual",
+    });
+  };
+  const shared = new FormData();
+  shared.set("title", "A+B page");
+  shared.set("text", "Read this https://example.com/a?b=1&c=2");
+  const launched = await launch({ "sec-fetch-site": "none" }, shared);
+  expect(launched.status).toBe(303);
+  const location = launched.headers.get("location")!;
+  expect(location.startsWith("/share#")).toBe(true);
+  const handed = new URLSearchParams(location.slice("/share#".length));
+  expect(handed.get("title")).toBe("A+B page");
+  expect(handed.get("text")).toBe("Read this https://example.com/a?b=1&c=2");
+  expect(handed.has("url")).toBe(false);
+
+  // Chrome 156+ attributes the launch to the app itself.
+  expect(
+    (
+      await launch({
+        "sec-fetch-site": "same-origin",
+        origin: "http://fixture",
+      })
+    ).headers.get("location"),
+  ).toBe("/share#");
+
+  // A form posted from another site, a sibling subdomain, or a client that
+  // sends no Fetch Metadata never reaches the page as shared text.
+  const refusals: Record<string, string>[] = [
+    { "sec-fetch-site": "cross-site", origin: "https://evil.test" },
+    { "sec-fetch-site": "same-site", origin: "https://e.fixture" },
+    { "sec-fetch-site": "same-origin", origin: "https://evil.test" },
+    {},
+  ];
+  for (const headers of refusals) {
+    const refused = await launch(headers, shared);
+    expect(refused.status, JSON.stringify(headers)).toBe(303);
+    expect(refused.headers.get("location")).toBe("/share#error=rejected");
+  }
+  const withFile = new FormData();
+  withFile.set("text", new File(["x"], "x.txt", { type: "text/plain" }));
+  expect(
+    (await launch({ "sec-fetch-site": "none" }, withFile)).headers.get(
+      "location",
+    ),
+  ).toBe("/share#error=invalid");
+  // The launch itself never wrote.
+  expect(
+    (await fixture<Inspection>("inspect", { userId })).snapshot.nodes,
+  ).toEqual([]);
+
+  const add = (
+    headers: Record<string, string>,
+    body: typeof CaptureBody.Type,
+  ) =>
+    mf.dispatchFetch("http://fixture/api/share", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+  const payload = {
+    attemptId: randomUUID(),
+    date: "2026-11-13",
+    text: "- [ ] shared task\n  - nested note",
+  };
+  // A key is not a session, and a session is not a key.
+  expect(
+    (
+      await add(
+        { authorization: `Bearer ${key}`, origin: "http://fixture" },
+        payload,
+      )
+    ).status,
+  ).toBe(401);
+  expect((await api("/api/capture", "", payload)).response.status).toBe(401);
+  const cookieOnCapture = await mf.dispatchFetch("http://fixture/api/capture", {
+    method: "POST",
+    headers: {
+      cookie,
+      origin: "http://fixture",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  expect(cookieOnCapture.status).toBe(401);
+  // The session still needs this server's Origin.
+  const foreign = await add({ cookie, origin: "https://evil.test" }, payload);
+  expect(foreign.status).toBe(403);
+  expect(
+    (await fixture<Inspection>("inspect", { userId })).snapshot.nodes,
+  ).toEqual([]);
+
+  const saved = await add({ cookie, origin: "http://fixture" }, payload);
+  expect(saved.status).toBe(200);
+  // SAFETY: a 200 from /api/share is the capture receipt (worker/capture.ts).
+  const receipt = (await saved.json()) as CaptureReceipt & {
+    replayed: boolean;
+  };
+  expect(receipt).toMatchObject({
+    saved: true,
+    date: "2026-11-13",
+    replayed: false,
+  });
+  const replay = await add({ cookie, origin: "http://fixture" }, payload);
+  expect(await replay.json()).toEqual({ ...receipt, replayed: true });
+  const { snapshot } = await fixture<Inspection>("inspect", { userId });
+  const task = snapshot.nodes.find((node) => node.id === receipt.nodeId)!;
+  expect(task).toMatchObject({
+    text: "shared task",
+    isTask: true,
+    parentId: receipt.dailyNoteId,
+  });
+  expect(
+    snapshot.nodes.filter((node) => node.parentId === task.id),
+  ).toMatchObject([{ text: "nested note" }]);
+  expect(
+    snapshot.nodes.filter((node) => node.parentId === receipt.dailyNoteId),
+  ).toHaveLength(1);
+});
