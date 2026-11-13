@@ -126,9 +126,17 @@ export function BandSoundControl({ ghost }: { ghost?: string }) {
 }
 
 /** The floating window: a popover would open in the page, not the window, so
- * a native select switches sounds in place. */
-export function CardSoundControl({ ghost }: { ghost?: string }) {
+ * a native select switches sounds in place. In overtime, Done, +5 min, and Let
+ * go fill the 300px footer, so only play/pause stays. */
+export function CardSoundControl({
+  ghost,
+  playOnly = false,
+}: {
+  ghost?: string;
+  playOnly?: boolean;
+}) {
   const { sound } = useAmbience();
+  if (playOnly) return <PlayButton ghost={ghost} compact />;
   return (
     <span className="flex items-center gap-0.5" data-testid="focus-sound">
       <PlayButton ghost={ghost} compact />

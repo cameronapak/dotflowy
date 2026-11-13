@@ -121,7 +121,8 @@ strip down its edge where scrollbars always show.
 A focus sound plays only while focus time runs. It pauses with the session,
 rests through Pomodoro breaks and comes back when the next round starts, goes
 quiet at time is up so the "attention" cue marks that moment (pressing play
-carries it into overtime), and stops when the session ends.
+carries it into overtime), and stops when the session ends or is replaced,
+even by a session started with Sound Off in another tab.
 
 - **Controls.** The picker has a Sound row: Off or one of the sounds. Its choice
   is remembered and starts the sound with the session, since the Start button is
@@ -129,7 +130,8 @@ carries it into overtime), and stops when the session ends.
   named for the sound and a chevron that opens the sound list and a volume
   slider (a bottom sheet on phones); choosing a sound plays it. The PiP window
   has a play/pause icon and a native select, because a popover would open in
-  the page rather than the window. Cmd+K offers "Play/Pause focus sound" and
+  the page rather than the window; in overtime only play/pause stays, since
+  Done, +5 min, and Let go fill its footer. Cmd+K offers "Play/Pause focus sound" and
   "Focus sound: …" while focusing.
 - **Remembered in this browser.** The sound, volume, and whether the picker
   starts one are stored in `localStorage`, like the last session length. Playing

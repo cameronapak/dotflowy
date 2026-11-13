@@ -366,7 +366,7 @@ function FocusSurface({
       <>
         {session.phase === "focus" &&
           (card ? (
-            !up && <CardSoundControl ghost={ghost} />
+            <CardSoundControl ghost={ghost} playOnly={up} />
           ) : (
             <BandSoundControl ghost={ghost} />
           ))}

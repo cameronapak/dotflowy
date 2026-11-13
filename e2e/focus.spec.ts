@@ -593,14 +593,26 @@ test("a rejected Focus sessions off-save keeps the running session", async ({
 test("a focus sound starts with the session, follows pause, switches, stops, and is remembered", async ({
   page,
 }) => {
-  // Record each looping source so the test can tell what is sounding: the
+  // Two tabs, a PiP window, and a timed session share this one journey, like
+  // the PiP reflection journey above; assertions keep their 5s budget.
+  test.setTimeout(60_000);
+  // Record each focus sound loop so the test can tell what is sounding: the
   // looped buffer's length names the sound, its context's state says whether
-  // audio is coming out.
+  // audio is coming out. Focus sounds ask for a "playback" context; the
+  // Cuelume cues use their own, and the time-up cue also loops.
   await page.addInitScript(() => {
     const loops: AudioBufferSourceNode[] = [];
+    const playback = new WeakSet<BaseAudioContext>();
+    const Context = AudioContext;
+    globalThis.AudioContext = class extends Context {
+      constructor(options?: AudioContextOptions) {
+        super(options);
+        if (options?.latencyHint === "playback") playback.add(this);
+      }
+    };
     const start = AudioBufferSourceNode.prototype.start;
     AudioBufferSourceNode.prototype.start = function (...args) {
-      if (this.loop) loops.push(this);
+      if (this.loop && playback.has(this.context)) loops.push(this);
       return start.apply(this, args);
     };
     Object.assign(globalThis, {
@@ -670,5 +682,57 @@ test("a focus sound starts with the session, follows pause, switches, stops, and
   await expect(
     band(page).getByRole("button", { name: "Play Clock tick", exact: true }),
   ).toBeVisible();
+  await expect.poll(audio).toBe("suspended 1s");
+
+  // A session started in another tab with Sound Off silences this tab.
+  await band(page)
+    .getByRole("button", { name: "Play Clock tick", exact: true })
+    .click();
+  await expect.poll(audio).toBe("running 1s");
+  const other = await page.context().newPage();
+  await seedOutline(other, TREE);
+  await openSeededOutline(other, { anchorId: "other" });
+  await picker(other, "other");
+  const otherDialog = other.getByRole("dialog", { name: "Focus session" });
+  await otherDialog.getByRole("button", { name: "Off", exact: true }).click();
+  await otherDialog
+    .getByRole("button", { name: "Start focus session", exact: true })
+    .click();
+  await expect(band(page)).toContainText("Other work");
+  await expect.poll(audio).toBe("suspended 1s");
+  await expect(
+    band(page).getByRole("button", { name: "Play Clock tick", exact: true }),
+  ).toBeVisible();
+  await other.close();
+
+  // At time is up the sound goes quiet, and the floating window can still
+  // play and pause it in overtime.
+  await picker(page);
+  await dialog.getByRole("button", { name: "Custom", exact: true }).click();
+  await dialog
+    .getByRole("spinbutton", { name: "Minutes", exact: true })
+    .fill("0.1");
+  await dialog.getByRole("button", { name: "Clock tick", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Start focus session", exact: true })
+    .click();
+  await expect.poll(audio).toBe("running 1s");
+  // The band offers Pop out only while time runs.
+  const popupPromise = page.context().waitForEvent("page");
+  await band(page)
+    .getByRole("button", { name: "Pop out focus session", exact: true })
+    .click();
+  const popup = await popupPromise;
+  await popup.setViewportSize({ width: 300, height: 180 });
+  const card = popup.getByRole("region", { name: "Focus card" });
+  await expect(card).toContainText("Time is up", { timeout: 10_000 });
+  await expect.poll(audio).toBe("suspended 1s");
+  await card
+    .getByRole("button", { name: "Play Clock tick", exact: true })
+    .click();
+  await expect.poll(audio).toBe("running 1s");
+  await card
+    .getByRole("button", { name: "Pause Clock tick", exact: true })
+    .click();
   await expect.poll(audio).toBe("suspended 1s");
 });

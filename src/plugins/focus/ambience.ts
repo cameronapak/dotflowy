@@ -90,8 +90,11 @@ function follow() {
   const session = getSession();
   let on = state.on;
   if (!session || session.phase === "reflect") on = false;
+  // A replacement session, even one started in another tab with Sound Off,
+  // ends this sound. playAmbience records the new ID first, so pressing play
+  // for the replacement still starts it.
+  else if (session.id !== lastSessionId) on = false;
   else if (
-    session.id === lastSessionId &&
     lastPhase === "focus" &&
     !lastNotified &&
     session.phase === "focus" &&
