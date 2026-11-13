@@ -76,8 +76,28 @@ test("Free previews never save, and leaving Settings restores the saved theme", 
 });
 
 /** Every check below its minimum for the theme and Mode now on <html>. */
-function contrastFailures(page: Page) {
-  return page.evaluate(() => {
+async function contrastFailures(page: Page) {
+  const hovered = [];
+  for (const [selector, property, min] of [
+    [".bullet-dot", "background-color", 3],
+    [".crumb-link", "color", 4.5],
+    [".crumb-ellipsis", "color", 4.5],
+  ] as const) {
+    const target = page.locator(selector).first();
+    await target.hover();
+    hovered.push(
+      await target.evaluate(
+        (el, { selector, property, min }) => ({
+          label: `hovered ${selector}`,
+          fg: getComputedStyle(el).getPropertyValue(property),
+          bg: getComputedStyle(el.closest("button")!).backgroundColor,
+          min,
+        }),
+        { selector, property, min },
+      ),
+    );
+  }
+  return page.evaluate((hovered) => {
     type Rgb = [number, number, number];
     // Resolve a CSS color through a probe, then composite the layers on a
     // 1px canvas: the sRGB a reader sees.
@@ -166,16 +186,27 @@ function contrastFailures(page: Page) {
         4.5,
       );
     }
+    for (const { label, fg, bg, min } of hovered)
+      check(label, fg, [page, bg], min);
     probe.remove();
     return failures;
-  });
+  }, hovered);
 }
 
 test("every theme and Mode keeps themed surfaces readable", async ({
   page,
 }) => {
-  await seedOutline(page, TREE);
-  await openSeededOutline(page, { anchorId: "a" });
+  await seedOutline(page, [
+    ...TREE,
+    { id: "b", parentId: "a", prevSiblingId: null, text: "Beta" },
+    { id: "c", parentId: "b", prevSiblingId: null, text: "Gamma" },
+    { id: "d", parentId: "c", prevSiblingId: null, text: "Delta" },
+    { id: "e", parentId: "d", prevSiblingId: null, text: "Epsilon" },
+    { id: "f", parentId: "e", prevSiblingId: null, text: "Zeta" },
+  ]);
+  await openSeededOutline(page, { path: "/e", anchorId: "f" });
+  // Measure settled hover colors, not a frame midway through a transition.
+  await page.addStyleTag({ content: "* { transition: none !important; }" });
   const failures: string[] = [];
   for (const theme of THEMES)
     for (const dark of [false, true]) {
