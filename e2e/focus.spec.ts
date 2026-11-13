@@ -589,3 +589,86 @@ test("a rejected Focus sessions off-save keeps the running session", async ({
     ),
   ).toHaveLength(1);
 });
+
+test("a focus sound starts with the session, follows pause, switches, stops, and is remembered", async ({
+  page,
+}) => {
+  // Record each looping source so the test can tell what is sounding: the
+  // looped buffer's length names the sound, its context's state says whether
+  // audio is coming out.
+  await page.addInitScript(() => {
+    const loops: AudioBufferSourceNode[] = [];
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...args) {
+      if (this.loop) loops.push(this);
+      return start.apply(this, args);
+    };
+    Object.assign(globalThis, {
+      focusAudio: () => {
+        const last = loops.at(-1);
+        return last
+          ? `${last.context.state} ${last.buffer?.duration}s`
+          : "silent";
+      },
+    });
+  });
+  const audio = () => page.evaluate<string>("focusAudio()");
+  await seedOutline(page, TREE);
+  await openSeededOutline(page, { anchorId: "draft" });
+
+  await picker(page);
+  const dialog = page.getByRole("dialog", { name: "Focus session" });
+  await dialog.getByRole("button", { name: "Rain", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Start focus session", exact: true })
+    .click();
+  await expect(
+    band(page).getByRole("button", { name: "Pause Rain", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  // Rain is a 20-second loop.
+  await expect.poll(audio).toBe("running 20s");
+
+  await band(page)
+    .getByRole("button", { name: "Pause focus session", exact: true })
+    .click();
+  await expect.poll(audio).toBe("suspended 20s");
+  await band(page)
+    .getByRole("button", { name: "Resume focus session", exact: true })
+    .click();
+  await expect.poll(audio).toBe("running 20s");
+
+  await band(page)
+    .getByRole("button", { name: "Choose focus sound", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Clock tick", exact: true }).click();
+  await page.keyboard.press("Escape");
+  // The clock ticks once a second, so its loop is one second long.
+  await expect.poll(audio).toBe("running 1s");
+  await band(page)
+    .getByRole("button", { name: "Pause Clock tick", exact: true })
+    .click();
+  await expect(
+    band(page).getByRole("button", { name: "Play Clock tick", exact: true }),
+  ).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(audio).toBe("suspended 1s");
+
+  await band(page)
+    .getByRole("button", { name: "End focus session", exact: true })
+    .click();
+  await band(page).getByRole("button", { name: "Skip", exact: true }).click();
+  await expect(band(page)).toHaveCount(0);
+
+  // The picker remembers the last sound, and Off starts a silent session.
+  await picker(page);
+  await expect(
+    dialog.getByRole("button", { name: "Clock tick", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await dialog.getByRole("button", { name: "Off", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Start focus session", exact: true })
+    .click();
+  await expect(
+    band(page).getByRole("button", { name: "Play Clock tick", exact: true }),
+  ).toBeVisible();
+  await expect.poll(audio).toBe("suspended 1s");
+});
