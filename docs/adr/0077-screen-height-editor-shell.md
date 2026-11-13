@@ -26,8 +26,20 @@ only while the pointer is inside the editor's bounds, in an edge band. Leaving
 the editor for header or subheader drop targets stops both axes; re-entering an
 edge band resumes scrolling within the same drag.
 
-The router resets `.outline-scroll` on new navigation and restores it on history
-navigation. Day stream search-param updates retain `resetScroll: false`.
+The router resets `.outline-scroll` on ordinary new navigation and restores it
+on history navigation. Explicit zoom-out uses `resetScroll: false`: the zoom
+landing owns its scroll position, so a later router reset must not erase it.
+Zoom-in starts fresh scroll history instead of inheriting the parent's offset.
+Zoom-out seeds the virtualizer's initial offset at the node being left, or its
+closest visible ancestor when a saved collapse state hides it. This mounts the
+return row for the incoming view-transition snapshot instead of scrolling an
+unmounted row into view after the morph starts. The zoom landing measures the
+mounted, decorated rows before refining the estimated offset, placing the return
+node one quarter of the way down the editor when scroll bounds allow. This leaves
+context above it and more room for its children below. Later observer measurements
+are batched on animation frames to avoid resize feedback loops while replacing
+windows. Zoom-in retains its nearest-edge reveal. Day stream search-param updates
+also retain `resetScroll: false`.
 Keyboard clearance belongs to the content inside the scroller; padding on the
 scroller itself can force its minimum height past the shell in landscape.
 

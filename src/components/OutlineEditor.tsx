@@ -1163,6 +1163,29 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     },
     count: items.length,
     ...sizing,
+    // Mount the zoom-out landing window before the browser captures the new
+    // view. Scrolling an unmounted pivot in a passive effect is too late for
+    // the shared-element morph. Hidden descendants land on a visible ancestor.
+    initialOffset: () => {
+      if (!pivotId || pivotId === rootId) return 0;
+      const index = getTreeIndex();
+      let target: string | null = pivotId;
+      let guard = index.byId.size + 1;
+      while (target !== null && guard-- > 0) {
+        const i = rowIndex.get(target);
+        if (i !== undefined) {
+          let offset = scrollMargin;
+          for (let j = 0; j < i; j++) offset += sizing.estimateSize(j);
+          return Math.max(0, offset - viewportHeight / 4);
+        }
+        if (target === rootId) break;
+        target = index.byId.get(target)?.parentId ?? null;
+      }
+      return 0;
+    },
+    // Landing can replace a measured window during history restoration. Batch
+    // observer-driven row changes in a frame to avoid resize feedback loops.
+    useAnimationFrameWithResizeObserver: true,
     overscan: 8,
     scrollMargin,
     // Seed the viewport size so the FIRST paint already has a non-empty window.
@@ -1249,6 +1272,42 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     });
     return () => setVirtualNav(null);
   }, [virtualizer]);
+
+  // Refine zoom-out after the landing focus and row text have mounted. The
+  // initial ref measurements precede decoration, so wrapped rows can still have
+  // empty-span heights. Measure this window before positioning the return node,
+  // rather than letting a later ResizeObserver move it down during the morph.
+  useEffect(() => {
+    if (!pivotId || pivotId === rootId) return;
+    const scroller = scrollRef.current;
+    const target = document.activeElement;
+    if (!(target instanceof HTMLElement) || !scroller?.contains(target)) return;
+    const scrollTop = scroller.scrollTop;
+    queueMicrotask(() => {
+      // History restoration can run between this effect and the refinement.
+      // Its saved position wins over the new-navigation landing.
+      if (!target.isConnected || scroller.scrollTop !== scrollTop) return;
+      const sizes = Array.from(
+        listRef.current?.querySelectorAll<HTMLLIElement>(
+          ":scope > li[data-index]",
+        ) ?? [],
+        (row) => [Number(row.dataset.index), row.offsetHeight] as const,
+      );
+      flushSync(() => {
+        for (const [index, height] of sizes)
+          virtualizer.resizeItem(index, height);
+      });
+      scroller.scrollBy({
+        top:
+          target.getBoundingClientRect().top -
+          scroller.getBoundingClientRect().top -
+          scroller.clientHeight / 4,
+        behavior: "instant",
+      });
+    });
+    // One landing per route mount, never re-center while the user edits.
+    // eslint-disable-next-line react-doctor/exhaustive-deps
+  }, []);
 
   // --- View stream behavior (ADR 0070) ---------------------------------------
   // Event-time reads go through refs, like the commands: the scroll listener
@@ -2464,9 +2523,13 @@ function useZoomNavigation({
       // Navigation changes the view root, never saved expansion state.
       if (prefersReducedMotion()) {
         // No morph, but still carry the pivot so the new view restores focus.
-        const state = { pivotId: pivot };
-        if (toRootId === null) navigate({ to: "/", state });
-        else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, state });
+        const opts = {
+          state: { pivotId: pivot },
+          resetScroll: pivot === toRootId,
+        };
+        if (toRootId === null) navigate({ to: "/", ...opts });
+        else
+          navigate({ to: "/$nodeId", params: { nodeId: toRootId }, ...opts });
         return;
       }
       // Retarget the morph name from this view's current pivot onto the new one.
@@ -2483,6 +2546,8 @@ function useZoomNavigation({
       }
       const opts = {
         state: { pivotId: pivot },
+        // Zoom-out owns its landing; zoom-in starts a fresh scroll history.
+        resetScroll: pivot === toRootId,
         viewTransition: { types: ["zoom"] },
       };
       if (toRootId === null) navigate({ to: "/", ...opts });
@@ -2512,10 +2577,9 @@ function useZoomNavigation({
   //  - Zooming IN (pivotId === rootId): the first visible child of the opened
   //    node, or its title when childless.
   //  - Zooming OUT: the node you came from, or its closest visible ancestor.
-  // Then scroll the target into view if it landed below the fold. Mount-only by
-  // design (the editor remounts per zoom view) and passive: each bullet's text
-  // is written in OutlineRow's own passive effect, so only by now is the list
-  // laid out at its real heights.
+  // Refine the virtualizer's estimated landing against the rendered text.
+  // Mount-only by design (the editor remounts per zoom view); the initial offset
+  // has already mounted the return row before the transition snapshot.
   useEffect(() => {
     if (!pivotId) return;
     const index = getTreeIndex();
