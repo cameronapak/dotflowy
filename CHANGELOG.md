@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.1.1
+
+### Patch Changes
+
+- 5ce70c0: Copy as Markdown now uses linked nodes' current text instead of raw node IDs, preserving Markdown formatting and URLs.
+
 ## 3.1.0
 
 ### Minor Changes
