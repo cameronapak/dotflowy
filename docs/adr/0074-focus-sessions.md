@@ -26,11 +26,13 @@ a session never dims the outline.
   row and zoomed title. The marker is a filled pie because a thin ring reads as
   a loading spinner at row size.
 - **The band stands out without a hue.** While a session runs, the band is a
-  solid `primary` fill with `primary-foreground` text and a 4px progress line,
-  so it contrasts with the page in both themes (about 17:1 light, 14:1 dark)
-  while Dotflowy stays black, white, and gray. In dark mode `primary` is
-  near-white, so the band reads as a bright bar, like a primary button. Time
-  is up fills the line across the band; the label goes full strength and Done
+  solid `primary` fill with `primary-foreground` text, so it contrasts with
+  the page in both modes (about 17:1 light, 14:1 dark) while the default theme
+  stays black, white, and gray. In dark mode `primary` is near-white, so the
+  band reads as a bright bar, like a primary button. Progress drains as the
+  same faint `primary-foreground` wash as the PiP window, behind the whole
+  band (November 2026; it was a 4px line). Time is up fills the wash across
+  the band; the label goes full strength and Done
   becomes the filled button. Focused controls on the fill draw a 2px offset
   outline in the text color. The in-page reflection field keeps the page
   surface. The title keeps at least 18rem, so crowded controls wrap below

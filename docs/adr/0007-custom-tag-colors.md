@@ -15,3 +15,8 @@ browser applies to all instances for free, with zero React re-renders.
 palette); put color on `Node` or per-occurrence (it's global to the tag _name_); or use
 per-instance classes. The generator skips unsafe tag names (`[\p{L}\p{N}_-]+` guard) — keep that,
 it's the CSS-injection guard.
+
+**November 2026:** the `--tag-*` palette moved from `tag-colors.ts` into `styles.css` and is now
+blended from the active color theme's background and foreground, in every theme including the
+default ([ADR 0082](./0082-color-themes.md)). Names, storage, and the `data-tag` stylesheet are
+unchanged.

@@ -3,6 +3,7 @@
 @import "tw-animate-css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
+@import "./themes.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -21,6 +22,8 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-ink: var(--ink);
+  --color-primary-ink: var(--primary-ink);
   --color-destructive: var(--destructive);
   --color-border: var(--border);
   --color-input: var(--input);
@@ -63,7 +66,8 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* 0.55, not shadcn's 0.556: 4.5:1 on this background (ADR 0082). */
+  --muted-foreground: oklch(0.55 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
@@ -84,11 +88,13 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
-  /* Node mirrors (ADR 0022): a source hue and a distinct instance hue, the only
-   * chromatic accents in an otherwise grayscale theme, so a colored edge reads at
-   * a glance. Tuned for light surfaces. */
-  --mirror-source: oklch(0.58 0.13 250);
-  --mirror-instance: oklch(0.6 0.16 300);
+  /* Outline ink (ADR 0082): bullet dots, quote bars, paragraph glyphs. The
+   * default theme keeps its historical accent-foreground; any other theme
+   * draws them from foreground, since shadcn pairs accent-foreground with
+   * accent, not with the page background. */
+  --ink: var(--accent-foreground);
+  --primary-ink: var(--primary);
+  --spoiler: var(--muted-foreground);
 }
 
 .dark {
@@ -123,9 +129,272 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
-  /* Brighter on dark surfaces (see :root). */
-  --mirror-source: oklch(0.72 0.13 250);
-  --mirror-instance: oklch(0.74 0.16 300);
+}
+
+/*
+ * Blended accents (ADR 0082): tags, highlights, mirror rings, links, and the
+ * selected Bible-ref atom, in every theme. Each palette color is ONE
+ * mid-lightness hue. A fill keeps a small share of it and takes the rest from
+ * the page background; an ink keeps a larger share and takes the rest from the
+ * foreground. Because foreground already contrasts with background in every
+ * theme, the pair inherits that contrast, and the same rule serves light, dark,
+ * and strongly colored themes (the un-harshify technique, in oklab).
+ */
+:root {
+  --hue-red: oklch(0.64 0.2 25);
+  --hue-orange: oklch(0.7 0.17 55);
+  --hue-yellow: oklch(0.82 0.16 90);
+  --hue-green: oklch(0.68 0.17 150);
+  --hue-teal: oklch(0.68 0.12 195);
+  --hue-blue: oklch(0.62 0.18 255);
+  --hue-indigo: oklch(0.58 0.19 280);
+  --hue-purple: oklch(0.62 0.2 310);
+  --hue-pink: oklch(0.66 0.2 345);
+  --tag-fill-mix: 24%;
+  --tag-ink-mix: 55%;
+  /* Ink keeps the hue but its lightness stays on the readable side of the
+     mode, so a theme with a soft foreground or a strongly colored background
+     cannot pull tag text under 4.5:1. */
+  --ink-l-min: 0;
+  --ink-l-max: 0.42;
+  /* Non-text contrast (WCAG 1.4.11, 3:1 on the page): the quote bar and an
+     unchecked checkbox's edge. Half ink, half page, with lightness kept far
+     enough from the page for a theme with a soft foreground. */
+  --edge-l-min: 0;
+  --edge-l-max: 0.6;
+  --quote-bar: oklch(
+    from color-mix(in oklab, var(--ink) 50%, var(--background))
+      clamp(var(--edge-l-min), l, var(--edge-l-max)) c h
+  );
+  --control-border: oklch(
+    from color-mix(in oklab, var(--foreground) 50%, var(--background))
+      clamp(var(--edge-l-min), l, var(--edge-l-max)) c h
+  );
+}
+
+.dark {
+  --tag-fill-mix: 28%;
+  --ink-l-min: 0.82;
+  --ink-l-max: 1;
+  --edge-l-min: 0.55;
+  --edge-l-max: 1;
+}
+
+:root {
+  --tag-red: color-mix(
+    in oklab,
+    var(--hue-red) var(--tag-fill-mix),
+    var(--background)
+  );
+  --tag-red-fg: oklch(
+    from
+      color-mix(in oklab, var(--hue-red) var(--tag-ink-mix), var(--foreground))
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  --tag-orange: color-mix(
+    in oklab,
+    var(--hue-orange) var(--tag-fill-mix),
+    var(--background)
+  );
+  --tag-orange-fg: oklch(
+    from
+      color-mix(
+        in oklab,
+        var(--hue-orange) var(--tag-ink-mix),
+        var(--foreground)
+      )
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  --tag-yellow: color-mix(
+    in oklab,
+    var(--hue-yellow) var(--tag-fill-mix),
+    var(--background)
+  );
+  --tag-yellow-fg: oklch(
+    from
+      color-mix(
+        in oklab,
+        var(--hue-yellow) var(--tag-ink-mix),
+        var(--foreground)
+      )
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  --tag-green: color-mix(
+    in oklab,
+    var(--hue-green) var(--tag-fill-mix),
+    var(--background)
+  );
+  --tag-green-fg: oklch(
+    from
+      color-mix(
+        in oklab,
+        var(--hue-green) var(--tag-ink-mix),
+        var(--foreground)
+      )
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  --tag-teal: color-mix(
+    in oklab,
+    var(--hue-teal) var(--tag-fill-mix),
+    var(--background)
+  );
+  --tag-teal-fg: oklch(
+    from
+      color-mix(in oklab, var(--hue-teal) var(--tag-ink-mix), var(--foreground))
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  --tag-blue: color-mix(
+    in oklab,
+    var(--hue-blue) var(--tag-fill-mix),
+    var(--background)
+  );
+  --tag-blue-fg: oklch(
+    from
+      color-mix(in oklab, var(--hue-blue) var(--tag-ink-mix), var(--foreground))
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  --tag-indigo: color-mix(
+    in oklab,
+    var(--hue-indigo) var(--tag-fill-mix),
+    var(--background)
+  );
+  --tag-indigo-fg: oklch(
+    from
+      color-mix(
+        in oklab,
+        var(--hue-indigo) var(--tag-ink-mix),
+        var(--foreground)
+      )
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  --tag-purple: color-mix(
+    in oklab,
+    var(--hue-purple) var(--tag-fill-mix),
+    var(--background)
+  );
+  --tag-purple-fg: oklch(
+    from
+      color-mix(
+        in oklab,
+        var(--hue-purple) var(--tag-ink-mix),
+        var(--foreground)
+      )
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  --tag-pink: color-mix(
+    in oklab,
+    var(--hue-pink) var(--tag-fill-mix),
+    var(--background)
+  );
+  --tag-pink-fg: oklch(
+    from
+      color-mix(in oklab, var(--hue-pink) var(--tag-ink-mix), var(--foreground))
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  /* Node mirrors (ADR 0022) and links lean toward the foreground, so they
+     keep 3:1 and 4.5:1 against any background. */
+  --mirror-source: color-mix(in oklab, var(--hue-blue) 75%, var(--foreground));
+  --mirror-instance: color-mix(
+    in oklab,
+    var(--hue-purple) 75%,
+    var(--foreground)
+  );
+  --link: oklch(
+    from color-mix(in oklab, var(--hue-blue) 70%, var(--foreground))
+      min(l, 0.45) c h
+  );
+  --atom-ring: color-mix(in oklab, var(--hue-blue) 80%, var(--foreground));
+  --atom-fill: color-mix(in oklab, var(--hue-blue) 20%, var(--background));
+  --atom-ink: oklch(
+    from color-mix(in oklab, var(--hue-blue) 45%, var(--foreground))
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+}
+
+.dark {
+  --link: oklch(
+    from color-mix(in oklab, var(--hue-blue) 70%, var(--foreground))
+      max(l, 0.74) c h
+  );
+}
+
+/* Any non-neutral theme: ink from foreground, and the glass and sheet surfaces
+   tinted from the theme instead of the package's fixed neutral grays. */
+.themed {
+  --ink: var(--foreground);
+}
+
+/* Dotflowy uses `accent` as the subtle hover and selection surface, and menus
+   as a raised sheet of the page. Registry themes often use accent as a loud
+   brand color and ship popovers darker than the page (Catppuccin) or pure
+   white (Claude), so every theme derives both here. The doubled class outranks
+   the theme blocks in themes.css. */
+:root.themed.themed {
+  --popover: color-mix(in oklab, var(--background), white 55%);
+  --popover-foreground: var(--foreground);
+  --accent: color-mix(in oklab, var(--primary) 10%, var(--popover));
+  --accent-foreground: var(--foreground);
+  /* Secondary is a quiet chip and pulse surface in Dotflowy (Bible-ref chips,
+     date chips, the breadcrumb "…", the moved-node flash). Registry themes
+     ship it near-white in dark mode (Claude) or near-black in light (Twitter). */
+  --secondary: color-mix(in oklab, var(--foreground) 8%, var(--background));
+  --secondary-foreground: var(--foreground);
+  /* Text on primary (Today chip, Focus, filled buttons) stays the theme's
+     own choice; the primary moves lightness just enough for it to read. The
+     bounds come from themes.css (generated). */
+  --primary: oklch(
+    from var(--primary-raw) clamp(var(--primary-l-min), l, var(--primary-l-max))
+      c h
+  );
+  /* Links take the theme's primary hue when it has one. */
+  --link: oklch(
+    from var(--link-source, var(--hue-blue))
+      clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  /* Primary used as text (node-link chips) keeps its hue at a readable
+     lightness, like tag ink. */
+  --primary-ink: oklch(
+    from var(--primary) clamp(var(--ink-l-min), l, var(--ink-l-max)) c h
+  );
+  /* The spoiler bar blends the theme's primary into the page, like a tag
+     fill but stronger, so it still reads as a solid redaction. */
+  --spoiler: oklch(
+    from color-mix(in oklab, var(--primary) 45%, var(--background))
+      clamp(var(--spoiler-l-min), l, var(--spoiler-l-max)) c h
+  );
+  --spoiler-l-min: 0;
+  --spoiler-l-max: 0.58;
+  /* Registry muted text is often too faint (Claude light 3.65:1), so it is
+     the theme's own foreground faded toward the page, clamped like tag ink. */
+  --muted-foreground: oklch(
+    from color-mix(in oklab, var(--foreground) 72%, var(--background))
+      clamp(var(--muted-l-min), l, var(--muted-l-max)) c h
+  );
+  --muted-l-min: 0;
+  --muted-l-max: 0.5;
+}
+
+:root.themed.themed.dark {
+  --popover: color-mix(in oklab, var(--background), white 7%);
+  --spoiler-l-min: 0.62;
+  --spoiler-l-max: 1;
+  --muted-l-min: 0.74;
+  --muted-l-max: 1;
+}
+
+.themed,
+.themed [data-theme] {
+  --lg-sheet-opaque: var(--popover);
+  --lg-surface: color-mix(in srgb, var(--popover) 86%, transparent);
+  --lg-separator: var(--border);
+  --lg-foreground: var(--foreground);
+  --lg-muted: var(--muted-foreground);
+}
+
+:root.themed .mobile-glass-header,
+:root.themed .mobile-actions-bar,
+:root.themed .mobile-navigation {
+  --lg-glass-tinted: color-mix(in srgb, var(--background) 96%, transparent);
 }
 
 @layer base {
@@ -1046,7 +1315,7 @@ h2 span.protection-indicator {
  */
 .bullet:hover,
 .bullet:has(span[data-has-children="true"][data-collapsed="true"]) {
-  @apply bg-accent-foreground/10;
+  @apply bg-ink/10;
 }
 
 .bullet:hover .bullet-dot {
@@ -1054,7 +1323,7 @@ h2 span.protection-indicator {
 }
 
 .bullet-dot {
-  @apply block size-1.75 rounded-full bg-accent-foreground/70;
+  @apply block size-1.75 rounded-full bg-ink/70;
   transition: background-color 0.15s ease;
 }
 
@@ -1067,7 +1336,7 @@ h2 span.protection-indicator {
  * `background-color` since the glyph is a `currentColor` SVG.
  */
 .bullet-paragraph {
-  @apply flex items-center justify-center text-accent-foreground/30;
+  @apply flex items-center justify-center text-ink/30;
   transition: color 0.15s ease;
 }
 
@@ -1136,7 +1405,7 @@ h2 span.protection-indicator {
 }
 
 .bullet-quote {
-  @apply block h-full rounded-full bg-accent-foreground/35;
+  @apply block h-full rounded-full bg-(--quote-bar);
   width: 3px;
   transition:
     background-color 0.15s ease,
@@ -1437,7 +1706,7 @@ h2.zoomed-title .row-body > .title-paragraph {
    inside a carved gutter on narrow screens, outdented into the margin on wide
    ones. It spans the title's lines, not a fixed glyph box. */
 .title-quote {
-  @apply rounded-full bg-accent-foreground/35;
+  @apply rounded-full bg-(--quote-bar);
   width: 3px;
   pointer-events: none;
 }
@@ -1596,8 +1865,7 @@ h2.zoomed-title .row-body > .title-quote {
    revealed `.quote-marker-reveal` text; either one leads the line. */
 .quick-add-editor .node-text:has(> .quote-marker, > .quote-marker-reveal) {
   padding-inline-start: 12px;
-  box-shadow: inset 3px 0 0
-    color-mix(in oklab, var(--accent-foreground) 35%, transparent);
+  box-shadow: inset 3px 0 0 var(--quote-bar);
 }
 
 /* Quick-add mini-editor (ADR 0049): show its placeholder while the capture is
@@ -2065,13 +2333,8 @@ h2.zoomed-title .row-body > .title-number {
    label but the URL stays folded behind a `(✎)` chip -- the raw url never
    expands into the line. At most one link reveals at a time (under caret). */
 .node-link {
-  color: oklch(0.5 0.18 255);
-  text-decoration-color: oklch(0.5 0.18 255 / 0.5);
-}
-
-.dark .node-link {
-  color: oklch(0.78 0.13 245);
-  text-decoration-color: oklch(0.78 0.13 245 / 0.5);
+  color: var(--link);
+  text-decoration-color: color-mix(in oklab, var(--link) 50%, transparent);
 }
 
 .node-link:hover {
@@ -2088,11 +2351,7 @@ h2.zoomed-title .row-body > .title-number {
 }
 
 .link-label {
-  color: oklch(0.5 0.18 255);
-}
-
-.dark .link-label {
-  color: oklch(0.78 0.13 245);
+  color: var(--link);
 }
 
 /* The site favicon, leading a folded link (Google s2/favicons). It sits inside the <a>
@@ -2270,7 +2529,7 @@ h2.zoomed-title .row-body > .title-number {
 .link-url-chip {
   cursor: pointer;
   user-select: none;
-  color: oklch(0.5 0.18 255);
+  color: var(--link);
   /* The literal parentheses already frame this inline control. Do not carry
      the folded button's horizontal padding into `(✎)` or enlarge its line. */
   min-width: 0;
@@ -2279,30 +2538,17 @@ h2.zoomed-title .row-body > .title-number {
   vertical-align: -0.02em;
 }
 
-.dark .link-url-chip {
-  color: oklch(0.78 0.13 245);
-}
-
 .link-url-chip .link-edit-icon {
   margin-left: 0;
 }
 
 dotflowy-widget[data-bible-ref][data-atom-selected] > span {
-  border-color: oklch(0.62 0.15 250);
-  background: oklch(0.94 0.05 250);
-  color: oklch(0.33 0.14 255);
+  border-color: var(--atom-ring);
+  background: var(--atom-fill);
+  color: var(--atom-ink);
   box-shadow:
-    0 0 0 1px oklch(0.62 0.15 250),
-    0 0 0 4px oklch(0.62 0.15 250 / 0.18);
-}
-
-.dark dotflowy-widget[data-bible-ref][data-atom-selected] > span {
-  border-color: oklch(0.74 0.13 245);
-  background: oklch(0.3 0.08 250);
-  color: oklch(0.9 0.05 245);
-  box-shadow:
-    0 0 0 1px oklch(0.74 0.13 245),
-    0 0 0 4px oklch(0.74 0.13 245 / 0.24);
+    0 0 0 1px var(--atom-ring),
+    0 0 0 4px color-mix(in oklab, var(--atom-ring) 20%, transparent);
 }
 
 :root {
@@ -2471,7 +2717,7 @@ body:has(.typing-suggestions) [data-mobile-bar] {
 }
 
 .stream-entry .bullet-dot {
-  @apply bg-accent-foreground/25;
+  @apply bg-ink/25;
 }
 
 .stream-entry-text {

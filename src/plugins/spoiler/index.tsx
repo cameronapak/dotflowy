@@ -31,7 +31,8 @@ import { definePlugin, type El, type PluginContext } from "../types";
 
 const SPOILER_MARKER: MarkerPair = { pre: "||", post: "||" };
 
-// The at-rest opaque bar: `bg-muted-foreground` paints the whole run in a solid
+// The at-rest opaque bar: `--spoiler` (muted-foreground in the default theme,
+// a primary blend in other color themes, ADR 0082) paints the whole run in a solid
 // mid-grey (a spoiler bar, deliberately NOT the harsh primary black) and
 // `text-transparent` hides the letters behind it, so the interior is present in
 // the DOM (selectable, and `data-src` carries the raw `||text||` so in-app
@@ -44,7 +45,7 @@ const SPOILER_MARKER: MarkerPair = { pre: "||", post: "||" };
 // against the fences on BOTH edges when revealed (padding would inset the fence
 // and read as a phantom space on the left). `rounded` still softens the ends.
 const BAR_CLASS =
-  "md-spoiler bg-muted-foreground text-transparent rounded-[0.25em] box-decoration-clone cursor-text";
+  "md-spoiler bg-(--spoiler) text-transparent rounded-[0.25em] box-decoration-clone cursor-text";
 
 // The revealed container: no bar (the interior must be legible), the interior
 // in MUTED text, the dimmed `||` fences INSIDE it as real walk-through text (so

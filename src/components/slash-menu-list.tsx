@@ -31,7 +31,7 @@ export function SlashMenuList({
       className={!inDock ? "fixed" : undefined}
       entries={items.map((item) => ({
         key: item.id,
-        render: () => {
+        render: (active) => {
           const Icon = item.icon;
           return (
             <>
@@ -39,7 +39,15 @@ export function SlashMenuList({
               <span className="flex min-w-0 flex-col">
                 <span className="truncate font-medium">{item.label}</span>
                 {!inDock && (
-                  <span className="text-xs text-muted-foreground">
+                  // On the selected row the hint fades from the row's own
+                  // ink, so it reads on any theme's highlight (ADR 0082).
+                  <span
+                    className={
+                      active
+                        ? "text-xs text-accent-foreground/85"
+                        : "text-xs text-muted-foreground"
+                    }
+                  >
                     {item.description}
                   </span>
                 )}

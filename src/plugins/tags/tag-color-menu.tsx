@@ -10,26 +10,21 @@ import {
   TAG_COLORS,
   clearTagColor,
   setTagColor,
-  tagColorPaletteCss,
   tagColorsCss,
   useTagColor,
   useTagColorRows,
 } from "../../data/tag-colors";
 
 /**
- * Named tag color pairs + per-tag overrides. Mounted once in __root__. Palette
- * custom properties and generated `[data-tag]` rules live here so the tags
- * plugin owns all tag paint CSS; surfaces use Tailwind for the neutral default.
+ * Per-tag color overrides, mounted once in __root__. The generated `[data-tag]`
+ * rules live here so the tags plugin owns which tag gets which color. The
+ * `--tag-*` palette itself is in styles.css, blended toward the active color
+ * theme (ADR 0082); surfaces use Tailwind for the neutral default.
  */
 export function TagColorStyles() {
   const rows = useTagColorRows();
   const overrides = tagColorsCss(rows);
-  return (
-    <>
-      <style data-tag-palette>{tagColorPaletteCss}</style>
-      <style data-tag-colors>{overrides}</style>
-    </>
-  );
+  return <style data-tag-colors>{overrides}</style>;
 }
 
 /**

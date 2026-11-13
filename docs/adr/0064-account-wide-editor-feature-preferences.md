@@ -102,3 +102,10 @@ with the same rollback toast, and plugin settings share one row layout
 - The per-feature "When off" explanation panels are removed. The "Off." line
   and the section caption carry the same promise: turning a plugin off never
   deletes notes.
+
+## November 2026 amendment: Color theme
+
+`appearance:color-theme` stores the account's color theme in the same
+namespace, so it follows the user across devices; Mode stays per device. The
+row decodes as any string, and a missing row or unknown id means the default
+theme. See [ADR 0082](./0082-color-themes.md).
