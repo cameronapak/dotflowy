@@ -1,4 +1,4 @@
-import { ExternalLinkIcon, TriangleAlertIcon } from "lucide-react";
+import { ExternalLinkIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { Bump, Release } from "../data/changelog-data";
@@ -106,31 +106,31 @@ function InlineMarkdown({ source }: { source: string }) {
 
 function ReleaseSection({ release }: { release: Release }) {
   return (
-    <section className="flex flex-col gap-2" data-testid="changelog-release">
+    <section
+      className="flex min-w-0 shrink-0 flex-col gap-3"
+      data-testid="changelog-release"
+    >
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold">{release.version}</h3>
         <time className="text-xs text-muted-foreground">
           {formatDate(release.date)}
         </time>
       </div>
-      {/* One shared badge column, not per-row `flex`: "Changed"/"Added"/"Fixed"
-          are different widths, so a flex row starts each summary at its own x
-          and the paragraphs stagger. A fixed 76px label column (wide enough for
-          every badge) plus `subgrid` on each row means all summaries hang off
-          the same left edge. */}
-      <ul className="grid grid-cols-[76px_1fr] gap-x-2 gap-y-2">
+      {/* Stack badges above full-width summaries on phones. Desktop keeps a
+          shared badge column so different label widths do not stagger text. */}
+      <ul className="grid grid-cols-1 gap-x-2 gap-y-4 sm:grid-cols-[76px_minmax(0,1fr)] sm:gap-y-2">
         {release.entries.map((entry, i) => (
           <li
             key={i}
-            className="col-span-2 grid grid-cols-subgrid items-start text-sm"
+            className="grid min-w-0 grid-cols-1 items-start gap-y-1 text-sm sm:col-span-2 sm:grid-cols-subgrid"
           >
             <Badge
               variant={BUMP_VARIANT[entry.bump]}
-              className="mt-0.5 justify-center"
+              className="mt-0.5 justify-center justify-self-start sm:justify-self-stretch"
             >
               {BUMP_LABEL[entry.bump]}
             </Badge>
-            <span className="min-w-0 whitespace-pre-line text-muted-foreground">
+            <span className="min-w-0 wrap-anywhere whitespace-pre-line text-muted-foreground">
               <InlineMarkdown source={entry.summary} />
             </span>
           </li>
@@ -145,7 +145,7 @@ export function ChangelogDialog() {
   const unseen = useUnseenReleaseCount();
   /** The unseen count as it was the moment the dialog opened. Read here because
    *  opening MARKS SEEN, which drives `unseen` to 0 before the first paint —
-   *  the "Breaking" callout must speak about what the reader hadn't read yet,
+   *  the update note must speak about what the reader hadn't read yet,
    *  not about every major bump in the project's history. */
   const [unseenAtOpen, setUnseenAtOpen] = useState(0);
 
@@ -168,8 +168,11 @@ export function ChangelogDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="sm:max-w-lg" data-testid="changelog-dialog">
-        <DialogHeader>
+      <DialogContent
+        className="flex max-h-[calc(100dvh-2rem)] flex-col sm:max-w-lg"
+        data-testid="changelog-dialog"
+      >
+        <DialogHeader className="shrink-0 pr-6">
           <DialogTitle>What's new</DialogTitle>
           <DialogDescription>
             Every change to Dotflowy, newest first.
@@ -177,23 +180,28 @@ export function ChangelogDialog() {
         </DialogHeader>
 
         {breaking && (
-          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-            <TriangleAlertIcon className="mt-px size-4 shrink-0" />
-            <p>
-              Something below is marked <strong>Changed</strong> — it asks
-              something of you: relearn a gesture, fix an agent prompt, or
-              re-export a file.
+          <aside
+            aria-label="About these updates"
+            className="flex shrink-0 flex-col gap-1 rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground"
+          >
+            <p className="font-medium text-foreground">
+              Updates to how things work
             </p>
-          </div>
+            <p>
+              Entries marked{" "}
+              <strong className="font-medium text-foreground">Changed</strong>{" "}
+              explain what’s different and any steps you need to take.
+            </p>
+          </aside>
         )}
 
-        <div className="flex max-h-[50vh] scroll-fade flex-col gap-5 overflow-y-auto pr-1">
+        <div className="flex min-h-0 min-w-0 flex-1 scroll-fade-y flex-col gap-6 overflow-y-auto overscroll-contain sm:max-h-[50vh] sm:pr-1">
           {releases.map((release) => (
             <ReleaseSection key={release.version} release={release} />
           ))}
         </div>
 
-        <DialogFooter className="sm:justify-between">
+        <DialogFooter className="shrink-0 flex-row items-center justify-between sm:justify-between">
           <Button
             variant="ghost"
             size="sm"
