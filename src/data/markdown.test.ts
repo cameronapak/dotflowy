@@ -104,6 +104,50 @@ test.each([
   },
 );
 
+test("exports node links as current target markdown without pulling in target children", () => {
+  const targetId = "11111111-2222-3333-4444-555555555555";
+  const nestedId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const mirrorId = "n_mirror_target";
+  const missingId = "00000000-0000-0000-0000-000000000000";
+  const index = buildTreeIndex([
+    createNode({ id: "root", text: "Hours", isTask: true }),
+    createNode({
+      id: "child",
+      parentId: "root",
+      text: `Review [[${targetId}]] then [[${mirrorId}]]; [[${missingId}]]; [[not an id]]`,
+    }),
+    createNode({
+      id: targetId,
+      text: `**Docs** [PR](https://example.com/pr) for [[${nestedId}]]`,
+    }),
+    createNode({ id: nestedId, text: "DevRel" }),
+    createNode({ id: mirrorId, mirrorOf: targetId }),
+    createNode({
+      id: "excluded",
+      parentId: targetId,
+      text: "Not linked content",
+    }),
+  ]);
+  expect(outlineToMarkdown(index, ["root"])).toBe(
+    "- [ ] Hours\n  - Review **Docs** [PR](https://example.com/pr) for DevRel then **Docs** [PR](https://example.com/pr) for DevRel; missing link; [[not an id]]",
+  );
+
+  index.byId.set(nestedId, {
+    ...index.byId.get(nestedId)!,
+    text: "Renamed DevRel",
+  });
+  expect(outlineToMarkdown(index, ["child"])).toContain("for Renamed DevRel");
+  expect(index.byId.get("child")!.text).toContain(`[[${targetId}]]`);
+
+  index.byId.set(nestedId, {
+    ...index.byId.get(nestedId)!,
+    text: `cycle [[${targetId}]]`,
+  });
+  expect(outlineToMarkdown(index, [targetId])).toBe(
+    "- **Docs** [PR](https://example.com/pr) for cycle …\n  - Not linked content",
+  );
+});
+
 test("an unknown root id contributes nothing", () => {
   const index = buildTreeIndex([createNode({ id: "a", text: "a" })]);
   expect(outlineToMarkdown(index, ["ghost"])).toBe("");

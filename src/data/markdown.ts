@@ -2,6 +2,7 @@ import type { Node } from "./schema";
 
 import { bibleRefsToMarkdownLinks } from "../plugins/route-bible/bible";
 import { paragraphRoundTrips } from "./markdown-import";
+import { linkTargetId, NODE_LINK_PATTERN } from "./node-links";
 import { numberedOrdinals } from "./numbering";
 import { childrenOf, trueSourceOf, type TreeIndex } from "./tree";
 
@@ -32,6 +33,25 @@ function prefixFor(
   return "- ";
 }
 
+/** Resolve inline pointers, not subtrees. Keep markdown formatting and URLs;
+ *  a path-local guard terminates cycles without suppressing repeated links. */
+function resolveNodeLinks(
+  index: TreeIndex,
+  text: string,
+  path: Set<string>,
+): string {
+  return text.replace(new RegExp(NODE_LINK_PATTERN, "g"), (token) => {
+    const id = trueSourceOf(index, linkTargetId(token));
+    const target = index.byId.get(id);
+    if (!target) return "missing link";
+    if (path.has(id)) return "…";
+    path.add(id);
+    const label = resolveNodeLinks(index, target.text, path);
+    path.delete(id);
+    return label;
+  });
+}
+
 function emit(
   index: TreeIndex,
   id: string,
@@ -51,11 +71,12 @@ function emit(
   // falls back to its own stored snapshot text.
   const content = index.byId.get(trueSourceOf(index, id)) ?? node;
   // `content.text` is mostly already the markdown source (links `[label](url)`,
-  // `#tags`, inline `code`). Route-bible chips are the exception: they store
-  // plain reference text and derive the URL at render time, so export projects
-  // them to portable markdown links. Empty text yields a bare `- ` bullet,
-  // preserving structure. See ADR 0017.
-  const text = bibleRefsToMarkdownLinks(content.text);
+  // `#tags`, inline `code`). Node links become their current target text, and
+  // Bible references become portable markdown links. Empty text yields a bare
+  // `- ` bullet, preserving structure. See ADR 0017.
+  const text = bibleRefsToMarkdownLinks(
+    resolveNodeLinks(index, content.text, new Set([content.id])),
+  );
   const ordinal =
     content.kind === "numbered"
       ? ordinalsFor(node.parentId).get(id)
@@ -84,8 +105,8 @@ function emit(
  * view-agnostic -- its only inputs are the index and the roots. See ADR 0017.
  *
  * The inverse is `markdown-import.ts`; the pair is held to
- * `parse(outlineToMarkdown(t)) === t` (ADR 0044) with three documented
- * exceptions, one of which is the mirror flattening `emit` performs above.
+ * `parse(outlineToMarkdown(t)) === t` (ADR 0044) with documented portability
+ * exceptions, including mirror expansion and node links becoming target text.
  */
 export function outlineToMarkdown(index: TreeIndex, rootIds: string[]): string {
   const lines: string[] = [];

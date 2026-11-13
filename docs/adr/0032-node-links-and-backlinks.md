@@ -26,8 +26,10 @@ store the target's text, Obsidian-style (node text isn't unique, renames break e
 title→id resolution pass); store a snapshot label in a `[label](dotflowy://id)` markdown shape (the
 frozen label lies the moment the target is edited — the #1 wiki-link complaint in tools that do this).
 Consequence, accepted: raw source is not human-readable. Markdown export ([ADR 0017](./0017-markdown-export.md))
-flattens a link to the target's text at export time; copying a bullet yields the `[[id]]` source slice
-(re-folds when pasted back into dotflowy; opaque elsewhere — same tradeoff as export).
+flattens a link to the target's current markdown text at export time, including Copy as Markdown
+on selected nodes. Ordinary text-range copy yields the `[[id]]` source slice, which re-folds when
+pasted back into Dotflowy. Export resolves nested links without expanding children, using `missing
+link` for deleted targets and `…` for cycles; see ADR 0017.
 
 **The chip is a BibleChip-class atom, not a revealing token.** Rendered as a Seam A **widget** token
 ([ADR 0006](./0006-react-token-widgets.md)): the mounted component subscribes via `useNode(targetId)`,

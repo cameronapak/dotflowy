@@ -10,8 +10,13 @@ pure-logic rule, and is the shared core a future selection-copy (Cmd+C on a node
 
 **The lucky break: `node.text` is already markdown.** Links are stored `[label](url)`, tags as
 `#tag`, inline code keeps its backticks — the folded/chip _display_ is derived at render time, but
-the stored source is plain markdown. So the serializer never transforms text or re-renders a token;
-it emits `node.text` verbatim and only adds the bullet prefix + indentation.
+the stored source is plain markdown. The serializer preserves that source rather than reconstructing
+rendered HTML, with two portability projections: Bible references become markdown links, and
+`[[nodeId]]` links become the target's current markdown text. Surrounding formatting and target URLs
+are preserved. Linked text resolves through mirrors and nested links, but never includes the linked
+target's children. Missing targets emit `missing link`; a circular reference emits `…` at the cycle.
+These projections apply to every Copy as Markdown entry point, including node selection copy.
+Ordinary text-range copy still carries the stored source for editing within Dotflowy.
 
 **The format, and the non-obvious calls it bakes in:**
 
@@ -36,6 +41,6 @@ it emits `node.text` verbatim and only adds the bullet prefix + indentation.
   an empty bullet, silently dropping the windowed content.)
 
 **Don't:** switch the root to a heading; make it respect `showCompleted`/filters by default;
-re-render tokens or reconstruct display HTML (emit raw `node.text`); reach for a bespoke stored
+reconstruct display HTML (preserve markdown source apart from the portability projections); reach for a bespoke stored
 export format (it's clipboard text). Keep the serializer pure and view-agnostic — its only inputs
 are the `TreeIndex` and the root ids.
