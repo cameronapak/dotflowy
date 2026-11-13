@@ -800,7 +800,7 @@ function SwitcherDialog({
                   ))}
                 </CommandGroup>
               )}
-              {results && results.length > RESULT_LIMIT && (
+              {results && exact && results.length > RESULT_LIMIT && (
                 <CommandGroup
                   heading={`Showing 50 of ${results.length} matches`}
                 >

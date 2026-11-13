@@ -30,10 +30,12 @@ their existing detents ([0066](./0066-narrow-screen-menu-drawers.md)).
    content independently of view settings. The guarded query walker resolves mirror
    content and caps cyclic expansion. An empty quoted phrase or unfinished quote
    with no parsed terms returns no Find results.
-3. Find renders the first 50 node matches. When there are more than 50, its last
-   row offers Filter Home for the query, exposing all matches through the
-   editable outline rather than an ever-growing modal. Shift+Enter or Filter in
-   place applies it to the current route. Plain words in Filter use substring matching, not Find's fuzzy rank.
+3. Find renders the first 50 node matches. For a structured query with more than
+   50 matches, its last row offers Filter Home, exposing the shared predicate
+   through the editable outline rather than an ever-growing modal. Plain-word
+   searches do not offer that overflow handoff: their typo-tolerant matches can
+   differ from Filter's literal substring matches. Shift+Enter and Filter in
+   place remain available for every query and apply it to the current route.
 4. Tag clicks continue adding terms to the local filter. Empty Filter uses the
    Find + fixes design: a place-specific heading, plain-language explanation,
    primary Find everywhere action, and a short recovery list. Find opens with the

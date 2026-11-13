@@ -322,6 +322,14 @@ test("Find searches everywhere, prioritizes here, returns to selection, and hand
   ).toBeVisible();
   await find.fill('"Zephr"'); // Quotes switch to exact DQL, not fuzzy matching.
   await expect(results).toHaveCount(0);
+  await find.fill("Releese"); // Typo-tolerant overflow must not hand off to literal filtering.
+  await expect(results).toHaveCount(50);
+  await expect(
+    dialog.getByRole("option", { name: /^Filter Home for/ }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: /Filter in place/ }),
+  ).toBeVisible();
   await find.fill("#launch is:todo -is:complete");
   await expect(dialog.getByText("Everywhere", { exact: true })).toBeVisible();
   await expect(
