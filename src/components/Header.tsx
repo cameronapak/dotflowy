@@ -5,7 +5,7 @@ import type { PluginContext } from "../plugins/types";
 import { useIsMobile } from "../hooks/use-mobile";
 import { usePluginChrome } from "../plugins/registry";
 import { HeaderAppMenu, HeaderViewMenu } from "./header-more-menu";
-import { CommandCenterButton } from "./node-switcher";
+import { FindButton } from "./node-switcher";
 import { FilterButton } from "./query-filter";
 import { SpotlightIndicator } from "./spotlight-indicator";
 
@@ -63,8 +63,8 @@ export function Header({
                 headerSlots.map((s) => (
                   <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
                 ))}
+              <FindButton />
               <FilterButton />
-              <CommandCenterButton />
               <HeaderViewMenu />
               <HeaderAppMenu />
             </div>

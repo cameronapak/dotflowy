@@ -7,6 +7,7 @@ import {
   buildFilterSuggestions,
   buildQueryFilter,
   caretToken,
+  hasQuerySyntax,
   collectOperatorKeyInfos,
   type FilterOperator,
   parseFilterQuery,
@@ -18,6 +19,22 @@ import { rowKeyFor } from "./visible-order";
 
 const index = (nodes: Node[]) => buildTreeIndex(nodes);
 const never = () => false;
+
+test.each<[string, boolean]>([
+  ["release checklist", false],
+  ["co-op or C#", false],
+  ["red OR blue", true],
+  ['"release checklist"', true],
+  ["release -draft", true],
+  ["#launch", true],
+  ["#", true],
+  ["is:todo", true],
+  ["highlight:", true],
+  ["unknown:value", true],
+  ["release:notes", true],
+])("Find uses DQL syntax for %s: %s", (query, exact) => {
+  expect(hasQuerySyntax(query)).toBe(exact);
+});
 
 // Exercise the registered pure operators, not handwritten predicate twins.
 const ops = queryOperators;
@@ -847,6 +864,27 @@ describe("buildQueryFilter", () => {
     expect(ids("highlight:")).toEqual(new Set(["h", "rd"])); // any highlight
     expect(ids("highlight:red")).toEqual(new Set(["rd"]));
     expect(ids("highlight:blue")).toEqual(new Set(["h"])); // bare run = blue
+  });
+
+  test("has:children includes collapsed parents and mirrors, but not leaves", () => {
+    const tree = index([
+      r,
+      createNode({ id: "parent", parentId: "r", collapsed: true }),
+      createNode({ id: "child", parentId: "parent", completed: true }),
+      createNode({
+        id: "mirror",
+        parentId: "r",
+        mirrorOf: "parent",
+        collapsed: true,
+      }),
+      createNode({ id: "leaf", parentId: "r", text: "has:children" }),
+    ]);
+    const ids = (q: string) =>
+      buildQueryFilter(tree, "r", q, never, ops)!.matchIds;
+    expect(ids("has:children")).toEqual(new Set(["parent", "mirror"]));
+    expect(ids("-has:children")).toEqual(
+      new Set(["child", "mirror\u0001child", "leaf"]),
+    );
   });
 
   test("negation, AND, and OR combine as expected", () => {

@@ -1,10 +1,13 @@
 import { autoUpdate } from "@floating-ui/react-dom";
+import { FilterIcon, Search01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { Pencil, Pin, Search, X } from "lucide-react";
+import { Pencil, Pin, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -13,11 +16,16 @@ import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
 
+import type { ViewContext } from "../plugins/types";
+
 import {
   buildFilterSuggestions,
   caretToken,
+  tokenizeQuery,
   type FilterSuggestion,
 } from "../data/filter-query";
+import { isMirrorsEnabled } from "../data/flags";
+import { flattenInline } from "../data/inline-text";
 import {
   deleteSavedQuery,
   renameSavedQuery,
@@ -27,8 +35,16 @@ import {
 } from "../data/saved-queries";
 import { normalizeQuery } from "../data/saved-queries-core";
 import { collectTagCorpus } from "../data/tags";
+import { trueSourceOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
-import { filterOperatorInfos } from "../plugins/registry";
+import { useTree } from "../data/useTree";
+import {
+  buildViewFilter,
+  composeHidden,
+  filterOperatorInfos,
+} from "../plugins/registry";
+import { openNodeSwitcher } from "./node-switcher-opener";
+import { QueryFilterChips } from "./query-filter-chips";
 import {
   addTermToFilter,
   bindQueryFilterNav,
@@ -39,13 +55,15 @@ import {
   toggleFilterInput,
   writeQuery,
 } from "./query-filter-nav";
+import { useShowCompleted } from "./show-completed-provider";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
+import { Kbd } from "./ui/kbd";
 
 // The `?q=` filter is CORE chrome now (the query grammar, ADR 0047 §6): a
 // resident input in the subheader, opened by Cmd+F, the Cmd+K "Filter this view"
-// action, or the header magnifier. It shows the RAW query text (live-as-you-type,
+// action, or the header funnel. It shows the RAW query text (live-as-you-type,
 // debounced `router.replace`) and STAYS resident -- focused or not -- as long as
 // `?q=` is non-empty (the blurred-with-pills state is dead, amended ADR 0047 §6).
 // The tags plugin no longer owns this -- it only contributes a `#tag` term on
@@ -54,6 +72,120 @@ import { Input } from "./ui/input";
 export { addTermToFilter };
 
 const DEBOUNCE_MS = 200;
+
+/** Mounted only for an empty filter: full-index recovery reads never subscribe
+ * the nonempty editor to unrelated keystrokes. Counts are undimmed render paths
+ * (including revealed descendants), exactly as the outline filter builds them. */
+export function QueryFilterEmptyState({ viewCtx }: { viewCtx: ViewContext }) {
+  const { index } = useTree();
+  const { setShowCompleted } = useShowCompleted();
+  const query = viewCtx.search.q ?? "";
+  const recovery = useMemo(() => {
+    const count = (ctx: ViewContext) =>
+      buildViewFilter(index, ctx, composeHidden(ctx))?.matchIds.size ?? 0;
+    const completed = viewCtx.showCompleted
+      ? 0
+      : count({ ...viewCtx, showCompleted: true });
+    const tokens = tokenizeQuery(query);
+    const removals =
+      tokens.length <= 1
+        ? []
+        : tokens.flatMap((term, i) => {
+            // Removing an OR operand changes the meaning of its neighbor. Offer only
+            // independent AND terms; preserve quoted phrases via the shared tokenizer.
+            if (
+              term === "OR" ||
+              tokens[i - 1] === "OR" ||
+              tokens[i + 1] === "OR"
+            )
+              return [];
+            const next = tokens.filter((_, j) => j !== i).join(" ");
+            const matches = count({
+              ...viewCtx,
+              search: { ...viewCtx.search, q: next },
+            });
+            return matches > 0 ? [{ term, next, matches, position: i }] : [];
+          });
+    return {
+      completed,
+      removals: removals
+        .sort((a, b) => b.matches - a.matches || a.position - b.position)
+        .slice(0, 2),
+    };
+  }, [index, viewCtx, query]);
+  const root =
+    viewCtx.rootId === null ? undefined : index.byId.get(viewCtx.rootId);
+  const titleNode =
+    root && isMirrorsEnabled()
+      ? index.byId.get(trueSourceOf(index, root.id))
+      : root;
+  const title = flattenInline(titleNode?.text ?? "").trim() || "Untitled";
+  const hasRecovery = recovery.completed > 0 || recovery.removals.length > 0;
+
+  return (
+    <section
+      className="outline-empty flex max-w-md flex-col gap-4"
+      aria-label="No filter matches"
+    >
+      <div className="flex flex-col gap-2">
+        <h2 className="text-base font-medium text-foreground">
+          {viewCtx.rootId === null ? "No matches" : `No matches in ${title}`}
+        </h2>
+        <p className="break-words">
+          Nothing here matches &quot;{query}&quot;. Find looks through your
+          whole outline.
+        </p>
+      </div>
+      <Button
+        aria-label="Find everywhere"
+        className="min-h-11 w-full md:w-fit"
+        onClick={() => openNodeSwitcher({ query })}
+      >
+        <HugeiconsIcon icon={Search01Icon} data-icon="inline-start" />
+        Find everywhere
+        <Kbd className="ml-2 max-md:hidden">⌘K</Kbd>
+      </Button>
+      <div className="flex flex-col gap-1">
+        <p className="mb-1">
+          {hasRecovery ? "Or change this filter" : "Or start over"}
+        </p>
+        {recovery.completed > 0 && (
+          <Button
+            variant="ghost"
+            className="min-h-11 w-full justify-between gap-4"
+            onClick={() => setShowCompleted(true)}
+          >
+            <span>Show completed</span>
+            <span className="text-muted-foreground tabular-nums">
+              {recovery.completed}
+            </span>
+          </Button>
+        )}
+        {recovery.removals.map(({ term, next, matches, position }) => (
+          <Button
+            key={position}
+            variant="ghost"
+            className="min-h-11 w-full justify-between gap-4"
+            onClick={() => writeQuery(next)}
+          >
+            <span className="truncate">Remove &quot;{term}&quot;</span>
+            <span className="text-muted-foreground tabular-nums">
+              {matches}
+            </span>
+          </Button>
+        ))}
+        <Button
+          variant="ghost"
+          className="min-h-11 w-full justify-between gap-4"
+          onClick={() => writeQuery("")}
+        >
+          <span>Clear filter</span>
+          <span className="text-muted-foreground">Show everything</span>
+        </Button>
+      </div>
+    </section>
+  );
+}
 
 /** The `?q=` filter state + route writers. Reads route state directly (no bridge
  *  needed) and owns the window-level Escape clear. */
@@ -88,7 +220,7 @@ export function useQueryFilter() {
         return;
       // A modal overlay (Cmd+K, a confirm dialog, a plugin sheet) owns Escape --
       // closing it must not clear the filter underneath it.
-      if (document.querySelector('[role="dialog"]')) return;
+      if (document.querySelector('[role="dialog"], dialog[open]')) return;
       clear();
     };
     window.addEventListener("keydown", onKey);
@@ -98,8 +230,8 @@ export function useQueryFilter() {
   return { rawQuery, active, clear };
 }
 
-/** The header magnifier -- toggles the filter input (ADR 0047 §6: the magnifier
- *  filters the view; the switcher moved to its own ⌘ button). Open when idle;
+/** The header funnel toggles the local filter input (ADR 0081).
+ *  Open when idle;
  *  a second press dismisses (clears + collapses). `preventDefault` on
  *  pointerdown keeps the input focused across the press so blur doesn't
  *  collapse-then-reopen before the click can close.
@@ -136,7 +268,7 @@ export function FilterButton() {
       aria-label="Filter this view"
       aria-pressed={open}
     >
-      <Search />
+      <HugeiconsIcon icon={FilterIcon} />
       <span className="sr-only">Filter this view</span>
     </Button>
   );
@@ -357,7 +489,7 @@ function SuggestionPopover({
   // Eager measure so the first paint already has a rect (avoids a null→mount
   // flash that would skip or clip the CSS enter animation).
   const [rect, setRect] = useState<DOMRect | null>(
-    () => anchorRef.current?.getBoundingClientRect() ?? null,
+    () => anchorRef.current?.closest("search")?.getBoundingClientRect() ?? null,
   );
   const popoverRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -365,7 +497,7 @@ function SuggestionPopover({
     const popover = popoverRef.current;
     if (!anchor || !popover) return;
     const measure = () => {
-      setRect(anchor.getBoundingClientRect());
+      setRect(anchor.closest("search")?.getBoundingClientRect() ?? null);
     };
     // The input can move while its ancestor expands, without resizing itself.
     return autoUpdate(anchor, popover, measure, { animationFrame: true });
@@ -416,7 +548,7 @@ function SuggestionPopover({
  * The core subheader filter surface: a resident input whenever a filter is
  * active OR the input was summoned, and NOTHING (so the subheader collapses)
  * when idle with no query. Summoned via {@link toggleFilterInput} / Cmd+F /
- * the Cmd+K action; the header magnifier toggles (open ↔ dismiss). The
+ * the Cmd+K action; the header funnel toggles (open ↔ dismiss). The
  * blurred-with-pills state is gone
  * (ADR 0047 §6, amended): while `?q=` is non-empty the raw query stays in the
  * input, focused or not.
@@ -451,7 +583,7 @@ export function QueryFilterBar() {
 
   // Publish the input's open state to the header FilterButton so it can light
   // (muted) while the box is open with no query yet (ADR 0050). Reset on unmount
-  // so a torn-down editor doesn't leave the magnifier stuck "on".
+  // so a torn-down editor doesn't leave the funnel stuck "on".
   useEffect(() => {
     setFilterOpen(showInput);
   }, [showInput]);
@@ -559,7 +691,7 @@ export function QueryFilterBar() {
   }, []);
 
   // Dismiss: wipe any pending/active query and collapse the row. Used by the
-  // header magnifier's toggle-off path (open-only stays on Cmd+F / Cmd+K).
+  // header funnel's toggle-off path (open-only stays on Cmd+F / Cmd+K).
   const close = useCallback(() => {
     if (debounceRef.current != null) {
       window.clearTimeout(debounceRef.current);
@@ -583,7 +715,7 @@ export function QueryFilterBar() {
     [],
   );
 
-  // Register the summon/dismiss controller (Cmd+K / chip taps / magnifier).
+  // Register the summon/dismiss controller (Cmd+K / chip taps / funnel).
   useEffect(() => {
     setFilterInputController({ open, close, isOpen });
     return () => setFilterInputController(null);
@@ -595,6 +727,7 @@ export function QueryFilterBar() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F")) {
+        if (document.querySelector('[role="dialog"], dialog[open]')) return;
         e.preventDefault();
         open();
       }
@@ -679,6 +812,15 @@ export function QueryFilterBar() {
     // SAFETY: relatedTarget is null when focus has nowhere to go, else an EventTarget that received focus
     const rt = e.relatedTarget as HTMLElement | null;
     if (rt && rt.closest("[data-filter-popover]")) return;
+    if (rt?.closest("[data-query-shortcuts], [data-query-shortcut-menu]")) {
+      // The shortcut menu owns focus, but the empty summoned bar must stay
+      // mounted with its draft. Flush pending typing before a menu action reads
+      // the query; stop autocomplete competing with that menu.
+      flush(draftRef.current);
+      setFocused(false);
+      setPopoverOpen(false);
+      return;
+    }
     setFocused(false);
     // Flush without dropping residency: a blurred active filter stays in the
     // input. An empty draft collapses via `showInput` once the write lands.
@@ -748,65 +890,80 @@ export function QueryFilterBar() {
   };
 
   return (
-    <search aria-label="Filter" className="relative w-full">
-      <Search
-        aria-hidden="true"
-        className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-      />
-      <Input
-        ref={inputRef}
-        value={draft}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        placeholder="Filter… e.g. #work is:todo -done"
-        aria-label="Filter query"
-        role="combobox"
-        aria-expanded={showPopover}
-        aria-controls={LISTBOX_ID}
-        aria-autocomplete="list"
-        aria-activedescendant={
-          showPopover && activeIndex >= 0 ? optionId(activeIndex) : undefined
-        }
-        spellCheck={false}
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-        className={cn("pl-8", showControls && "pr-14")}
-      />
-      {showControls ? (
-        <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5">
-          {/* Pin toggle (ADR 0048): instant save/unsave of the current query,
+    <search aria-label="Filter" className="w-full">
+      <InputGroup>
+        <InputGroupInput
+          ref={inputRef}
+          value={draft}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          placeholder="Filter… e.g. #work is:todo -done"
+          aria-label="Filter query"
+          role="combobox"
+          aria-expanded={showPopover}
+          aria-controls={LISTBOX_ID}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            showPopover && activeIndex >= 0 ? optionId(activeIndex) : undefined
+          }
+          spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+        />
+        <InputGroupAddon>
+          <HugeiconsIcon icon={FilterIcon} />
+        </InputGroupAddon>
+        {showControls ? (
+          <InputGroupAddon align="inline-end">
+            {/* Pin toggle (ADR 0048): instant save/unsave of the current query,
               no naming prompt. Pressed/filled when already saved. */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            // Keep focus across the press (like the clear X) so saving doesn't
-            // blur -> collapse the input.
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => toggleSavedQuery(draft)}
-            aria-label={isSaved ? "Unsave filter" : "Save filter"}
-            aria-pressed={isSaved}
-            className={cn(isSaved ? "text-primary" : "text-muted-foreground")}
-          >
-            <Pin className={cn(isSaved && "fill-current")} />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            // Keep focus across the press so clearing doesn't blur -> collapse.
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => clearText(true)}
-            aria-label="Clear filter"
-            className="text-muted-foreground"
-          >
-            <X />
-          </Button>
-        </div>
-      ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              // Keep focus across the press (like the clear X) so saving doesn't
+              // blur -> collapse the input.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => toggleSavedQuery(draft)}
+              aria-label={isSaved ? "Unsave filter" : "Save filter"}
+              aria-pressed={isSaved}
+              className={cn(isSaved ? "text-primary" : "text-muted-foreground")}
+            >
+              <Pin className={cn(isSaved && "fill-current")} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              // Keep focus across the press so clearing doesn't blur -> collapse.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => clearText(true)}
+              aria-label="Clear filter"
+              className="text-muted-foreground"
+            >
+              <X />
+            </Button>
+          </InputGroupAddon>
+        ) : null}
+      </InputGroup>
+      <QueryFilterChips
+        query={draft}
+        onChange={(value) => {
+          draftRef.current = value;
+          setDraft(value);
+          scheduleWrite(value);
+          setSummoned(true);
+          setPopoverOpen(true);
+          requestAnimationFrame(() => {
+            inputRef.current?.focus();
+            inputRef.current?.setSelectionRange(value.length, value.length);
+            recompute();
+          });
+        }}
+      />
       {showPopover ? (
         <SuggestionPopover
           anchorRef={inputRef}

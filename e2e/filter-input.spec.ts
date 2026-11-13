@@ -48,7 +48,7 @@ async function summon(page: Page) {
   await expect(input(page)).toBeFocused();
 }
 
-test("the magnifier's three states track the stakes (ADR 0050)", async ({
+test("the funnel's three states track the stakes (ADR 0050)", async ({
   page,
 }) => {
   await load(page);
@@ -107,6 +107,80 @@ test("typing filters the view live", async ({ page }) => {
   await expect(page).toHaveURL(/[?&]q=is/);
 });
 
+test("an empty local filter opens Find everywhere without changing the route", async ({
+  page,
+}) => {
+  await seedOutline(page, [
+    ...TREE,
+    {
+      id: "detail",
+      parentId: "mom",
+      prevSiblingId: null,
+      text: "Call details",
+    },
+  ]);
+  await openSeededOutline(page, { path: "/mom", anchorId: "detail" });
+  await summon(page);
+  await input(page).fill("#work");
+  await expect(row(page, "detail")).toHaveCount(0);
+  const escape = page.getByRole("button", {
+    name: "Find everywhere",
+    exact: true,
+  });
+  await expect(escape).toBeVisible();
+  const origin = page.url();
+  await escape.click();
+  await expect(
+    page.getByRole("combobox", { name: "Find nodes and actions" }),
+  ).toHaveValue("#work");
+  await expect(page.locator('[data-result-id="milk"]')).toBeVisible();
+  await expect(page.locator('[data-result-id="ship"]')).toBeVisible();
+  await expect(page).toHaveURL(origin);
+});
+
+test("empty-filter recovery ranks useful removals and protects OR operands", async ({
+  page,
+}) => {
+  await load(page);
+  await summon(page);
+  await input(page).fill('#work "Call mom"');
+  const empty = page.getByRole("region", { name: "No filter matches" });
+  await expect(empty.getByRole("heading")).toHaveText("No matches");
+  const removals = empty.getByRole("button", { name: /^Remove / });
+  // Dropping the phrase restores both tagged rows; dropping the tag restores mom.
+  await expect(removals).toHaveText([
+    'Remove ""Call mom""2',
+    'Remove "#work"1',
+  ]);
+  await expect(
+    empty.getByRole("button", { name: /^Show completed/ }),
+  ).toHaveCount(0);
+  await removals.first().click();
+  await expect(input(page)).toHaveValue("#work");
+  await expect(row(page, "milk")).toBeVisible();
+  await expect(row(page, "ship")).toBeVisible();
+
+  await input(page).fill("milk OR mom missing");
+  await expect(removals).toHaveText(['Remove "missing"2']);
+  await removals.first().click();
+  await expect(input(page)).toHaveValue("milk OR mom");
+  await expect(row(page, "milk")).toBeVisible();
+  await expect(row(page, "mom")).toBeVisible();
+
+  // Removing mom would also unlock results by changing the OR grouping. Only
+  // the independent milk term is safe to offer.
+  await input(page).fill("milk mom OR ship");
+  await expect(removals).toHaveText(['Remove "milk"2']);
+  // A sole token defers to Clear filter, rather than a duplicate action.
+  await input(page).fill("missing");
+  await expect(page).toHaveURL(/q=missing/);
+  await expect(empty).toBeVisible();
+  await expect(removals).toHaveCount(0);
+  await empty.getByRole("button", { name: /^Clear filter/ }).click();
+  await expect(page).not.toHaveURL(/q=/);
+  await expect(row(page, "mom")).toBeVisible();
+});
+
 test("a free-text term filters by substring", async ({ page }) => {
   await load(page);
   await summon(page);
@@ -160,9 +234,9 @@ test("editing the last match keeps the row until blur outside the outline", asyn
 
   await input(page).focus();
   await expect(row(page, "milk")).toHaveCount(0);
-  await expect(page.locator(".outline-empty")).toHaveText(
-    'No matches for "milk" here.',
-  );
+  await expect(
+    page.getByRole("region", { name: "No filter matches" }),
+  ).toContainText('"milk"');
 });
 
 test("a row that still matches after editing stays visible on blur", async ({
@@ -505,9 +579,48 @@ test("editing a mirrored descendant keeps only the focused path and its context 
   await expect(row(page, "child")).toHaveCount(0);
   await expect(row(page, "scope")).toHaveCount(0);
   await expect(row(page, "mirror")).toHaveCount(0);
-  await expect(page.locator(".outline-empty")).toHaveText(
-    'No matches for "#child" here.',
+  await expect(
+    page.getByRole("region", { name: "No filter matches" }),
+  ).toContainText('"#child"');
+});
+
+test("recovery counts stay local through mirrors and respect the completed setting", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("dotflowy:show-completed", "false"),
   );
+  await seedOutline(page, tree);
+  await openSeededOutline(page, { path: "/scope", anchorId: "mirror" });
+  await summon(page);
+  await input(page).fill("#child missing");
+  const empty = page.getByRole("region", { name: "No filter matches" });
+  await expect(empty.getByRole("heading")).toContainText("Today");
+  // Only the mirrored path is in scope, not its source path under Project.
+  await expect(empty.getByRole("button", { name: /^Remove / })).toHaveText([
+    'Remove "missing"1',
+  ]);
+  await empty.getByRole("button", { name: /^Remove / }).click();
+  await expect(row(page, "child")).toHaveCount(1);
+  await expect(row(page, "project")).toHaveCount(0);
+
+  await openSeededOutline(page, { path: "/project", anchorId: "source" });
+  await summon(page);
+  await input(page).fill("is:complete");
+  const showCompleted = empty.getByRole("button", { name: /^Show completed/ });
+  await expect(showCompleted).toHaveText("Show completed1");
+  await expect(empty.getByRole("button", { name: /^Remove / })).toHaveCount(0);
+  await showCompleted.click();
+  await expect(input(page)).toHaveValue("is:complete");
+  await expect(row(page, "done")).toBeVisible();
+  await expect(empty).toHaveCount(0);
+  expect(
+    await page.evaluate(() => localStorage.getItem("dotflowy:show-completed")),
+  ).toBe("true");
+
+  await input(page).fill("missing");
+  await expect(empty).toBeVisible();
+  await expect(showCompleted).toHaveCount(0);
 });
 
 test("the same query selects source and mirror content, while is:mirror excludes the source", async ({

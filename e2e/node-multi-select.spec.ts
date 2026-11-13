@@ -808,7 +808,7 @@ test("selection menu keyboard navigation preserves the slab, IME, and caret rest
   // A global editor shortcut still opens its own control. Its Escape must not
   // clear the underlying selection before that control restores menu focus.
   await page.keyboard.press(`${MOD}+k`);
-  const commandCenter = page.getByRole("dialog", { name: "Command center" });
+  const commandCenter = page.getByRole("dialog", { name: "Find" });
   await expect(commandCenter.getByRole("combobox")).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(commandCenter).toHaveCount(0);

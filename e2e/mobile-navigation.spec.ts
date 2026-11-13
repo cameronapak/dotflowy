@@ -79,6 +79,57 @@ test("mobile destinations, search, capture, and filter use existing app behavior
   await expect(page).toHaveURL(/q=Captured/);
 });
 
+test("Find menus and overlay handoffs work inside the native phone sheet", async ({
+  page,
+}) => {
+  await seedOutline(page, STANDARD_TREE);
+  await openSeededOutline(page, { anchorId: "alpha" });
+  const searchButton = page.getByRole("button", {
+    name: "Search",
+    exact: true,
+  });
+  await searchButton.tap();
+  const find = page.getByRole("combobox", { name: "Find nodes and actions" });
+  await page.getByRole("button", { name: "Completed", exact: true }).tap();
+  await page
+    .getByRole("menuitemradio", { name: "Not completed", exact: true })
+    .tap();
+  await expect(find).toHaveValue("-is:complete");
+  await page.getByRole("button", { name: "Not completed", exact: true }).tap();
+  await page.getByRole("menuitemradio", { name: "Any", exact: true }).tap();
+  await expect(find).toHaveValue("");
+  await find.fill("quick add");
+  await page.getByRole("option", { name: /Quick add/ }).tap();
+  const capture = page.getByRole("textbox", { name: "Quick add", exact: true });
+  await expect(capture).toBeFocused();
+  await capture.fill("A thought after Find closes");
+  await expect(capture).toHaveText("A thought after Find closes");
+  await expect(page.locator("dialog[open]").filter({ has: find })).toHaveCount(
+    0,
+  );
+  await capture.press("Escape");
+  await searchButton.tap();
+  await find.fill("Alpha");
+  await page
+    .locator('[data-result-id="alpha"]')
+    .getByRole("button", { name: "Node actions" })
+    .tap();
+  await page.getByRole("option", { name: /^Move to/ }).tap();
+  const move = page.getByRole("dialog", { name: "Move node", exact: true });
+  await expect(move.getByRole("combobox")).toBeFocused();
+  await move.getByRole("combobox").fill("Bravo");
+  await expect(move.getByRole("option", { name: /Bravo/ })).toBeVisible();
+  await move.getByRole("combobox").press("Escape");
+  await searchButton.tap();
+  await find.fill("tomorrow");
+  await page.getByRole("option", { name: /tomorrow/i }).tap();
+  await expect(page).not.toHaveURL(/\/$/);
+  await expect(page.locator("h2.zoomed-title")).toBeVisible();
+  await expect(page.locator("dialog[open]").filter({ has: find })).toHaveCount(
+    0,
+  );
+});
+
 test("dock respects keyboard geometry, accessibility preferences, feature settings and desktop boundary", async ({
   page,
 }) => {
@@ -140,7 +191,7 @@ test("dock respects keyboard geometry, accessibility preferences, feature settin
   await page.setViewportSize({ width: 768, height: 844 });
   await expect(nav).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Command center", exact: true }),
+    page.getByRole("button", { name: "Search", exact: true }),
   ).toBeVisible();
   await expect(
     page

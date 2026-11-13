@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   useRef,
   type ReactNode,
+  type ComponentProps,
 } from "react";
 import { OverlayTriggerStateContext } from "react-aria-components/Dialog";
 
@@ -16,6 +17,7 @@ export default function MenuSheetContent({
   isOpen,
   onOpenChange,
   onAfterClose,
+  detents,
 }: {
   title: string;
   children: ReactNode;
@@ -23,6 +25,7 @@ export default function MenuSheetContent({
   isOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   onAfterClose?: () => void;
+  detents?: ComponentProps<typeof Sheet>["detents"];
 }) {
   const trigger = useContext(OverlayTriggerStateContext);
   const { theme } = useTheme();
@@ -95,7 +98,12 @@ export default function MenuSheetContent({
           ?.focus({ preventScroll: true });
       }}
     >
-      <Sheet aria-label={title} open={open} onOpenChange={setOpen}>
+      <Sheet
+        aria-label={title}
+        open={open}
+        onOpenChange={setOpen}
+        detents={detents}
+      >
         {children}
       </Sheet>
     </div>

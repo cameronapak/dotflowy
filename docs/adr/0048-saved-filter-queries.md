@@ -1,5 +1,11 @@
 # Saved filter queries, pinned in the search popover and Cmd+K
 
+**Find amendment ([ADR 0083](./0083-find-and-filter.md)).** Selecting a saved
+query in Find (Cmd+K) now fills the palette with its text instead of applying a
+local filter and closing. Shift+Enter filters the current view. The filter
+popover still applies saved queries directly. Storage and query-only scope are
+unchanged.
+
 A filter query worth typing twice is worth saving. We decided saved queries are a small synced side-collection surfaced in exactly two places — the filter input's empty-focus popover and Cmd+K — saved by a Pin toggle inside the input, and scoped to the **query only** (they run against whatever view you're in). Promoted from ADR 0047's non-goals list.
 
 ## The decisions

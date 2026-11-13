@@ -32,9 +32,10 @@ export function writeQuery(q: string, opts?: { replace?: boolean }) {
   const nextSearch = trimmed ? { q: trimmed } : {};
   const replace = opts?.replace ?? false;
   const root = rootIdRef;
-  if (root === null) navigateRef({ to: "/", search: nextSearch, replace });
+  if (root === null)
+    return navigateRef({ to: "/", search: nextSearch, replace });
   else
-    navigateRef({
+    return navigateRef({
       to: "/$nodeId",
       params: { nodeId: root },
       search: nextSearch,
@@ -64,7 +65,7 @@ let opener: (() => void) | null = null;
 let closer: (() => void) | null = null;
 let isOpenProbe: (() => boolean) | null = null;
 
-/** Registered by `QueryFilterBar` so Cmd+F / the header magnifier / the Cmd+K
+/** Registered by `QueryFilterBar` so Cmd+F / the header funnel / the Cmd+K
  *  action can summon (or dismiss) the filter input from anywhere. */
 export function setFilterInputController(
   next: {
@@ -83,7 +84,7 @@ export function openFilterInput() {
   opener?.();
 }
 
-/** Header-magnifier toggle: open when idle, dismiss (clear + collapse) when
+/** Header-funnel toggle: open when idle, dismiss (clear + collapse) when
  *  the filter row is showing. Cmd+F / Cmd+K keep the open-only path. */
 export function toggleFilterInput() {
   if (isOpenProbe?.()) closer?.();

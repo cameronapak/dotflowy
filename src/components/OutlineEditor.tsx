@@ -189,6 +189,7 @@ import { MobileBreadcrumb } from "./mobile-breadcrumb";
 import { MobileActionsBar, type MobileBarActions } from "./MobileActionsBar";
 import { openMoveDialog } from "./move-dialog-opener";
 import { NodeBody } from "./node-body";
+import { BackToFind } from "./node-switcher";
 import { NodeDecorations } from "./NodeDecorations";
 import { OutlineLoading } from "./OutlineLoading";
 import { INDENT_PX, OutlineRow } from "./OutlineRow";
@@ -211,6 +212,7 @@ import {
   guardProtected,
   ProtectionIndicator,
 } from "./protection";
+import { QueryFilterEmptyState } from "./query-filter";
 import { useQuoteMarkerBackspace } from "./quote-marker";
 import { useNativeFormatInput } from "./selection-format";
 import { SelectionActionsMenu, useSelectionMode } from "./selection-mode";
@@ -1959,6 +1961,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         <Subheader getCtx={pluginCtx} />
         <DailyNavigationProgress />
       </div>
+      <BackToFind />
       <div className="outline-scroll" ref={scrollRef}>
         {/* Tag chips live inside the bullets' contentEditable, so the click that
           filters is captured here (mousedown blocks the editing caret). */}
@@ -2094,10 +2097,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                 </>
               )}
 
-              {noMatches &&
-              renderedRows.length === 0 &&
-              filter?.emptyMessage ? (
-                <div className="outline-empty">{filter.emptyMessage}</div>
+              {noMatches && renderedRows.length === 0 ? (
+                <QueryFilterEmptyState viewCtx={viewCtx} />
               ) : (
                 <div
                   ref={canvasViewportRef}

@@ -46,6 +46,11 @@ Search and More in their glass group; the Spotlight indicator stays outside it.
 
 ## Existing behavior and plugin ownership
 
+Find + filter ([ADR 0083](./0083-find-and-filter.md)) keeps Search opening the
+shared Find palette. Below 768px it uses the native sheet's large detent so the
+input, query chips, and results remain usable above a docked keyboard. Filter
+this view remains first in More; no toolbar icon is added.
+
 Home uses `/`. Today shares the existing header action, including seed-entry,
 focus-last, and in-stream scrolling; `/today` remains its normal link destination
 for modified clicks and opening a new tab. Search opens the command center, not the
