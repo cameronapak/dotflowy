@@ -660,7 +660,24 @@ test("Copy as Markdown copies the selected roots' subtrees", async ({
   context,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await load(page);
+  const targetId = "11111111-2222-3333-4444-555555555555";
+  await load(page, [
+    ...FLAT.map((node) =>
+      node.id === "b" ? { ...node, text: `bravo [[${targetId}]]` } : node,
+    ),
+    {
+      id: "child",
+      parentId: "b",
+      prevSiblingId: null,
+      text: `[[${targetId}]]`,
+    },
+    {
+      id: targetId,
+      parentId: null,
+      prevSiblingId: "d",
+      text: "DevDocs **review** [PR](https://example.com/pr)",
+    },
+  ]);
   await focus(page, "a");
   await page.keyboard.press("Shift+ArrowDown"); // enter -> [a]
   await page.keyboard.press("Shift+ArrowDown"); // extend -> [a, b]
@@ -668,13 +685,16 @@ test("Copy as Markdown copies the selected roots' subtrees", async ({
   await page.keyboard.press(`${MOD}+c`);
   await expect(page.getByText("Copied as Markdown")).toBeVisible();
   const clip = await page.evaluate(() => navigator.clipboard.readText());
-  expect(clip).toBe("- alpha\n- bravo");
+  expect(clip).toBe(
+    "- alpha\n- bravo DevDocs **review** [PR](https://example.com/pr)\n  - DevDocs **review** [PR](https://example.com/pr)",
+  );
   const copy = page.getByRole("menuitem", { name: /^Copy as Markdown/ });
   await expect(copy).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(copy).toBeFocused();
   await expect(li(page, "a")).toHaveAttribute("data-selected", "top");
-  await expect(li(page, "b")).toHaveAttribute("data-selected", "bottom");
+  await expect(li(page, "b")).toHaveAttribute("data-selected", "middle");
+  await expect(li(page, "child")).toHaveAttribute("data-selected", "bottom");
 });
 
 test("Backspace deletes the selected roots in one batch; undo restores", async ({

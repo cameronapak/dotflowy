@@ -119,7 +119,7 @@ Rule 5 is the surprising one: paste a 40-line document mid-sentence and the rest
 - **No wrapper container** (OPML wraps because a migration lands in an unknown place; a paste lands at your caret) and **not collapsed** (OPML's `collapsed: true` was a 17k-node perf guard; pasted content is meant to be seen).
 - **Focus lands at the seam** in the last inserted node; the virtualized path needs `scrollRowIntoView(id)` (`virtual-nav.ts`), since that row may not be mounted. **No `.node-acted` flash** — new bullets under your caret are self-evident.
 
-## The invariant, and its three exceptions
+## The invariant, and its four exceptions
 
 > `parse(outlineToMarkdown(t)) === t` for all trees `t`, except:
 >
@@ -127,11 +127,13 @@ Rule 5 is the surprising one: paste a 40-line document mid-sentence and the rest
 > 2. **Task markers as literal text.** A non-task node whose text is `[ ] buy milk` exports as `- [ ] buy milk` and re-imports as a task. dotflowy has **no escape syntax** and inventing one fights the parsed-from-text model (ADR 0037 settled this). The todos `[]` autoformat makes that text nearly unreachable by typing.
 > 3. **Mirrors flatten to copies.** Markdown cannot carry mirror-ness, and dropping the _content_ is not an option — so `outlineToMarkdown` resolves `contentId = mirrorOf ?? id` and emits the **source's** text and subtree (with a visited-set guard: a mirror inside its own source's subtree emits its text once and does not descend). A copied mirror therefore pastes back as an **independent copy**; the relationship collapses on the first pass and is a fixed point after. Rejected: exporting `[[sourceId]]` (a link points, a mirror windows — the glossary keeps them distinct, and a raw id is garbage in any other app) and inventing a mirror escape syntax (ADR 0037 settled that). This also **fixes a shipped hole**: the exporter currently reads the mirror row raw and emits an empty childless bullet, silently dropping the windowed content from every copy — the mirrors flag broke ADR 0017's "nothing dropped" and nobody noticed.
 >
-> All three are stable under further round-trips.
+> 4. **Node links become text.** Copy as Markdown replaces `[[nodeId]]` with the target's current markdown text (ADR 0017), preserving formatting and URLs, but not the pointer relationship. Nested links resolve too; linked children are not copied. Deleted targets become `missing link`, and cycles end at `…`. Pasting the result back yields independent text, not node links. Ordinary text-range copy retains the raw token.
+>
+> All four are stable under further round-trips.
 
 ### One space, not `\s+`
 
-There is no fourth exception. There nearly was.
+Whitespace loss is not another exception.
 
 `outlineToMarkdown` emits `- ` + text, so a node whose text is `  const x` serializes to `-   const x`. Consume `\s+` after the marker — the rule every lenient markdown reader follows — and those two spaces are gone on re-import. It reaches a fixed point after one pass, so it hides well. It also **drops characters**, which the fidelity bar forbids outright.
 
@@ -145,7 +147,7 @@ That trade is decided by which harm is recoverable. A kept leading space is on s
 
 Rejected: **stop preserving fence indentation** (breaks the fence rule, and code without indentation is not code); **an escape syntax for leading whitespace** (ADR 0037 settled that dotflowy has none); **accept and document it** (a documented character-dropping gap is not an invariant, it is a footnote pretending to be one).
 
-Property-test the identity over generated trees with the three exceptions carved out — the corpus carries leading-whitespace texts, so a regression here fails the property test, not just a named case — and generate trees **with** mirrors, asserting the round-trip equals the mirror-resolved flattening. Everything else round-trips clean: emphasis, links, highlights, spoilers (raw `||x||` per ADR 0043), inline code, `#tags`, date tokens, node links.
+Property-test the identity over generated trees with the four exceptions carved out — the corpus carries leading-whitespace texts, so a regression here fails the property test, not just a named case — and generate trees **with** mirrors, asserting the round-trip equals the mirror-resolved flattening. Everything else round-trips clean: emphasis, links, highlights, spoilers (raw `||x||` per ADR 0043), inline code, `#tags`, date tokens. Node-link export is covered by the Markdown serializer's regression test.
 
 ## Markdown is the interchange format for node state, never its storage
 
