@@ -419,10 +419,10 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
                 {PLAN_LABELS[plan]}
               </span>
               {paid && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[0.7rem] font-medium text-primary">
-                  <CheckIcon className="size-3" />
+                <Badge variant="secondary">
+                  <CheckIcon data-icon="inline-start" />
                   Active
-                </span>
+                </Badge>
               )}
             </div>
             {plan === "founding" && (

@@ -76,13 +76,19 @@ test("Free previews never save, and leaving Settings restores the saved theme", 
 });
 
 /** Every check below its minimum for the theme and Mode now on <html>. */
-async function contrastFailures(page: Page) {
+async function contrastFailures(
+  page: Page,
+  surface: "outline" | "settings" = "outline",
+) {
   const hovered = [];
-  for (const [selector, property, min] of [
+  const hoverTargets = [
     [".bullet-dot", "background-color", 3],
     [".crumb-link", "color", 4.5],
     [".crumb-ellipsis", "color", 4.5],
-  ] as const) {
+  ] as const;
+  for (const [selector, property, min] of surface === "outline"
+    ? hoverTargets
+    : []) {
     const target = page.locator(selector).first();
     await target.hover();
     hovered.push(
@@ -97,7 +103,8 @@ async function contrastFailures(page: Page) {
       ),
     );
   }
-  return page.evaluate((hovered) => {
+  const inputs = { hovered, surface };
+  return page.evaluate(({ hovered, surface }) => {
     type Rgb = [number, number, number];
     // Resolve a CSS color through a probe, then composite the layers on a
     // 1px canvas: the sRGB a reader sees.
@@ -133,6 +140,47 @@ async function contrastFailures(page: Page) {
       const value = ratio(paint([...bg, fg]), paint(bg));
       if (value < min) failures.push(`${label} ${value.toFixed(2)} < ${min}`);
     };
+    if (surface === "settings") {
+      // Composite actual ancestor backgrounds, including the card and badge
+      // tint. Token pairs alone miss primary used as ink and translucent tracks.
+      const backgrounds = (el: Element) => {
+        const layers = ["white"];
+        for (let p: Element | null = el; p; p = p.parentElement)
+          layers.splice(1, 0, getComputedStyle(p).backgroundColor);
+        return layers;
+      };
+      const active = Array.from(
+        document.querySelectorAll("#billing span"),
+      ).find((el) => el.textContent?.trim() === "Active")!;
+      check(
+        "Active badge",
+        getComputedStyle(active).color,
+        backgrounds(active),
+        4.5,
+      );
+      for (const control of document.querySelectorAll('[role="switch"]')) {
+        const style = getComputedStyle(control);
+        const behind = backgrounds(control.parentElement!);
+        const track = [...behind, style.backgroundColor];
+        const thumb = control.querySelector('[data-slot="switch-thumb"]')!;
+        const label = `${control.getAttribute("aria-label")} ${control.getAttribute("aria-checked") === "true" ? "on" : "off"}`;
+        // Either the fill or the border can identify the control's boundary.
+        const boundary = Math.max(
+          ratio(paint(track), paint(behind)),
+          ratio(paint([...track, style.borderTopColor]), paint(behind)),
+        );
+        if (boundary < 3)
+          failures.push(`${label} boundary ${boundary.toFixed(2)} < 3`);
+        check(
+          `${label} thumb`,
+          getComputedStyle(thumb).backgroundColor,
+          track,
+          3,
+        );
+      }
+      probe.remove();
+      return failures;
+    }
     check("body text", "var(--foreground)", [page], 4.5);
     check("muted text", "var(--muted-foreground)", [page], 4.5);
     check("link", "var(--link)", [page], 4.5);
@@ -190,8 +238,48 @@ async function contrastFailures(page: Page) {
       check(label, fg, [page, bg], min);
     probe.remove();
     return failures;
-  }, hovered);
+  }, inputs);
 }
+
+test("settings badges and on/off switches stay readable in every theme and Mode", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  await page.route("**/api/membership", (route) =>
+    route.fulfill({
+      json: { plan: "unlimited", legacyLeaf: false, subs: [], welcome: null },
+    }),
+  );
+  await page.goto("/settings");
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
+  await expect(page.getByText("Active", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("switch", { name: "Bible references", exact: true }),
+  ).toBeChecked();
+  const embeds = page.getByRole("switch", { name: "Embeds", exact: true });
+  await embeds.click();
+  await expect(embeds).not.toBeChecked();
+  await page.addStyleTag({ content: "* { transition: none !important; }" });
+  const failures: string[] = [];
+  for (const theme of THEMES)
+    for (const dark of [false, true]) {
+      await page.evaluate(
+        ([theme, dark]) => {
+          const root = document.documentElement;
+          root.classList.remove(
+            ...Array.from(root.classList).filter((c) => c.startsWith("theme-")),
+          );
+          root.classList.toggle("themed", theme !== "default");
+          if (theme !== "default") root.classList.add(`theme-${theme}`);
+          root.classList.toggle("dark", dark);
+        },
+        [theme, dark] as const,
+      );
+      for (const f of await contrastFailures(page, "settings"))
+        failures.push(`${theme} ${dark ? "dark" : "light"}: ${f}`);
+    }
+  expect(failures).toEqual([]);
+});
 
 test("every theme and Mode keeps themed surfaces readable", async ({
   page,
