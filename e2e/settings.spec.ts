@@ -270,6 +270,7 @@ test("a checkout return waits for server confirmation and the thank-you stays di
     });
   });
   await page.goto("/settings?checkout=success");
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(
     page.getByRole("status").filter({ hasText: "Confirming your membership" }),
   ).toBeVisible();
@@ -293,6 +294,7 @@ test("a checkout return waits for server confirmation and the thank-you stays di
   ).toBeEnabled();
   await expect(thanks).toHaveCount(0);
   await page.goto("/settings?checkout=canceled");
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(
     page.getByRole("status").filter({ hasText: "Checkout canceled" }),
   ).toBeVisible();
