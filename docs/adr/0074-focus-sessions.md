@@ -63,8 +63,12 @@ a session never dims the outline.
   the expected step, and ending the whole session is the quieter choice.
 - **Sounds** use Cuelume (MIT, Web Audio synthesis, no audio files): "attention"
   when time is up, "success" on Done, "ready" when a break ends. On by default,
-  one switch, no countdown ticking. When the tab is hidden and no PiP window is
-  open, the tab title also reads "Time is up - …". No system notifications.
+  one switch. When the tab is hidden and no PiP window is open, the tab title
+  also reads "Time is up - …". No system notifications. These cues are
+  separate from focus sounds below; the Sounds switch governs only the cues.
+- **Focus sounds** are optional ambient sound while you focus: Clock tick (one
+  identical tick each second, not a tick-tock), Rain, and Brown noise. See
+  "Focus sounds follow the focus" below.
 - **Spoilers.** Band and PiP text use the MCP projection (`[spoiler]`), not the
   breadcrumb's revealing one. A floating window can be screen-shared.
 - **Settings.** Focus sessions is a row under Settings → Plugins with an
@@ -86,10 +90,10 @@ card layout. It opens only from the band's Pop out button. `requestWindow()`
 requires a user gesture, and Chrome opens one automatically on tab switch only
 for pages with audible media or an active camera or microphone. Chrome then
 asks inside the window whether to allow automatic entry every time, only this
-time, or never; "every time" waives its media-engagement threshold. A future
-optional focus sound could therefore enable automatic pop-out honestly, but it
-is an experiment, not v1. The window never outlives the tab and is absent in
-Safari and on phones.
+time, or never; "every time" waives its media-engagement threshold. Focus sounds
+play through Web Audio, not a media element, so they do not qualify; routing
+them through an `<audio>` element could enable automatic pop-out later. The
+window never outlives the tab and is absent in Safari and on phones.
 
 The whole window is the same `primary` fill as the running band, with the
 band's on-fill controls and focus outline, in every state: running, paused,
@@ -111,6 +115,41 @@ focus is a quiet text button, so the state's own actions, such as Done, stay
 the strongest controls. Reflection keeps the stacked layout. The window drops
 the page's reserved scrollbar gutter, which would otherwise leave an empty
 strip down its edge where scrollbars always show.
+
+## Focus sounds follow the focus
+
+A focus sound plays only while focus time runs. It pauses with the session,
+rests through Pomodoro breaks and comes back when the next round starts, goes
+quiet at time is up so the "attention" cue marks that moment (pressing play
+carries it into overtime), and stops when the session ends or is replaced,
+even by a session started with Sound Off in another tab.
+
+- **Controls.** The picker has a Sound row: Off or one of the sounds. Its choice
+  is remembered and starts the sound with the session, since the Start button is
+  the gesture browsers require before audio. The band has a play/pause button
+  named for the sound and a chevron that opens the sound list and a volume
+  slider (a bottom sheet on phones); choosing a sound plays it. The PiP window
+  has a play/pause icon and a native select, because a popover would open in
+  the page rather than the window; in overtime only play/pause stays, since
+  Done, +5 min, and Let go fill its footer. Cmd+K offers "Play/Pause focus sound" and
+  "Focus sound: …" while focusing.
+- **Remembered in this browser.** The sound, volume, and whether the picker
+  starts one are stored in `localStorage`, like the last session length. Playing
+  is never restored after a reload: autoplay needs a gesture, so the band shows
+  Play instead.
+- **One tab plays.** Pressing play claims the sound over a `BroadcastChannel`;
+  another tab that was playing goes quiet, so two tabs never double the rain.
+- **Generated, not recorded.** Each sound is synthesized once with Web Audio
+  into a seamless loop (1 second for the tick, 12 to 20 seconds for noise), with
+  an equal-power crossfade at the seam. Nothing ships as an audio file, nothing
+  needs a license, and the bundle grows by a few kilobytes of code. The tick's
+  loop starts on the timer's second, and the loop itself keeps time, so a
+  throttled tab never drifts. The audio context suspends when nothing plays.
+- **Mobile.** On iOS 17+ the audio session is set to `playback`, so sounds play
+  through the silent switch like a media app.
+- **Not automatic PiP.** Chrome's automatic picture-in-picture needs an audible
+  media element with audio focus; Web Audio does not count. The window still
+  opens by hand.
 
 ## Session state stays in this browser
 
@@ -146,3 +185,11 @@ ordinary nodes.
 - **Zoom in on start.** Jarring without an explicit request. Only Return zooms.
 - **Auto-open the PiP window on tab leave.** Not possible for a silent page; see
   above.
+- **A café sound.** A synthesized murmur of voices, cups, and room tone was
+  prototyped. Generated chatter sounded fake, and a convincing café needs a
+  licensed recording (0.3 to 1 MB). Cameron dropped it.
+- **A tick-tock clock.** The first tick alternated two pitches. Cameron chose
+  the same tick every second.
+- **Licensed audio files.** Recordings of rain or noise would cost download
+  size and license tracking for sounds that synthesis covers well. Rejected
+  until a sound needs one.

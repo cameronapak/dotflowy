@@ -1,5 +1,17 @@
 # dotflowy
 
+## 3.1.0
+
+### Minor Changes
+
+- b08c5a1: Focus sessions can now play a focus sound while you work: a clock tick, rain, or brown noise. Pick one when you start a session, then play, pause, switch sounds, or change the volume from the focus bar, the pop-out window, or the command palette. The sound pauses with your session, rests during breaks, and stops when you finish.
+
+## 3.0.4
+
+### Patch Changes
+
+- 8717634: The focus session picker now shows the selected length clearly, with larger choices that are easier to tell apart. Between Pomodoro rounds, the band reads "Next" and Start round is the main button, and long task names or links no longer push the picker's buttons off screen.
+
 ## 3.0.3
 
 ### Patch Changes

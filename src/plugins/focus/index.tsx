@@ -11,6 +11,13 @@ import { getSession as getAccount } from "../../lib/auth-client";
 import { featureToggleAction } from "../feature-actions";
 import { definePlugin, type GlobalActionSpec } from "../types";
 import { endSession, returnToFocus } from "./actions";
+import {
+  getAmbience,
+  playAmbience,
+  SOUNDS,
+  subscribeAmbience,
+  toggleAmbience,
+} from "./ambience";
 import { openFocusPicker } from "./picker";
 import {
   configureAccount,
@@ -88,6 +95,32 @@ export default definePlugin({
       },
     ];
     const session = getSession();
+    if (session?.phase === "focus") {
+      const sound = getAmbience();
+      const label = SOUNDS.find((s) => s.id === sound.sound)!.label;
+      actions.push(
+        {
+          id: "sound",
+          label: sound.on
+            ? `Pause focus sound (${label})`
+            : `Play focus sound (${label})`,
+          description: "Ambient sound while you focus",
+          icon: FocusSessionIcon,
+          keywords: ["sound", "ambient", "noise", "music", "mute"],
+          run: toggleAmbience,
+        },
+        ...SOUNDS.filter((s) => !(sound.on && s.id === sound.sound)).map(
+          (option) => ({
+            id: `sound-${option.id}`,
+            label: `Focus sound: ${option.label}`,
+            description: "Play while you focus",
+            icon: FocusSessionIcon,
+            keywords: ["sound", "ambient", "noise"],
+            run: () => playAmbience(option.id),
+          }),
+        ),
+      );
+    }
     if (session && session.phase !== "reflect")
       actions.push(
         {
@@ -108,7 +141,14 @@ export default definePlugin({
       );
     return actions;
   },
-  chromeChanged: subscribeSession,
+  chromeChanged: (notify) => {
+    const session = subscribeSession(notify);
+    const sound = subscribeAmbience(notify);
+    return () => {
+      session();
+      sound();
+    };
+  },
   subheaderSlots: [
     { id: "focus-band", placement: "full-width", render: () => <FocusBand /> },
   ],

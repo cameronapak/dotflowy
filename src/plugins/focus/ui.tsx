@@ -33,6 +33,7 @@ import {
   togglePause,
   type FocusSession,
 } from "./session";
+import { BandSoundControl, CardSoundControl } from "./sound-control";
 import {
   configureAccount,
   readSession,
@@ -363,6 +364,12 @@ function FocusSurface({
       <Reflection key={session.id} session={session} card={card} />
     ) : (
       <>
+        {session.phase === "focus" &&
+          (card ? (
+            <CardSoundControl ghost={ghost} playOnly={up} />
+          ) : (
+            <BandSoundControl ghost={ghost} />
+          ))}
         {/* Between rounds, starting the next one is the expected step; Done
             ends the whole Pomodoro session, so it steps back (ADR 0074). */}
         {session.phase === "ready" && (

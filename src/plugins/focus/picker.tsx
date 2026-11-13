@@ -1,3 +1,4 @@
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 
 import type { PluginContext } from "../types";
@@ -21,7 +22,16 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "../kit";
+import {
+  getAmbience,
+  pauseAmbience,
+  playAmbience,
+  setAutoStart,
+  SOUNDS,
+  type SoundId,
+} from "./ambience";
 import { startSession } from "./session";
+import { SOUND_ICON } from "./sound-control";
 import { unlockSounds, updateSession, useSession } from "./store";
 
 const LAST_CHOICE = "dotflowy:focus-choice";
@@ -46,6 +56,10 @@ function FocusPicker({ id, ctx }: { id: string; ctx: PluginContext }) {
   const [custom, setCustom] = useState(() =>
     choice.startsWith("custom:") ? choice.slice(7) : "30",
   );
+  const [sound, setSound] = useState<SoundId | "off">(() => {
+    const prefs = getAmbience();
+    return prefs.autoStart ? prefs.sound : "off";
+  });
   const isCustom = choice.startsWith("custom");
   const minutes = Number(isCustom ? custom : choice);
   const valid =
@@ -88,6 +102,10 @@ function FocusPicker({ id, ctx }: { id: string; ctx: PluginContext }) {
                 Date.now(),
               ),
             );
+            // The submit is the gesture that lets the sound start.
+            setAutoStart(sound === "off" ? null : sound);
+            if (sound !== "off") playAmbience(sound);
+            else if (getAmbience().on) pauseAmbience();
             ctx.openOverlay(null);
           }}
         >
@@ -136,6 +154,38 @@ function FocusPicker({ id, ctx }: { id: string; ctx: PluginContext }) {
               />
             </Field>
           )}
+          <Field>
+            <FieldLabel id="focus-sound-label">Sound</FieldLabel>
+            <ToggleGroup
+              aria-labelledby="focus-sound-label"
+              value={[sound]}
+              onValueChange={(values) => {
+                if (values[0])
+                  setSound(SOUNDS.find((s) => s.id === values[0])?.id ?? "off");
+              }}
+              className="grid w-full grid-cols-4 items-stretch"
+              variant="outline"
+            >
+              <ToggleGroupItem
+                value="off"
+                className={`${CHOICE} h-auto min-h-14`}
+              >
+                Off
+              </ToggleGroupItem>
+              {SOUNDS.map((option) => (
+                // On a phone the four columns are narrower than "Brown noise",
+                // so a label wraps to two lines inside its tile.
+                <ToggleGroupItem
+                  key={option.id}
+                  value={option.id}
+                  className={`${CHOICE} h-auto min-h-14 flex-col gap-1 px-1 py-2 text-center text-xs leading-tight whitespace-normal`}
+                >
+                  <HugeiconsIcon icon={SOUND_ICON[option.id]} />
+                  {option.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </Field>
           {choice === "pomodoro" && (
             <p className="text-sm text-muted-foreground">
               {prefs.focus.focusMinutes} min focus, {prefs.focus.breakMinutes}{" "}
