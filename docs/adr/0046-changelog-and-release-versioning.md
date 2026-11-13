@@ -98,8 +98,9 @@ credibility to do marketing — that loan can never be repaid.
 Mounted once, beside `McpConnectDialog` / `OpmlImportDialog` / `DeleteConfirmDialog`, behind a
 module-singleton opener (the `move-dialog-opener.ts` pattern). Entry points: the header App menu
 (its "What's new" item, emphasized while unread) and a Cmd+K global action. MAJOR renders a
-"Breaking" callout derived from the bump type already in the data — not a louder badge, and **no new
-state**.
+neutral "Updates to how things work" note derived from the bump type already in the data,
+without warning colors or an alert icon. It points readers to Changed entries and any steps
+they need to take, not to danger. No louder badge, and **no new state**.
 
 It is **not** the Tier-3 panel: `openPanel` is the containment boundary
 ([ADR 0031](./0031-two-lane-plugin-trust.md)) for plugin and Lane-B UI, and core chrome must not
@@ -107,6 +108,18 @@ squat in the room built to hold untrusted code. It is **not** a route: SPA mode
 ([ADR 0008](./0008-sync-via-a-per-user-durable-object.md)) prerenders the _shell_, so a
 `/changelog` route is neither crawlable nor shareable — and everything under `__root`'s `AuthGate`
 is authed-only anyway, which is correct for a badge and wrong for a public page.
+
+### Narrow-screen reading layout
+
+Below `sm`, each entry's badge sits above its full-width summary. At `sm` and
+above, a shared badge column keeps summaries aligned. Summaries wrap even long
+code terms instead of clipping them or requiring horizontal scrolling.
+
+The dialog stays within the dynamic viewport. Only the release list scrolls;
+the header, any Changed notice, and a single-row footer remain visible. Mobile
+uses the remaining height rather than a fixed `50vh` reading area; desktop
+keeps its `50vh` list cap. This is local to the changelog, not a change to the
+shared dialog or mobile menu sheets.
 
 ## Running tabs learn the version from the sync handshake
 
