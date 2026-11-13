@@ -8,16 +8,14 @@ interface CapturedFetch {
 }
 
 function fakeFetcher(capture: CapturedFetch) {
-  // SAFETY: the fake implements the (url, init) => Promise<Response> call shape
-  // proxyPostHog uses; no other fetch members are touched.
-  return (async (url: string | URL | Request, init?: RequestInit) => {
+  return async (url: string | URL | Request, init?: RequestInit) => {
     capture.url = String(url);
     capture.init = init;
     return new Response('{"ok":true}', {
       status: 200,
       headers: { "content-type": "application/json" },
     });
-  }) as typeof fetch;
+  };
 }
 
 test("only the proxy subdomain matches", () => {
@@ -105,11 +103,10 @@ test("only PostHog project-key Authorization survives", async () => {
 
 test("OPTIONS preflight answers without calling upstream", async () => {
   let called = false;
-  // SAFETY: same as fakeFetcher above; only the call shape is used.
-  const fetcher = (async () => {
+  const fetcher = async () => {
     called = true;
     return new Response("x");
-  }) as typeof fetch;
+  };
   const res = await proxyPostHog(
     new Request("https://e.dotflowy.com/e/", {
       method: "OPTIONS",
@@ -125,10 +122,9 @@ test("OPTIONS preflight answers without calling upstream", async () => {
 });
 
 test("upstream failures become 502s", async () => {
-  // SAFETY: same as fakeFetcher above; only the call shape is used.
-  const fetcher = (async () => {
+  const fetcher = async () => {
     throw new Error("network down");
-  }) as typeof fetch;
+  };
   const res = await proxyPostHog(
     new Request("https://e.dotflowy.com/e/"),
     fetcher,
