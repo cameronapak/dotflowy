@@ -77,7 +77,6 @@ import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { legacyNumberedNode } from "./numbered-compat";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
-import { isPostHogProxyRequest, proxyPostHog } from "./posthog-proxy";
 import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, rateLimitedTitleE, unfurlTitleE } from "./unfurl";
@@ -1353,10 +1352,6 @@ const handler = {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
-
-    // faith.tools analytics proxy (posthog-proxy.ts): the proxy subdomain is
-    // served by this Worker, but never reaches the SPA fallback or auth below.
-    if (isPostHogProxyRequest(url)) return proxyPostHog(request);
 
     // OAuth discovery for MCP clients (RFC 8414 / RFC 9728). These MUST live at
     // the site root — clients resolve them from the resource origin, not from
