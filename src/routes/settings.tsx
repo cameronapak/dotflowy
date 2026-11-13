@@ -21,7 +21,7 @@ import {
   SunIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { openAppleShortcut } from "../components/apple-shortcut-opener";
@@ -31,9 +31,12 @@ import {
   COLOR_THEMES,
   setColorTheme,
   useColorTheme,
+  endColorThemePreview,
+  useColorThemePreview,
 } from "../components/color-theme";
 import { DeleteAccountDialog } from "../components/delete-account-dialog";
 import { McpConnectDialog } from "../components/mcp-connect-dialog";
+import { openMembership } from "../components/membership-opener";
 import { openOpmlImport } from "../components/opml-import-opener";
 import {
   SettingsOptionRow,
@@ -47,6 +50,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "../components/ui/accordion";
+import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import {
@@ -61,6 +65,7 @@ import {
   type EditorFeature,
   type EmptyDaysMode,
 } from "../data/editor-features";
+import { startCheckout, useMembership } from "../data/membership";
 import { useNodeCount } from "../data/node-count";
 import {
   copyOutlineAsMarkdown,
@@ -223,20 +228,7 @@ interface SubRow {
   periodEnd?: string | Date;
 }
 
-/** Active/trialing rows resolve the plan (founding outranks unlimited), mirroring
- *  worker/plan.ts `resolvePlan` — kept simple + local so the client never imports
- *  worker code. */
-function resolvePlanFromSubs(subs: SubRow[]): PlanName {
-  let plan: PlanName = "free";
-  for (const s of subs) {
-    if (s.status !== "active" && s.status !== "trialing") continue;
-    if (s.plan === "founding") return "founding";
-    if (s.plan === "unlimited") plan = "unlimited";
-  }
-  return plan;
-}
-
-function activeSub(subs: SubRow[]): SubRow | null {
+function activeSub(subs: readonly SubRow[]): SubRow | null {
   return (
     subs.find(
       (s) =>
@@ -249,44 +241,10 @@ function activeSub(subs: SubRow[]): SubRow | null {
 type SubState = "loading" | "error" | "ready";
 
 interface Subscriptions {
+  plan: PlanName | null;
   state: SubState;
-  subs: SubRow[];
+  subs: readonly SubRow[];
   reload: () => void;
-}
-
-/** ONE `subscription.list()` fetch for the whole page (both Plan & billing and
- *  the Connections nudge read it) — lifted to SettingsPage so the endpoint isn't
- *  hit twice on mount, and the two sections can't disagree about the plan. */
-function useSubscriptions(): Subscriptions {
-  const [state, setState] = useState<SubState>("loading");
-  const [subs, setSubs] = useState<SubRow[]>([]);
-
-  const reload = useCallback(() => {
-    let cancelled = false;
-    setState("loading");
-    subscription.list().then(
-      ({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
-          setState("error");
-          return;
-        }
-        // SAFETY: server rows carry the Stripe fields SubRow reads, only nullability typing differs
-        setSubs((data ?? []) as SubRow[]);
-        setState("ready");
-      },
-      () => {
-        if (!cancelled) setState("error");
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => reload(), [reload]);
-
-  return { state, subs, reload };
 }
 
 function UsageMeter() {
@@ -370,7 +328,7 @@ function UpgradeCard({
   );
 }
 
-function PlanBilling({ state, subs, reload }: Subscriptions) {
+function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
   const [busy, setBusy] = useState(false);
 
   async function upgrade(plan: "unlimited" | "founding", annual: boolean) {
@@ -380,23 +338,13 @@ function PlanBilling({ state, subs, reload }: Subscriptions) {
       // On success the client REDIRECTS to Stripe Checkout, so the page unloads
       // and `busy` never needs resetting on the happy path. Only a returned
       // error (e.g. the founding 50-seat 403) lands back here.
-      const { error } = await subscription.upgrade({
-        plan,
-        annual,
-        successUrl: "/settings",
-        cancelUrl: "/settings",
-      });
-      if (error) {
-        toast.error(
-          error.message ??
-            (plan === "founding"
-              ? "Founding is sold out."
-              : "Couldn't start checkout. Please try again."),
-        );
-        setBusy(false);
-      }
-    } catch {
-      toast.error("Couldn't start checkout. Please try again.");
+      await startCheckout(plan, annual);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Couldn't start checkout. Please try again.",
+      );
       setBusy(false);
     }
   }
@@ -455,7 +403,7 @@ function PlanBilling({ state, subs, reload }: Subscriptions) {
     );
   }
 
-  const plan = resolvePlanFromSubs(subs);
+  if (plan === null) return null;
   const paid = plan !== "free";
   const sub = activeSub(subs);
 
@@ -521,12 +469,13 @@ function PlanBilling({ state, subs, reload }: Subscriptions) {
       {plan === "free" && (
         <div className="grid gap-3 sm:grid-cols-2">
           <UpgradeCard
-            name="Unlimited"
+            name="Pro"
             price="$5"
             cadence="/ month"
             note={
               <>
-                No node limit, plus AI app connections over MCP. Or{" "}
+                Every theme, AI app connections, member feedback, and no node
+                limit. Or{" "}
                 <span className="font-medium text-foreground">
                   $48/yr ($4/mo billed yearly)
                 </span>
@@ -538,10 +487,10 @@ function PlanBilling({ state, subs, reload }: Subscriptions) {
             busy={busy}
           />
           <UpgradeCard
-            name="Unlimited, yearly"
+            name="Pro, yearly"
             price="$48"
             cadence="/ year"
-            note="Everything in Unlimited, billed once a year — that's $4/mo."
+            note="Everything in Pro, billed once a year — that's $4/mo."
             cta="Upgrade yearly"
             onUpgrade={() => void upgrade("unlimited", true)}
             busy={busy}
@@ -644,30 +593,56 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
       <RowGroup>
         <SettingRow
           icon={<PlugZapIcon />}
-          title="Connect apps (MCP)"
-          description="Claude, Cursor, VS Code, ChatGPT, and more."
+          title={
+            <span className="flex flex-wrap items-center gap-2">
+              Connect apps (MCP)
+              <Badge variant="secondary">
+                {plan && !free
+                  ? "Included with your subscription"
+                  : "Included with Pro"}
+              </Badge>
+            </span>
+          }
+          description="Let Claude, Cursor, VS Code, ChatGPT, and more work with your outline."
           action={
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setConnectOpen(true)}
+              disabled={plan === null}
+              onClick={() =>
+                free ? openMembership("connections") : setConnectOpen(true)
+              }
             >
-              Set up
+              {free ? "Unlock app connections" : "Set up"}
             </Button>
           }
         />
         <SettingRow
           icon={<HugeiconsIcon icon={TerminalIcon} />}
-          title="Command line (CLI)"
+          title={
+            <span className="flex flex-wrap items-center gap-2">
+              Command line (CLI)
+              <Badge variant="secondary">
+                {plan && !free
+                  ? "Included with your subscription"
+                  : "Included with Pro"}
+              </Badge>
+            </span>
+          }
           description="Use Dotflowy from your terminal or scripts."
           action={
             <Button
               variant="outline"
               size="sm"
-              aria-label="Set up command line (CLI)"
-              onClick={() => setCliOpen(true)}
+              aria-label={
+                free ? "Unlock command line (CLI)" : "Set up command line (CLI)"
+              }
+              disabled={plan === null}
+              onClick={() =>
+                free ? openMembership("connections") : setCliOpen(true)
+              }
             >
-              Set up
+              {free ? "See plans" : "Set up"}
             </Button>
           }
         />
@@ -705,9 +680,9 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
       </RowGroup>
       {free && (
         <p className="text-sm text-muted-foreground">
-          Connecting AI apps requires{" "}
-          <span className="font-medium text-foreground">Unlimited</span>. See
-          Other settings → Plan &amp; billing to upgrade.
+          App connections and the CLI are included with Pro and Founding. Try
+          asking your AI app to organize meeting notes, find an idea, or add a
+          task to today.
         </p>
       )}
       <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
@@ -1118,91 +1093,149 @@ function PluginsSection() {
 function AppearanceSection() {
   const { theme, setTheme } = useTheme();
   const colorTheme = useColorTheme();
+  const preview = useColorThemePreview();
+  const membership = useMembership();
   const { textSize, setTextSize } = useTextSize();
   return (
-    <Section title="Appearance">
-      <RowGroup>
-        {/* The color theme (ADR 0082). Six choices don't fit beside the
+    <div id="appearance" className="scroll-mt-20">
+      <Section title="Appearance">
+        <RowGroup>
+          {/* The color theme (ADR 0082). Six choices don't fit beside the
             label, so they wrap on their own row. */}
-        <div className="flex flex-col gap-3 bg-card px-4 py-3">
-          <div className="text-sm font-medium text-foreground">Theme</div>
-          <div
-            role="radiogroup"
-            aria-label="Theme"
-            className="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-1 rounded-lg bg-muted p-1"
-          >
-            {COLOR_THEMES.map((t) => {
-              const active = t.id === colorTheme;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => setColorTheme(t.id)}
-                  className={cn(
-                    "inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[0.8rem] font-medium transition outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                    active
-                      ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/10"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="size-3 shrink-0 rounded-full ring-1 ring-foreground/15"
-                    style={{
-                      background: `linear-gradient(135deg, ${t.swatch[0]} 50%, ${t.swatch[1]} 50%)`,
-                    }}
-                  />
-                  <span className="truncate">{t.label}</span>
+          <div className="flex flex-col gap-3 bg-card px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-medium text-foreground">Theme</span>
+              <Badge variant="secondary">
+                {membership.state === "ready" && membership.plan !== "free"
+                  ? "Included with your subscription"
+                  : "Included with Pro"}
+              </Badge>
+            </div>
+            <div
+              role="radiogroup"
+              aria-label="Theme"
+              className="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-1 rounded-lg bg-muted p-1"
+            >
+              {COLOR_THEMES.map((t) => {
+                const active = t.id === colorTheme;
+                const locked =
+                  membership.plan === "free" &&
+                  t.id !== "default" &&
+                  !(membership.legacyLeaf && t.id === "leaf");
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    aria-label={
+                      locked
+                        ? `${t.label}, preview with Pro or Founding`
+                        : t.label
+                    }
+                    disabled={membership.state !== "ready"}
+                    onClick={() => setColorTheme(t.id)}
+                    className={cn(
+                      "inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[0.8rem] font-medium transition outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                      active
+                        ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/10"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="size-3 shrink-0 rounded-full ring-1 ring-foreground/15"
+                      style={{
+                        background: `linear-gradient(135deg, ${t.swatch[0]} 50%, ${t.swatch[1]} 50%)`,
+                      }}
+                    />
+                    <span className="truncate">{t.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {preview ? (
+              <div
+                className="flex flex-col gap-3 rounded-lg bg-muted p-3"
+                role="status"
+              >
+                <p className="text-sm font-medium">
+                  Previewing {COLOR_THEMES.find((t) => t.id === preview)?.label}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Try it here. Unlock themes to keep your choice on every
+                  device.
+                </p>
+                <ul className="list-inside list-disc rounded-lg bg-background p-3 text-sm">
+                  <li>Room for your next idea</li>
+                  <li>A little more space to think</li>
+                </ul>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => openMembership("themes")}>
+                    Unlock themes
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={endColorThemePreview}
+                  >
+                    End preview
+                  </Button>
+                </div>
+              </div>
+            ) : membership.plan === "free" ? (
+              <p className="text-sm text-muted-foreground">
+                Dotflowy is free. Try any other palette before you subscribe.
+              </p>
+            ) : null}
+            {membership.state === "error" && (
+              <p role="alert" className="text-sm text-muted-foreground">
+                Couldn't load your plan.{" "}
+                <button className="underline" onClick={membership.reload}>
+                  Try again
                 </button>
-              );
-            })}
+              </p>
+            )}
           </div>
-        </div>
-        <SettingRow
-          title="Mode"
-          action={
-            <Segmented
-              label="Mode"
-              value={theme}
-              onChange={(v) => setTheme(v)}
-              options={[
-                { value: "light", label: <SunIcon />, title: "Light" },
-                { value: "dark", label: <MoonIcon />, title: "Dark" },
-                { value: "system", label: <MonitorIcon />, title: "System" },
-              ]}
-            />
-          }
-        />
-        <SettingRow
-          title="Text size"
-          action={
-            <Segmented
-              label="Text size"
-              value={textSize}
-              onChange={(v: TextSize) => setTextSize(v)}
-              options={[
-                { value: "small", label: "Small" },
-                { value: "default", label: "Default" },
-                { value: "large", label: "Large" },
-              ]}
-            />
-          }
-        />
-      </RowGroup>
-    </Section>
+          <SettingRow
+            title="Mode"
+            action={
+              <Segmented
+                label="Mode"
+                value={theme}
+                onChange={(v) => setTheme(v)}
+                options={[
+                  { value: "light", label: <SunIcon />, title: "Light" },
+                  { value: "dark", label: <MoonIcon />, title: "Dark" },
+                  { value: "system", label: <MonitorIcon />, title: "System" },
+                ]}
+              />
+            }
+          />
+          <SettingRow
+            title="Text size"
+            action={
+              <Segmented
+                label="Text size"
+                value={textSize}
+                onChange={(v: TextSize) => setTextSize(v)}
+                options={[
+                  { value: "small", label: "Small" },
+                  { value: "default", label: "Default" },
+                  { value: "large", label: "Large" },
+                ]}
+              />
+            }
+          />
+        </RowGroup>
+      </Section>
+    </div>
   );
 }
 
 function SettingsPage() {
-  // One subscription fetch for the whole page; Plan & billing and the
-  // Connections nudge both read it (no double request, no divergent state).
-  const subscriptions = useSubscriptions();
-  const plan =
-    subscriptions.state === "ready"
-      ? resolvePlanFromSubs(subscriptions.subs)
-      : null;
+  const subscriptions = useMembership();
+  const plan = subscriptions.plan;
 
   return (
     <main className="min-h-dvh bg-background">
@@ -1225,6 +1258,14 @@ function SettingsPage() {
       </header>
 
       <div className="mx-auto flex max-w-2xl flex-col gap-10 px-4 py-8 sm:px-6">
+        <div id="billing" className="scroll-mt-20">
+          <Section
+            title="Plan & billing"
+            description="Your plan, usage, and payment."
+          >
+            <PlanBilling {...subscriptions} />
+          </Section>
+        </div>
         <ConnectionsSection plan={plan} />
         <PluginsSection />
         <AppearanceSection />
@@ -1233,12 +1274,6 @@ function SettingsPage() {
             Other settings
           </summary>
           <div className="mt-6 flex flex-col gap-10">
-            <Section
-              title="Plan & billing"
-              description="Your plan, usage, and payment."
-            >
-              <PlanBilling {...subscriptions} />
-            </Section>
             <AccountSection />
             <DataSection />
           </div>

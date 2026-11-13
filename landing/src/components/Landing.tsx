@@ -39,7 +39,7 @@ export const FAQ: Faq[] = [
   },
   {
     q: "What can AI agents see?",
-    a: "Only your outline, and only after you approve the connection. Text in a spoiler reaches them redacted. Their edits are labeled as theirs. AI agents need Unlimited or Founding.",
+    a: "Only your outline, and only after you approve the connection. Text in a spoiler reaches them redacted. Their edits are labeled as theirs. AI agents need Pro or Founding.",
   },
   {
     q: "Is Dotflowy open source?",
@@ -170,7 +170,7 @@ export function Landing() {
 
         <Section>
           <p className="text-brand-blue mb-3 text-sm font-medium">
-            AI agents · Unlimited and Founding
+            AI agents · Pro and Founding
           </p>
           <H2>Let your AI agent tidy your outline.</H2>
           <Lede>

@@ -19,7 +19,10 @@ import { AuthScreen } from "../components/auth-screen";
 import { ChangelogDialog } from "../components/changelog-dialog";
 import { ColorThemeSync } from "../components/color-theme";
 import { DeleteConfirmDialog } from "../components/delete-confirm-dialog";
+import { FeedbackDialog } from "../components/feedback-dialog";
 import { HistoryRestoreDialog } from "../components/history-restore";
+import { MembershipDialog } from "../components/membership-dialog";
+import { MembershipWelcome } from "../components/membership-welcome";
 import { MirrorPlaces } from "../components/mirror-places";
 import { MoveDialog } from "../components/move-dialog";
 import { NodeSwitcher } from "../components/node-switcher";
@@ -34,6 +37,7 @@ import { TextSizeProvider } from "../components/text-size-provider";
 import { ThemeProvider } from "../components/theme-provider";
 import { Toaster } from "../components/ui/sonner";
 import { UpdateAvailableToast } from "../components/update-available";
+import { MembershipProvider } from "../data/membership";
 import { hardReset, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
@@ -231,7 +235,12 @@ function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <>
       <AmpFeedback userId={session.user.id} />
-      {children}
+      <MembershipProvider>
+        <MembershipWelcome />
+        {children}
+        <MembershipDialog />
+        <FeedbackDialog />
+      </MembershipProvider>
     </>
   );
 }

@@ -323,6 +323,13 @@ export function installDemoBackend(): void {
           },
           user: DEMO_USER,
         });
+      case "/api/membership":
+        return json({
+          plan: "free",
+          legacyLeaf: false,
+          subs: [],
+          welcome: null,
+        });
       case "/api/nodes":
         return nodes(request);
       case "/api/kv":

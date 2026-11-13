@@ -210,7 +210,7 @@ test("binding failures and missing configuration do not stamp delivered and rema
           text: "fixture",
         },
       ),
-    ).toBe(false);
+    ).toEqual({ status: "simulated" });
   } finally {
     f.sqlite.close();
   }

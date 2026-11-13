@@ -1,3 +1,4 @@
+import { useLocation } from "@tanstack/react-router";
 // The color theme (ADR 0082): one class on <html> (`theme-<id>` plus
 // `themed`), separate from the light/dark Mode. The account's
 // `appearance:color-theme` row is the source of truth, so the choice follows
@@ -11,6 +12,7 @@ import {
   setColorThemePreference,
   useEditorFeatures,
 } from "../data/editor-features";
+import { peekMembership, useMembership } from "../data/membership";
 import { hasWindow } from "../env";
 import { COLOR_THEME_KEY } from "../lib/storage-keys";
 import { THEME_COLORS } from "../themes.generated";
@@ -47,16 +49,31 @@ function toColorThemeId(value: string | null): ColorThemeId {
 }
 
 const listeners = new Set<() => void>();
+let preview: ColorThemeId | null = null;
 
-function read(): ColorThemeId {
+function savedTheme(): ColorThemeId {
   return toColorThemeId(
     hasWindow() ? localStorage.getItem(COLOR_THEME_KEY) : null,
   );
 }
 
-/** Mirror locally and repaint, without touching the account. */
-function applyLocal(id: ColorThemeId) {
-  localStorage.setItem(COLOR_THEME_KEY, id);
+function effectiveSavedTheme(): ColorThemeId {
+  const id = savedTheme();
+  const membership = peekMembership();
+  return membership.state === "ready" &&
+    membership.plan === "free" &&
+    id !== "default" &&
+    !(membership.legacyLeaf && id === "leaf")
+    ? "default"
+    : id;
+}
+
+function read(): ColorThemeId {
+  return preview ?? effectiveSavedTheme();
+}
+
+/** Paint a preview without writing either the account or the no-flash cache. */
+function paint(id: ColorThemeId) {
   const root = document.documentElement;
   root.classList.remove(
     ...Array.from(root.classList).filter((c) => c.startsWith("theme-")),
@@ -64,6 +81,24 @@ function applyLocal(id: ColorThemeId) {
   root.classList.toggle("themed", id !== "default");
   if (id !== "default") root.classList.add(`theme-${id}`);
   for (const l of listeners) l();
+}
+
+function applyLocal(id: ColorThemeId) {
+  localStorage.setItem(COLOR_THEME_KEY, id);
+  paint(preview ?? effectiveSavedTheme());
+}
+
+export function endColorThemePreview() {
+  preview = null;
+  paint(effectiveSavedTheme());
+}
+
+export function useColorThemePreview() {
+  return useSyncExternalStore(
+    subscribe,
+    () => preview,
+    () => null,
+  );
 }
 
 // Saves in flight. While one runs, the local pick is newer than anything the
@@ -80,12 +115,27 @@ function adoptAccountTheme() {
   if (colorTheme === null && accountTheme !== null) return;
   accountTheme = colorTheme;
   const id = toColorThemeId(colorTheme);
-  if (id !== read()) applyLocal(id);
+  if (id !== savedTheme()) applyLocal(id);
 }
 
-/** Pick a theme: repaint now, then save it to the account. */
+/** Free palettes preview locally; only entitled selections reach persistence. */
 export function setColorTheme(id: ColorThemeId) {
-  const previous = read();
+  const membership = peekMembership();
+  if (membership.state !== "ready") {
+    toast.error("Your plan isn't available yet. Try again in a moment.");
+    return;
+  }
+  if (
+    membership.plan === "free" &&
+    id !== "default" &&
+    !(membership.legacyLeaf && id === "leaf")
+  ) {
+    preview = id;
+    paint(id);
+    return;
+  }
+  preview = null;
+  const previous = savedTheme();
   applyLocal(id);
   pendingSaves += 1;
   setColorThemePreference(id)
@@ -114,7 +164,16 @@ export function setColorTheme(id: ColorThemeId) {
  */
 export function ColorThemeSync() {
   const { colorTheme, ready } = useEditorFeatures();
+  const membership = useMembership();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  // Reset on leaving the route, not on component cleanup during navigation.
+  useEffect(() => {
+    if (pathname !== "/settings" && preview) endColorThemePreview();
+  }, [pathname]);
   useEffect(adoptAccountTheme, [ready, colorTheme]);
+  useEffect(() => {
+    paint(read());
+  }, [membership.state, membership.plan, membership.legacyLeaf]);
   return null;
 }
 

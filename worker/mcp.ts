@@ -79,7 +79,7 @@ const INTERNAL_ERROR = -32603;
 // can still initialize + discover but no tool call ever touches the outline.
 const UPGRADE_REQUIRED = -32001;
 const UPGRADE_MESSAGE =
-  "Agent access requires a paid Dotflowy plan. Upgrade at https://dotflowy.com to connect an agent.";
+  "Agent access requires Pro or Founding. Upgrade at https://app.dotflowy.com/settings#billing to connect an agent.";
 
 // --- Wire schemas (the /api/mcp trust boundary) --------------------------------
 

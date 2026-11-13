@@ -2,12 +2,13 @@ import { hashPassword } from "better-auth/crypto";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { build } from "esbuild";
 import { Miniflare, Response as FixtureResponse } from "miniflare";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { EmbedDescriptor } from "../src/data/embed-providers";
+import type { FeedbackSubmission } from "../src/data/feedback";
 import type { Node } from "../src/data/wire-schema";
 import type { OutlineSnapshot } from "./backup";
 import type {
@@ -17,12 +18,16 @@ import type {
 } from "./capture-input";
 import type { CaptureKeyEntry } from "./capture-keys";
 import type { FixtureInput } from "./capture-real-fixture";
+import type { KvClaimBody, KvUpsertBody } from "./wire";
 
 import { captureDigest } from "./capture-input";
 
 let mf: Miniflare;
 let directory: string;
 const outboundUrls: string[] = [];
+// Stripe transport is fixture-owned. No request in this suite reaches Stripe.
+const stripeSubscriptions = new Map<string, string>();
+const webhookSecret = "whsec_disposable_membership_fixture";
 
 type Key = { key: string; entry: { id: string; suffix: string } };
 type Inspection = {
@@ -162,6 +167,11 @@ beforeAll(async () => {
               value: "disposable-capture-test-secret-not-for-production",
             },
             BETTER_AUTH_URL: { type: "text", value: "http://fixture" },
+            STRIPE_SECRET_KEY: {
+              type: "text",
+              value: "sk_test_disposable_membership_fixture",
+            },
+            STRIPE_WEBHOOK_SECRET: { type: "text", value: webhookSecret },
             SIGNUP_OPEN: { type: "text", value: "true" },
             OWNER_USER_ID: { type: "text", value: "nobody-is-the-owner" },
             AMP_FEEDBACK_USER_ID: { type: "text", value: "feedback-owner" },
@@ -184,6 +194,21 @@ beforeAll(async () => {
             type: "fetcher",
             async handler(request) {
               const url = new URL(request.url);
+              if (url.hostname === "api.stripe.com") {
+                const subscription = stripeSubscriptions.get(
+                  url.pathname.split("/").pop() ?? "",
+                );
+                return new FixtureResponse(
+                  subscription ??
+                    JSON.stringify({
+                      error: { message: "No fixture for this Stripe call" },
+                    }),
+                  {
+                    status: subscription ? 200 : 404,
+                    headers: { "content-type": "application/json" },
+                  },
+                );
+              }
               if (
                 url.hostname === "fixture.unfurl.test" ||
                 ["x.com", "twitter.com", "mobile.twitter.com"].includes(
@@ -222,6 +247,10 @@ beforeAll(async () => {
     "0007_create_invites.sql",
     "0014_capture_keys.sql",
     "0015_scoped_api_keys.sql",
+    "0017_membership_welcome.sql",
+    "0018_first_party_feedback.sql",
+    "0019_feedback_triage.sql",
+    "0020_feedback_replies.sql",
   ]) {
     const sql = await readFile(`migrations/${migration}`, "utf8");
     await db.exec(sql.replace(/--[^\n]*/g, "").replaceAll("\n", " "));
@@ -231,6 +260,322 @@ beforeAll(async () => {
 afterAll(async () => {
   await mf?.dispose();
   if (directory) await rm(directory, { recursive: true, force: true });
+});
+
+test("membership gates theme writes, keeps the launch exception narrow, and scopes welcome dismissal to the account", async () => {
+  const db = await mf.getD1Database("DB");
+  const freeId = randomUUID();
+  const legacyId = "N67xxLwtsZ7FA1YTv7u90gqF8y9k3i1f";
+  async function signIn(id: string) {
+    const password = "membership-fixture-password";
+    await fixture("seed", {
+      userId: id,
+      password: await hashPassword(password),
+    });
+    const email = `${id.toLowerCase()}@capture.test`;
+    await db
+      .prepare('UPDATE "user" SET email = ? WHERE id = ?')
+      .bind(email, id)
+      .run();
+    const response = await mf.dispatchFetch(
+      "http://fixture/api/auth/sign-in/email",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://fixture",
+        },
+        body: JSON.stringify({ email, password }),
+      },
+    );
+    expect(response.status).toBe(200);
+    return response.headers
+      .getSetCookie()
+      .map((value) => value.split(";")[0])
+      .join("; ");
+  }
+  const freeCookie = await signIn(freeId);
+  const legacyCookie = await signIn(legacyId);
+  const origin = (await mf.ready).origin;
+  const request = (
+    cookie: string,
+    path: string,
+    body?:
+      | typeof KvUpsertBody.Type
+      | typeof KvClaimBody.Type
+      | FeedbackSubmission
+      | { id: string },
+    requestOrigin = origin,
+  ) =>
+    mf.dispatchFetch(`${origin}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        cookie,
+        origin: requestOrigin,
+        "content-type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const theme = (name: string, key = "appearance:color-theme") => ({
+    key,
+    value: { key: "appearance:color-theme", theme: name },
+  });
+  const kvPath = "/api/kv?collection=account-prefs";
+  expect(
+    (await request(freeCookie, "/api/membership")).headers.get("cache-control"),
+  ).toBe("private, no-store");
+  expect(
+    await (await request(freeCookie, "/api/membership")).json(),
+  ).toMatchObject({ plan: "free", legacyLeaf: false, welcome: null });
+  expect(
+    await (await request(legacyCookie, "/api/membership")).json(),
+  ).toMatchObject({ plan: "free", legacyLeaf: true, welcome: null });
+  expect(
+    (await request(freeCookie, kvPath, { rows: [theme("default")] })).status,
+  ).toBe(200);
+  expect(
+    (await request(freeCookie, kvPath, { rows: [theme("leaf")] })).status,
+  ).toBe(403);
+  expect(
+    (await request(freeCookie, kvPath, { rows: [theme("leaf", "alias")] }))
+      .status,
+  ).toBe(400);
+  expect(
+    (
+      await request(freeCookie, `${kvPath}&op=claim`, {
+        key: "alias",
+        value: { key: "appearance:color-theme", theme: "leaf" },
+      })
+    ).status,
+  ).toBe(400);
+  expect(
+    (await request(legacyCookie, kvPath, { rows: [theme("leaf")] })).status,
+  ).toBe(200);
+  expect(
+    (await request(legacyCookie, kvPath, { rows: [theme("catppuccin")] }))
+      .status,
+  ).toBe(403);
+  // A rejected mixed batch cannot sneak any part of a premium pick into storage.
+  expect(
+    (
+      await request(freeCookie, kvPath, {
+        rows: [theme("default"), theme("leaf")],
+      })
+    ).status,
+  ).toBe(403);
+  expect(await (await request(freeCookie, kvPath)).json()).toEqual([
+    { key: "appearance:color-theme", theme: "default" },
+  ]);
+  for (const status of ["past_due", "trialing", "active"]) {
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO subscription (id, plan, referenceId, status, stripeSubscriptionId) VALUES ('member-test', 'unlimited', ?, ?, 'sub_member')",
+      )
+      .bind(freeId, status)
+      .run();
+    expect(
+      (await request(freeCookie, kvPath, { rows: [theme("catppuccin")] }))
+        .status,
+    ).toBe(status === "past_due" ? 403 : 200);
+    // Entitlement or a forged return URL is not a payment receipt.
+    expect(
+      await (
+        await request(freeCookie, "/api/membership?checkout=success")
+      ).json(),
+    ).toMatchObject({ welcome: null });
+  }
+  await db
+    .prepare(
+      "INSERT INTO membership_welcome (id, userId, plan, createdAt) VALUES ('sub_member', ?, 'unlimited', 1)",
+    )
+    .bind(freeId)
+    .run();
+  expect(
+    await (await request(freeCookie, "/api/membership")).json(),
+  ).toMatchObject({ welcome: { id: "sub_member", plan: "unlimited" } });
+  const neighborAck = await request(legacyCookie, "/api/membership", {
+    id: "sub_member",
+  });
+  expect(neighborAck.status, await neighborAck.text()).toBe(200);
+  expect(
+    await (await request(freeCookie, "/api/membership")).json(),
+  ).toMatchObject({ welcome: { id: "sub_member" } });
+  expect(
+    (
+      await request(
+        freeCookie,
+        "/api/membership",
+        { id: "sub_member" },
+        "https://untrusted.test",
+      )
+    ).status,
+  ).toBe(403);
+  expect(
+    (await request(freeCookie, "/api/membership", { id: "sub_member" })).status,
+  ).toBe(200);
+  expect(
+    await (await request(freeCookie, "/api/membership")).json(),
+  ).toMatchObject({ welcome: null });
+  // First-party bugs reach durable storage; plan tags and the inbox are server-owned.
+  const report: FeedbackSubmission = {
+    id: randomUUID(),
+    kind: "bug",
+    message: "Fixture report",
+    context: { appVersion: "3.2.0" },
+  };
+  expect(
+    (
+      await request(
+        legacyCookie,
+        "/api/feedback",
+        report,
+        "https://untrusted.test",
+      )
+    ).status,
+  ).toBe(403);
+  expect((await request(legacyCookie, "/api/feedback", report)).status).toBe(
+    201,
+  );
+  expect(
+    await db
+      .prepare("SELECT plan FROM feedback_submissions WHERE user_id = ?")
+      .bind(legacyId)
+      .first<{ plan: string }>(),
+  ).toEqual({ plan: "free" });
+  expect((await request("", "/api/admin/feedback")).status).toBe(404);
+  expect((await request(freeCookie, "/api/admin/feedback")).status).toBe(404);
+});
+
+test("only a signed paid checkout queues a welcome, and webhook retries cannot revive a dismissed note", async () => {
+  const db = await mf.getD1Database("DB");
+  const userId = randomUUID();
+  await fixture("seed", { userId });
+  const stripeId = `sub_${randomUUID()}`;
+  const rowId = randomUUID();
+  await db
+    .prepare(
+      "INSERT INTO subscription (id, plan, referenceId, status) VALUES (?, 'founding', ?, 'incomplete')",
+    )
+    .bind(rowId, userId)
+    .run();
+  const now = Math.floor(Date.now() / 1000);
+  const stripeSubscription = {
+    id: stripeId,
+    object: "subscription",
+    customer: "cus_fixture",
+    status: "active",
+    cancel_at_period_end: false,
+    metadata: { subscriptionId: rowId, referenceId: userId },
+    items: {
+      data: [
+        {
+          id: "si_fixture",
+          quantity: 1,
+          current_period_start: now,
+          current_period_end: now + 86400,
+          price: {
+            id: "price_fixture",
+            lookup_key: "dotflowy_founding",
+            recurring: { interval: "year", interval_count: 3 },
+          },
+        },
+      ],
+    },
+  };
+  stripeSubscriptions.set(stripeId, JSON.stringify(stripeSubscription));
+  const event = (
+    paymentStatus: string,
+    type = "checkout.session.completed",
+    subscriptionId = stripeId,
+  ) =>
+    JSON.stringify({
+      id: `evt_${randomUUID()}`,
+      object: "event",
+      type,
+      created: now,
+      data: {
+        object: {
+          id: "cs_fixture",
+          object: "checkout.session",
+          mode: "subscription",
+          subscription: subscriptionId,
+          client_reference_id: userId,
+          payment_status: paymentStatus,
+          metadata: { subscriptionId: rowId, referenceId: userId, userId },
+        },
+      },
+    });
+  const send = (body: string, secret = webhookSecret) =>
+    mf.dispatchFetch("http://fixture/api/auth/stripe/webhook", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": `t=${now},v1=${createHmac("sha256", secret).update(`${now}.${body}`).digest("hex")}`,
+      },
+      body,
+    });
+  const welcome = () =>
+    db
+      .prepare(
+        "SELECT id, plan, seenAt FROM membership_welcome WHERE userId = ?",
+      )
+      .bind(userId)
+      .first<{ id: string; plan: string; seenAt: number | null }>();
+  expect((await send(event("paid"), "wrong_fixture_secret")).status).toBe(400);
+  expect(await welcome()).toBeNull();
+  expect((await send(event("unpaid"))).status).toBe(200);
+  expect(await welcome()).toBeNull();
+  stripeSubscriptions.set(
+    stripeId,
+    JSON.stringify({ ...stripeSubscription, status: "trialing" }),
+  );
+  expect((await send(event("paid"))).status).toBe(200);
+  expect(await welcome()).toBeNull();
+  stripeSubscriptions.set(stripeId, JSON.stringify(stripeSubscription));
+  const paid = event("paid");
+  const response = await send(paid);
+  expect(response.status, await response.text()).toBe(200);
+  expect(await welcome()).toEqual({
+    id: stripeId,
+    plan: "founding",
+    seenAt: null,
+  });
+  await db
+    .prepare("UPDATE membership_welcome SET seenAt = 123 WHERE userId = ?")
+    .bind(userId)
+    .run();
+  expect((await send(paid)).status).toBe(200);
+  expect(await welcome()).toEqual({
+    id: stripeId,
+    plan: "founding",
+    seenAt: 123,
+  });
+  expect((await send(event("paid", "invoice.paid"))).status).toBe(200);
+  expect(await welcome()).toEqual({
+    id: stripeId,
+    plan: "founding",
+    seenAt: 123,
+  });
+  const delayedId = `sub_${randomUUID()}`;
+  const delayed = event(
+    "paid",
+    "checkout.session.async_payment_succeeded",
+    delayedId,
+  );
+  expect((await send(delayed)).status).toBe(400);
+  await db
+    .prepare(
+      "INSERT INTO subscription (id, plan, referenceId, status, stripeSubscriptionId) VALUES (?, 'unlimited', ?, 'active', ?)",
+    )
+    .bind(randomUUID(), userId, delayedId)
+    .run();
+  expect((await send(delayed)).status).toBe(200);
+  expect(
+    await db
+      .prepare("SELECT plan, seenAt FROM membership_welcome WHERE id = ?")
+      .bind(delayedId)
+      .first<{ plan: string; seenAt: number | null }>(),
+  ).toEqual({ plan: "unlimited", seenAt: null });
 });
 
 test("retained shards stay inert until authenticated account erasure, without affecting a neighbor", async () => {

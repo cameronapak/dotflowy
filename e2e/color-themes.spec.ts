@@ -19,6 +19,62 @@ const THEMES = [
   "leaf",
 ];
 
+test("Free previews never save, and leaving Settings restores the saved theme", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  const writes: unknown[] = [];
+  await page.route("**/api/kv?**", (route) => {
+    if (
+      route.request().method() === "POST" &&
+      new URL(route.request().url()).searchParams.get("collection") ===
+        "account-prefs"
+    )
+      writes.push(route.request().postDataJSON());
+    return route.fallback();
+  });
+  await page.goto("/settings");
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
+  const leaf = page.getByRole("radio", { name: /Leaf, preview/ });
+  await expect(leaf).toBeEnabled();
+  const cache = await page.evaluate(() =>
+    localStorage.getItem("dotflowy:color-theme"),
+  );
+  await leaf.click();
+  await expect(page.locator("html")).toHaveClass(/\btheme-leaf\b/);
+  await expect(
+    page.getByText("Previewing Leaf", { exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("dotflowy:color-theme")),
+  ).toBe(cache);
+  expect(writes).toEqual([]);
+  await page
+    .getByRole("button", { name: "Unlock themes", exact: true })
+    .click();
+  const upgrade = page.getByRole("dialog", { name: "Make Leaf yours" });
+  await expect(upgrade).toBeVisible();
+  // Canceling the offer preserves the preview, not an entitlement or preference.
+  await page.keyboard.press("Escape");
+  await expect(upgrade).toBeHidden();
+  await page.getByRole("button", { name: "End preview" }).click();
+  await expect(page.locator("html")).not.toHaveClass(/\btheme-leaf\b/);
+  await leaf.click();
+  await page.getByRole("button", { name: "Back to outline" }).click();
+  await expect(page.locator("html")).not.toHaveClass(/\btheme-leaf\b/);
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder("Search nodes and actions...").fill("Catppuccin");
+  await page.getByRole("option", { name: /Theme: Catppuccin/ }).click();
+  await expect(page).toHaveURL(/settings#appearance$/);
+  await expect(
+    page.getByText("Previewing Catppuccin", { exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("dotflowy:color-theme")),
+  ).toBe(cache);
+  expect(writes).toEqual([]);
+});
+
 /** Every check below its minimum for the theme and Mode now on <html>. */
 function contrastFailures(page: Page) {
   return page.evaluate(() => {
@@ -145,6 +201,11 @@ test("the color theme is the account's and survives cleared storage", async ({
   page,
 }) => {
   await seedOutline(page, TREE);
+  await page.route("**/api/membership", (route) =>
+    route.fulfill({
+      json: { plan: "unlimited", legacyLeaf: false, subs: [], welcome: null },
+    }),
+  );
   await page.goto("/settings");
   const leaf = page.getByRole("radio", { name: "Leaf" });
   await leaf.click();
@@ -189,6 +250,11 @@ for (const failure of ["account load", "save"] as const)
         route.request().method() === (failure === "save" ? "POST" : "GET")
           ? route.fulfill({ status: 500, json: { error: "unavailable" } })
           : route.fallback(),
+    );
+    await page.route("**/api/membership", (route) =>
+      route.fulfill({
+        json: { plan: "unlimited", legacyLeaf: false, subs: [], welcome: null },
+      }),
     );
     await page.goto("/settings");
     await page.getByRole("radio", { name: "Leaf" }).click();

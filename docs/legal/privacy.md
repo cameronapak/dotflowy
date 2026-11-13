@@ -1,6 +1,6 @@
 # Dotflowy Privacy Policy
 
-**Effective date:** July 11, 2026 · **Last updated:** October 15, 2026
+**Effective date:** July 11, 2026 · **Last updated:** November 13, 2026
 
 Dotflowy is operated by **FAITH TOOLS SOFTWARE SOLUTIONS, LLC**, an Oklahoma limited liability company. This policy says exactly what data we handle, where it lives, who can see it, and what we will never do with it. We'd rather over-disclose than hide anything.
 
@@ -18,6 +18,8 @@ Dotflowy is operated by **FAITH TOOLS SOFTWARE SOLUTIONS, LLC**, an Oklahoma lim
 **Your notes.** The outline you write is the product — we store it so we can sync and display it. That's the only reason.
 
 **Billing data.** Handled by Stripe. We store your subscription status and plan; Stripe holds your card details. We never see your card number.
+
+**Feedback.** If you send a bug report, idea, or question in the app, we store the text you choose to send, its type, app version, time, account ID, and plan at submission in a private Cloudflare D1 inbox for support and product decisions. Browser information and a broad page category are optional. We do not automatically attach outline text, screenshots, full URLs, or node identifiers. Reports are available only to authorized administrators, not other users. Administrators can track completion and add internal support comments, which stay in the private inbox and are removed with the report. We use your account email to send an automatic receipt, identify your report in an owner notification, and contact you about your feedback from a Dotflowy support address. Automatic receipts and owner notifications include a reference, not your feedback text or technical details. If an administrator emails you from the inbox, we keep the recipient address, message, time and send status privately with the report; internal comments are never included in those emails. Replies to our support address arrive by email and do not sync into the in-app inbox. Reports and their reply history remain until you delete your account or ask us to remove them; emails may remain in their recipients' mailboxes. Public GitHub ideas are separate and follow GitHub's policies.
 
 **Waitlist.** If you join the waitlist, we store the email you submitted, only to send you an invite.
 
@@ -60,7 +62,7 @@ We never sell your data, share it for advertising, or use it to train AI models.
 
 ## Cookies
 
-We set one cookie: your login session. We set no tracking cookies. Preferences like theme and view settings are stored locally in your browser.
+We set one cookie: your login session. We set no tracking cookies. Mode and view settings are stored locally in your browser. Your color theme is an account preference synced across devices, with a local copy to avoid a flash on page load. Free theme previews stay in memory and are not saved.
 
 Embedded media is the exception we don't control: when a YouTube, Vimeo, Spotify, or X embed loads, that provider may set its own cookies. You only get them if you turn on external embeds, or if you open an embed in the live demo.
 

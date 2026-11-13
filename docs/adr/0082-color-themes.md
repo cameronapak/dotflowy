@@ -76,6 +76,20 @@ Themes are classes, not `data-theme`, because Liquid Glass reads
 Pick a theme in Settings → Appearance or from ⌘K ("Theme: …"). Mode is now
 labeled "Mode" in both places.
 
+Additional palettes require Unlimited or Founding; Dotflowy and every Mode
+stay free. Free users preview palettes in memory in Settings, without changing
+the account row or its localStorage mirror. Leaving Settings or ending the
+preview restores the saved, entitled palette. The Worker also gates theme
+writes, including alternate KV key/claim paths. On downgrade, the app displays
+the default without deleting the saved paid preference, so resubscribing
+restores it.
+
+Themes shipped free briefly on November 13, 2026. A read-only production check
+found only the owner's outline and one free account with Leaf saved. Cam chose
+to keep Leaf available to that free account. `worker/membership.ts` holds the
+single stable-ID, Leaf-only exception. There is no migration, entitlement
+table, email matching, or customer-facing grandfathering notice.
+
 ## Status bar
 
 One unscoped `theme-color` meta follows the computed page background, which

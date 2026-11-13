@@ -16,6 +16,7 @@ import { stripe } from "@better-auth/stripe";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { captcha, mcp } from "better-auth/plugins";
+import { Schema } from "effect";
 import Stripe from "stripe";
 
 import type { UserOutlineDO } from "./outline-do";
@@ -34,6 +35,7 @@ import {
   normalizeEmail,
 } from "./identity";
 import { isRedeemableInvite, redeemInvite } from "./invites";
+import { recordWelcome } from "./membership";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
 
 /** Any undecoded JSON request-body field as the auth hooks see it (Better Auth
@@ -478,6 +480,41 @@ export function createAuth(
         // backfill, and the free tier is the absence of a subscription row.
         // The plugin creates the customer lazily at first `upgrade()`.
         createCustomerOnSignUp: false,
+        // onEvent runs after signature verification and the plugin's persistence.
+        // Unlike onSubscriptionComplete, failures here return non-2xx for
+        // Stripe to retry. Delayed methods have their own paid completion event.
+        onEvent: async (event) => {
+          if (
+            event.type !== "checkout.session.completed" &&
+            event.type !== "checkout.session.async_payment_succeeded"
+          )
+            return;
+          const checkout = event.data.object;
+          if (
+            checkout.mode !== "subscription" ||
+            checkout.payment_status !== "paid" ||
+            !checkout.client_reference_id ||
+            !checkout.subscription
+          )
+            return;
+          const subscriptionId = Schema.is(Schema.String)(checkout.subscription)
+            ? checkout.subscription
+            : checkout.subscription.id;
+          const completed = await env.DB.prepare(
+            "SELECT plan, status FROM subscription WHERE referenceId = ? AND stripeSubscriptionId = ?",
+          )
+            .bind(checkout.client_reference_id, subscriptionId)
+            .first<{ plan: string; status: string }>();
+          // An out-of-order event retries after the subscription record lands.
+          if (!completed) throw new Error("Checkout subscription is not ready");
+          if (completed.status !== "trialing")
+            await recordWelcome(
+              env.DB,
+              checkout.client_reference_id,
+              subscriptionId,
+              completed.plan,
+            );
+        },
         subscription: {
           enabled: true,
           // Both plans are ALWAYS listed. Don't gate the founding cap by
@@ -509,7 +546,7 @@ export function createAuth(
             ) {
               throw new APIError("FORBIDDEN", {
                 message:
-                  "All founding seats are taken. The unlimited plan is available.",
+                  "All founding seats are taken. The Pro plan is available.",
               });
             }
             return {};

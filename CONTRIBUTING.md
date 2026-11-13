@@ -202,12 +202,24 @@ STRIPE_SECRET_KEY=sk_test_… bun scripts/stripe-setup.ts            # test mode
 STRIPE_SECRET_KEY=sk_test_… bun scripts/stripe-setup.ts --dry-run  # plan only, no writes
 ```
 
+The public recurring plan is **Dotflowy Pro**. The internal `unlimited` plan
+name and `dotflowy_unlimited_*` lookup keys remain stable for existing subscriptions.
+Renaming an existing Stripe Product is a separate, approved in-place name change,
+not a new Product or Price. The setup script does not rename existing Products.
+
 The lookup keys are the state (no state file); re-running only creates what's
 missing. Test mode skips the webhook endpoint (that's what `stripe listen` is
 for). For prod, run it once against the live key with the explicit `--live`
 guard — `STRIPE_SECRET_KEY=sk_live_… bun scripts/stripe-setup.ts --live` — which
 also registers the `app.dotflowy.com` webhook endpoint and prints the `whsec_…`
 signing secret once (feed it to `wrangler secret put STRIPE_WEBHOOK_SECRET`).
+
+The managed webhook must also subscribe to
+`checkout.session.async_payment_succeeded` so delayed-payment success can queue
+the personal membership thank-you. Existing endpoints are not modified by the
+setup script: it reports event mismatches. With explicit approval, add that
+one event to the existing endpoint without changing its URL, signing secret,
+existing events, Prices, or subscriptions.
 
 Entitlement reads never call Stripe. `getPlan(userId, env)` is one D1 query on
 `referenceId = user.id`, `status IN ('active','trialing')`. Free tier is no
