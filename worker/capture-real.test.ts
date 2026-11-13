@@ -18,6 +18,8 @@ import type {
 import type { CaptureKeyEntry } from "./capture-keys";
 import type { FixtureInput } from "./capture-real-fixture";
 
+import { captureDigest } from "./capture-input";
+
 let mf: Miniflare;
 let directory: string;
 const outboundUrls: string[] = [];
@@ -219,6 +221,7 @@ beforeAll(async () => {
     "0006_create_stripe.sql",
     "0007_create_invites.sql",
     "0014_capture_keys.sql",
+    "0015_scoped_api_keys.sql",
   ]) {
     const sql = await readFile(`migrations/${migration}`, "utf8");
     await db.exec(sql.replace(/--[^\n]*/g, "").replaceAll("\n", " "));
@@ -959,6 +962,13 @@ test.skipIf(!process.env.LIVE_EMBEDS)(
 
 test("key storage, expiry boundary, revocation, tenant isolation, and password version fail closed", async () => {
   const first = await account();
+  // Retained dfc_ secrets still authenticate alongside newly issued dfk_ keys.
+  first.key = first.key.replace("dfk_", "dfc_");
+  const db = await mf.getD1Database("DB");
+  await db
+    .prepare("UPDATE capture_key SET hash=? WHERE id=?")
+    .bind(await captureDigest(first.key), first.entry.id)
+    .run();
   const second = await account();
   const exact = 2_000_000_000_000;
   const expiring = await fixture<Key>("key", {
@@ -1093,7 +1103,134 @@ test("real password change and reset revoke keys; sign-out does not", async () =
     .getSetCookie()
     .map((value) => value.split(";")[0])
     .join("; ");
-  const first = await fixture<Key>("key", { userId });
+  const beforeCreation = Date.now();
+  const created = await mf.dispatchFetch("http://fixture/api/keys", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: "http://fixture",
+      cookie,
+    },
+    // Omitting expiry exercises the canonical route's secure default.
+    body: JSON.stringify({ name: "Read-only automation", permission: "read" }),
+  });
+  expect(created.status).toBe(201);
+  // SAFETY: The real creation handler returns the key contract verified below.
+  let first = (await created.json()) as Key & { entry: CaptureKeyEntry };
+  expect(first.entry.permission).toBe("read");
+  expect(first.entry.expiresAt).toBeGreaterThanOrEqual(
+    beforeCreation + 30 * 86400000,
+  );
+  expect(first.entry.expiresAt).toBeLessThanOrEqual(Date.now() + 30 * 86400000);
+  const handshake = await mf.dispatchFetch("http://fixture/mcp", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${first.key}`,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {},
+    }),
+  });
+  expect(handshake.status).toBe(200);
+  expect(await handshake.text()).toContain("protocolVersion");
+  type RotationRequest = { id: string; expiry?: string; permission?: string };
+  const rotate = (
+    body: RotationRequest,
+    path = "/api/keys",
+    origin = "http://fixture",
+  ) =>
+    mf.dispatchFetch(`http://fixture${path}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin, cookie },
+      body: JSON.stringify(body),
+    });
+  const foreign = await account();
+  expect((await rotate({ id: foreign.entry.id })).status).toBe(404);
+  expect(
+    (await rotate({ id: first.entry.id }, "/api/capture-keys")).status,
+  ).toBe(405);
+  expect(
+    (await rotate({ id: first.entry.id }, "/api/keys", "https://evil.test"))
+      .status,
+  ).toBe(403);
+  expect(
+    (await rotate({ id: first.entry.id, permission: "write" })).status,
+  ).toBe(400);
+  expect((await rotate({ id: first.entry.id, expiry: "never" })).status).toBe(
+    400,
+  );
+  await db
+    .prepare('UPDATE "session" SET createdAt = ? WHERE userId = ?')
+    .bind(new Date(Date.now() - 86400001).toISOString(), userId)
+    .run();
+  expect((await rotate({ id: first.entry.id })).status).toBe(401);
+  await db
+    .prepare('UPDATE "session" SET createdAt = ? WHERE userId = ?')
+    .bind(new Date().toISOString(), userId)
+    .run();
+  const oldKey = first.key;
+  const beforeRotation = Date.now();
+  const rotation = await rotate({ id: first.entry.id, expiry: "90d" });
+  expect(rotation.status).toBe(200);
+  // SAFETY: The real rotation response uses the creation contract; assertions verify its grant and lifetime.
+  const rotated = (await rotation.json()) as Key & { entry: CaptureKeyEntry };
+  expect(rotated.key).not.toBe(oldKey);
+  expect(rotated.entry.id).toBe(first.entry.id);
+  expect(rotated.entry.name).toBe("Read-only automation");
+  expect(rotated.entry.permission).toBe("read");
+  expect(rotated.entry.expiresAt).toBeGreaterThanOrEqual(
+    beforeRotation + 90 * 86400000,
+  );
+  expect(rotated.entry.expiresAt).toBeLessThanOrEqual(
+    Date.now() + 90 * 86400000,
+  );
+  expect(
+    await fixture<{ authenticated: boolean }>("auth", {
+      userId,
+      authorization: `Bearer ${oldKey}`,
+    }),
+  ).toEqual({ authenticated: false });
+  expect(
+    await fixture<{ authenticated: boolean }>("auth", {
+      userId,
+      authorization: `Bearer ${rotated.key}`,
+    }),
+  ).toEqual({ authenticated: true });
+  const deniedRotation = await mf.dispatchFetch("http://fixture/api/keys", {
+    method: "PATCH",
+    headers: {
+      "content-type": "application/json",
+      origin: "http://fixture",
+      authorization: `Bearer ${rotated.key}`,
+    },
+    body: JSON.stringify({ id: rotated.entry.id }),
+  });
+  expect(deniedRotation.status).toBe(401);
+  await db
+    .prepare("UPDATE capture_key SET expiresAt = ? WHERE id = ?")
+    .bind(Date.now() - 1, rotated.entry.id)
+    .run();
+  const renewed = await rotate({ id: rotated.entry.id });
+  expect(renewed.status).toBe(200);
+  // SAFETY: This is the same real rotation response contract, now exercising an expired key and default lifetime.
+  first = (await renewed.json()) as Key & { entry: CaptureKeyEntry };
+  expect(first.entry.permission).toBe("read");
+  expect(first.entry.expiresAt - first.entry.createdAt).toBe(30 * 86400000);
+  expect(
+    await fixture<{ authenticated: boolean }>("auth", {
+      userId,
+      authorization: `Bearer ${first.key}`,
+    }),
+  ).toEqual({ authenticated: true });
+  const listing = await mf.dispatchFetch("http://fixture/api/keys", {
+    headers: { cookie },
+  });
+  expect(listing.status).toBe(200);
+  expect(await listing.text()).not.toContain(first.key);
   const refused = await auth(
     "change-password",
     {
@@ -1213,9 +1350,165 @@ test("invalid capture input creates no nodes; key management enforces origin and
   const fresh = await fixtureResponse<Key>("manage", {
     userId,
     manageMethod: "POST",
-    manageBody: { name: "fresh", expiry: "never" },
+    manageBody: { name: "fresh", expiry: "30d" },
     sessionCreatedAt: Date.now(),
   });
   expect(fresh.response.status).toBe(201);
-  expect(fresh.body.key).toMatch(/^dfc_[0-9a-f]{64}$/);
+  expect(fresh.body.key).toMatch(/^dfk_[0-9a-f]{64}$/);
+  const escalation = await fixtureResponse("manage", {
+    userId,
+    manageMethod: "POST",
+    manageBody: { name: "legacy route", expiry: "30d", permission: "write" },
+  });
+  expect(escalation.response.status).toBe(400);
+});
+
+test("API keys enforce MCP permissions, plan gates, capture scope, and live revocation", async () => {
+  const { userId, key: captureKey } = await account();
+  const reader = await fixture<Key>("key", { userId, permission: "read" });
+  const writer = await fixture<Key>("key", {
+    userId,
+    permission: "write",
+    expiry: "90d",
+  });
+  const db = await mf.getD1Database("DB");
+  const rpc = async (
+    key: string,
+    method: string,
+    params: { name?: string; arguments?: Record<string, string> } = {},
+    path = "/mcp",
+  ) => {
+    const response = await mf.dispatchFetch(`http://fixture${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${key}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "test", method, params }),
+    });
+    return {
+      status: response.status,
+      // SAFETY: The real MCP handler emits this envelope; each tested field is asserted below.
+      body: (await response.json()) as {
+        error?: { code: number };
+        result?: {
+          tools?: { name: string }[];
+          isError?: boolean;
+          content?: { text: string }[];
+        };
+      },
+    };
+  };
+  expect((await rpc(captureKey, "initialize")).status).toBe(401);
+  expect(
+    (
+      await rpc(reader.key, "tools/call", {
+        name: "get_outline",
+        arguments: {},
+      })
+    ).body.error?.code,
+  ).toBe(-32001);
+  await db
+    .prepare(
+      "INSERT INTO subscription (id,plan,referenceId,status) VALUES (?,'unlimited',?,'active')",
+    )
+    .bind(randomUUID(), userId)
+    .run();
+  const discovery = await rpc(reader.key, "tools/list", {}, "/api/mcp");
+  expect(discovery.body.result?.tools?.map((tool) => tool.name).sort()).toEqual(
+    ["export_opml", "get_outline", "search_nodes"],
+  );
+  const captured = await api("/api/capture", captureKey, {
+    attemptId: randomUUID(),
+    date: "2026-01-02",
+    text: "Visible ||hidden-secret||",
+  });
+  expect(captured.response.status).toBe(200);
+  const nodeId = captured.body!.nodeId!;
+  const read = await rpc(reader.key, "tools/call", {
+    name: "get_outline",
+    arguments: {},
+  });
+  expect(read.body.result?.isError).not.toBe(true);
+  expect(JSON.stringify(read.body)).toContain("Visible");
+  expect(JSON.stringify(read.body)).not.toContain("hidden-secret");
+  const original = (await fixture<Inspection>("inspect", { userId })).snapshot
+    .nodes;
+  for (const name of [
+    "add_node",
+    "update_node",
+    "delete_node",
+    "add_to_today",
+    "mirror_node",
+    "mirror_to_today",
+    "add_subtree",
+    "move_nodes",
+    "import_opml",
+  ]) {
+    // Even explicit calls to tools hidden from discovery cannot reach a write.
+    expect(
+      (
+        await rpc(reader.key, "tools/call", {
+          name,
+          arguments: { nodeId, text: "forbidden", sourceApp: "test" },
+        })
+      ).body.result?.isError,
+      name,
+    ).toBe(true);
+  }
+  expect(
+    (
+      await api("/api/capture", reader.key, {
+        attemptId: randomUUID(),
+        date: "2026-01-02",
+        text: "forbidden",
+      })
+    ).response.status,
+  ).toBe(403);
+  expect(
+    (await fixture<Inspection>("inspect", { userId })).snapshot.nodes,
+  ).toEqual(original);
+  const write = await rpc(writer.key, "tools/call", {
+    name: "update_node",
+    arguments: { nodeId, text: "Allowed", sourceApp: "test" },
+  });
+  expect(write.body.result?.isError).not.toBe(true);
+  expect(
+    (await fixture<Inspection>("inspect", { userId })).snapshot.nodes.find(
+      (n) => n.id === nodeId,
+    )?.text,
+  ).toBe("Allowed");
+  expect(
+    (
+      await api("/api/capture", writer.key, {
+        attemptId: randomUUID(),
+        date: "2026-01-02",
+        text: "writer capture",
+      })
+    ).response.status,
+  ).toBe(200);
+  for (const path of ["/api/nodes", "/api/keys", "/api/capture-keys"])
+    expect((await api(path, writer.key)).response.status, path).toBe(401);
+  await fixture("manage", {
+    userId,
+    manageMethod: "DELETE",
+    manageBody: { id: reader.entry.id },
+  });
+  expect((await rpc(reader.key, "tools/list")).status).toBe(401);
+  await fixture("password", { userId, password: "changed" });
+  expect((await rpc(writer.key, "initialize")).status).toBe(401);
+  const expired = await fixture<Key>("key", {
+    userId,
+    permission: "write",
+    expiresAt: Date.now() - 1,
+  });
+  expect((await rpc(expired.key, "tools/list")).status).toBe(401);
+  const failure = await api("/api/capture", expired.key, {
+    attemptId: randomUUID(),
+    date: "2026-01-02",
+    text: "not saved",
+  });
+  expect(failure.response.status).toBe(401);
+  expect(failure.body?.message).toContain("Dotflowy Settings");
+  expect(failure.body?.saved).not.toBe(true);
 });

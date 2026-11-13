@@ -1,4 +1,8 @@
-import { Key01Icon, SmartPhone01Icon } from "@hugeicons/core-free-icons";
+import {
+  Key01Icon,
+  SmartPhone01Icon,
+  TerminalIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
 import { Effect } from "effect";
@@ -21,7 +25,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { openAppleShortcut } from "../components/apple-shortcut-opener";
-import { CaptureKeysDialog } from "../components/capture-keys-dialog";
+import { ApiKeysDialog } from "../components/capture-keys-dialog";
 import { CliSetupDialog } from "../components/cli-setup-dialog";
 import {
   COLOR_THEMES,
@@ -57,10 +61,6 @@ import {
   type EditorFeature,
   type EmptyDaysMode,
 } from "../data/editor-features";
-import {
-  setExperimentalCaptureEnabled,
-  useExperimentalCaptureEnabled,
-} from "../data/flags";
 import { useNodeCount } from "../data/node-count";
 import {
   copyOutlineAsMarkdown,
@@ -633,6 +633,7 @@ function AccountSection() {
 function ConnectionsSection({ plan }: { plan: PlanName | null }) {
   const [connectOpen, setConnectOpen] = useState(false);
   const [cliOpen, setCliOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
   const free = plan === "free";
 
   return (
@@ -656,6 +657,7 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
           }
         />
         <SettingRow
+          icon={<HugeiconsIcon icon={TerminalIcon} />}
           title="Command line (CLI)"
           description="Use Dotflowy from your terminal or scripts."
           action={
@@ -664,6 +666,37 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
               size="sm"
               aria-label="Set up command line (CLI)"
               onClick={() => setCliOpen(true)}
+            >
+              Set up
+            </Button>
+          }
+        />
+        <div id="capture-keys" className="scroll-mt-20">
+          <SettingRow
+            icon={<HugeiconsIcon icon={Key01Icon} />}
+            title="API keys"
+            description="Personal keys for shortcuts, MCP, and the CLI. Choose capture-only, read-only, or read and write access."
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setKeysOpen(true)}
+              >
+                Manage
+              </Button>
+            }
+          />
+        </div>
+        <SettingRow
+          icon={<HugeiconsIcon icon={SmartPhone01Icon} />}
+          title="Apple Shortcut"
+          description="Send text and links from other apps to today's note with the share sheet on iPhone or Mac. Available on every plan."
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label="Set up Apple Shortcut"
+              onClick={openAppleShortcut}
             >
               Set up
             </Button>
@@ -679,74 +712,7 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
       )}
       <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
       <CliSetupDialog open={cliOpen} onOpenChange={setCliOpen} />
-    </Section>
-  );
-}
-
-function ExperimentalSection() {
-  const enabled = useExperimentalCaptureEnabled();
-  const [captureOpen, setCaptureOpen] = useState(false);
-
-  return (
-    <Section
-      title="Experimental"
-      description="Opt in to features that are still being tested."
-    >
-      <RowGroup>
-        <SettingRow
-          title="External quick-add"
-          description="Try Apple Shortcuts and capture keys. Available on every plan. Off by default on this device."
-          action={
-            <Switch
-              aria-label="Enable experimental quick-add"
-              checked={enabled}
-              onCheckedChange={setExperimentalCaptureEnabled}
-            />
-          }
-        />
-        {enabled && (
-          <>
-            <SettingRow
-              icon={<HugeiconsIcon icon={SmartPhone01Icon} />}
-              title="Apple Shortcut"
-              description="Add text and links to today's note from your iPhone."
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-label="Set up Apple Shortcut"
-                  onClick={openAppleShortcut}
-                >
-                  Set up
-                </Button>
-              }
-            />
-            <div id="capture-keys" className="scroll-mt-20">
-              <SettingRow
-                icon={<HugeiconsIcon icon={Key01Icon} />}
-                title="Capture keys"
-                description="Let shortcuts and scripts add to daily notes, without access to existing content."
-                action={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCaptureOpen(true)}
-                  >
-                    Manage
-                  </Button>
-                }
-              />
-            </div>
-          </>
-        )}
-      </RowGroup>
-      <p className="text-xs text-muted-foreground">
-        Turning this off hides setup on this device. Existing keys and shortcuts
-        keep working; revoke keys to stop their access.
-      </p>
-      {enabled && (
-        <CaptureKeysDialog open={captureOpen} onOpenChange={setCaptureOpen} />
-      )}
+      <ApiKeysDialog open={keysOpen} onOpenChange={setKeysOpen} />
     </Section>
   );
 }
@@ -1262,7 +1228,6 @@ function SettingsPage() {
         <ConnectionsSection plan={plan} />
         <PluginsSection />
         <AppearanceSection />
-        <ExperimentalSection />
         <details className="border-t pt-4">
           <summary className="cursor-pointer text-sm text-muted-foreground">
             Other settings

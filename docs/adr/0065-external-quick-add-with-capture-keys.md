@@ -4,6 +4,15 @@ status: accepted
 
 # External Quick-add with scoped capture keys
 
+**Amended by [ADR 0084](./0084-scoped-expiring-api-keys.md):** Cam reports the
+feature works well and approved promoting discovery into Connections. API keys
+now have one management surface with capture-only, read-only, and read/write
+permissions. New keys default to 30 days, max 90 days; existing long-lived keys
+receive at most 90 days from migration. The original experimental rollout and
+No expiration/1 year choices below record the initial decision, not current policy.
+Capture-only credentials still cannot use MCP or CLI. Broader access requires
+explicitly creating a new key; existing keys never gain permissions.
+
 An official Apple Shortcut extends [Quick-add](./0049-quick-add-capture-surface.md)
 outside the editor without a native mobile app. Cam approved capture on every
 plan, using a named, revocable capture key that permits adding to daily notes

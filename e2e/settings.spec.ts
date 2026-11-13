@@ -190,7 +190,7 @@ test("free settings exposes its sections, connections nudge, and disclosed upgra
   await openSettings(page);
 
   await expect(page.getByText(/Connecting AI apps requires/i)).toBeVisible();
-  for (const name of ["Connections", "Plugins", "Appearance", "Experimental"]) {
+  for (const name of ["Connections", "Plugins", "Appearance"]) {
     await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
   }
   await expect(
@@ -221,91 +221,25 @@ test("free settings exposes its sections, connections nudge, and disclosed upgra
   ).toBeVisible();
 });
 
-test("free accounts can opt into experimental capture key management", async ({
-  page,
-}) => {
+test("free accounts can manage API keys from Connections", async ({ page }) => {
   await seedOutline(page, TREE);
   await mockFreePlan(page);
-  await page.route("**/api/capture-keys", (route) =>
+  await page.route("**/api/keys", (route) =>
     route.fulfill({ json: { keys: [] } }),
   );
   await openSettings(page);
   await expect(
     page.getByText("Available on every plan.", { exact: false }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Manage", exact: true }),
-  ).toHaveCount(0);
-  await page
-    .getByRole("switch", { name: "Enable experimental quick-add" })
-    .click();
   await page.getByRole("button", { name: "Manage", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "API keys" })).toBeVisible();
+  await expect(page.getByText("No API keys yet.")).toBeVisible();
   await expect(
-    page.getByRole("dialog", { name: "Capture keys" }),
-  ).toBeVisible();
-  await expect(page.getByText("No capture keys yet.")).toBeVisible();
-  await expect(page.getByLabel("Expiration")).toHaveValue("never");
-  await expect(page.getByText(/Keys let shortcuts and scripts/)).toBeVisible();
-  await expect(page.getByRole("button", { name: /shortcut/i })).toHaveCount(0);
-});
-
-test("experimental quick-add is default-off, persists opt-in, and reacts to rollback", async ({
-  page,
-}) => {
-  await seedOutline(page, TREE);
-  await mockFreePlan(page);
-  let keyRequests = 0;
-  await page.route("**/api/capture-keys", (route) => {
-    keyRequests += 1;
-    return route.fulfill({ json: { keys: [] } });
-  });
-  await openSettings(page);
-  const toggle = page.getByRole("switch", {
-    name: "Enable experimental quick-add",
-  });
-  await expect(toggle).not.toBeChecked();
+    page.getByRole("button", { name: "30 days", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await expect(
-    page.getByRole("button", { name: "Set up Apple Shortcut" }),
-  ).toHaveCount(0);
-  await page.getByRole("button", { name: "Back to outline" }).click();
-  await page.getByRole("button", { name: /Account and help/ }).click();
-  await expect(
-    page.getByRole("menuitem", { name: "Add Apple Shortcut" }),
-  ).toHaveCount(0);
-  await page.getByRole("menuitem", { name: "Settings" }).click();
-  expect(keyRequests).toBe(0);
-
-  await toggle.click();
-  await expect(toggle).toBeChecked();
-  await expect(
-    page.getByRole("button", { name: "Set up Apple Shortcut" }),
-  ).toBeVisible();
-  await page.reload();
-  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
-  await expect(toggle).toBeChecked();
-  await toggle.click();
-  await expect(toggle).not.toBeChecked();
-  await expect(
-    page.getByRole("button", { name: "Manage", exact: true }),
-  ).toHaveCount(0);
-  await page.reload();
-  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
-  await expect(toggle).not.toBeChecked();
-
-  await toggle.click();
-  await expect(
-    page.getByRole("button", { name: "Set up Apple Shortcut" }),
-  ).toBeVisible();
-  // Model another tab clearing storage: subscribers must read the new value
-  // and remove the setup button without a reload, including storage's null-key case.
-  await page.evaluate(() => {
-    localStorage.removeItem("dotflowy:flag:external-capture");
-    window.dispatchEvent(new StorageEvent("storage", { key: null }));
-  });
-  await expect(
-    page.getByRole("button", { name: "Set up Apple Shortcut" }),
-  ).toHaveCount(0);
-  expect(keyRequests).toBe(0);
+    page.getByRole("button", { name: "Capture only", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
 });
 
 test("Data → Export downloads the whole outline as OPML", async ({ page }) => {

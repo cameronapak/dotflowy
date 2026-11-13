@@ -41,6 +41,7 @@ import {
   sendAnnouncements,
   type AnnounceBatchResult,
 } from "./announce";
+import { runApiKeyReminderSweep } from "./api-key-reminders";
 import { createAuth, type AuthEnv } from "./auth";
 import {
   OutlineSnapshotSchema,
@@ -51,6 +52,7 @@ import {
   isBackupDateKey,
 } from "./backup";
 import { handleCaptureKeys, handleCaptureRequest } from "./capture";
+import { authenticateCaptureKey } from "./capture-keys";
 import { lookupEmbedE } from "./embeds";
 import { withFramePolicy } from "./frame-policy";
 import {
@@ -1070,18 +1072,25 @@ function handleApiRequest(
       return json({ key, ...result });
     }
 
-    // The MCP endpoint authenticates with an OAuth BEARER TOKEN (issued by the
-    // mcp plugin, stored in D1), not the session cookie, so it's gated here —
-    // before the cookie-session check below. Same identity model though: the
-    // token's user id routes to the same per-user DO as the browser session,
-    // so an agent and the editor share one outline, live. ADR 0026. Served at
-    // the ecosystem-default `/mcp` (what clients probe); `/api/mcp` stays a
-    // working alias so an already-configured client keeps connecting.
+    // OAuth and personal API keys share the same MCP transport and plan gate.
+    // Neither grants browser-session access. Capture-only keys cannot use MCP.
     if (url.pathname === "/mcp" || url.pathname === "/api/mcp") {
       if (request.method === "OPTIONS") return mcpCorsPreflight();
-      const token = yield* Effect.promise(() =>
-        auth.api.getMcpSession({ headers: request.headers }),
-      );
+      const authorization = request.headers.get("authorization");
+      const isApiKey = /^Bearer (?:dfc|dfk)_/i.test(authorization ?? "");
+      const apiKey = isApiKey
+        ? yield* Effect.promise(() =>
+            authenticateCaptureKey(env.DB, authorization, Date.now()),
+          )
+        : null;
+      const token = isApiKey
+        ? apiKey &&
+          (apiKey.permission === "read" || apiKey.permission === "write")
+          ? apiKey
+          : null
+        : yield* Effect.promise(() =>
+            auth.api.getMcpSession({ headers: request.headers }),
+          );
       if (!token?.userId) {
         // RFC 9728: point the client at the protected-resource metadata so it
         // can discover the authorization server and start the OAuth flow.
@@ -1105,6 +1114,13 @@ function handleApiRequest(
       const classicStub = env.USER_OUTLINE.get(
         env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
       );
+      if (apiKey)
+        executionCtx.waitUntil(
+          env.DB.prepare("UPDATE capture_key SET lastUsedAt = ? WHERE id = ?")
+            .bind(Date.now(), apiKey.id)
+            .run()
+            .catch(() => console.warn("API key last-used update failed")),
+        );
       return yield* handleMcp(
         request,
         classicStub,
@@ -1142,11 +1158,12 @@ function handleApiRequest(
             }),
           );
         },
+        apiKey?.permission === "read" ? "read" : "write",
       );
     }
 
     // Identity = the validated session's stable user id. No session → 401.
-    // Capture keys authorize exactly this route, never MCP or browser APIs.
+    // Capture-only and read/write keys may append here, never on browser APIs.
     if (url.pathname === "/api/capture") {
       return yield* handleCaptureRequest(request, env, executionCtx);
     }
@@ -1158,7 +1175,7 @@ function handleApiRequest(
 
     const userId = resolveUserId(session.user.id, env);
 
-    if (url.pathname === "/api/capture-keys") {
+    if (url.pathname === "/api/keys" || url.pathname === "/api/capture-keys") {
       return yield* handleCaptureKeys(
         request,
         env,
@@ -1300,7 +1317,17 @@ const handler = {
   // withSentry catch/flush window — the nightly backup could silently stop.
   // Awaiting keeps a total failure loud; per-user failures are contained
   // inside runBackupSweep.
-  async scheduled(event: ScheduledController, env: Env): Promise<void> {
+  async scheduled(
+    event: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    ctx.waitUntil(
+      runApiKeyReminderSweep(env, event.scheduledTime).catch((error) => {
+        console.error("API key reminder sweep failed", error);
+        Sentry.captureException(error);
+      }),
+    );
     await runBackupSweep(env, event.scheduledTime);
   },
 

@@ -56,7 +56,7 @@ test("the committed artifact is deterministic, valid, and credential-free", () =
   expect(identifiers).not.toContain("is.workflow.actions.matchtext");
   expect(identifiers).not.toContain("is.workflow.actions.generateuuid");
   expect(identifiers).toContain("is.workflow.actions.text.match");
-  expect(identifiers).toContain("is.workflow.actions.number.random");
+  expect(identifiers).toContain("is.workflow.actions.getitemfromlist");
 });
 
 test("the public download has the intended name and is signed, not XML", () => {
@@ -169,32 +169,69 @@ test.skipIf(process.platform !== "darwin")(
   },
 );
 
-test("the attempt ID uses two six-digit numbers within Shortcuts' integer range", () => {
-  const randomActions = actions.filter(
-    (action) => identifierOf(action) === "is.workflow.actions.number.random",
+test("the attempt ID is a random v4 UUID built without Number actions", () => {
+  // Number and Random Number make a setup-question import show Calculator's
+  // icon on macOS 26, so randomness comes from Get Random Item instead.
+  const identifiers = actions.map(identifierOf);
+  expect(identifiers).not.toContain("is.workflow.actions.number");
+  expect(identifiers).not.toContain("is.workflow.actions.number.random");
+
+  const at = (name: string) =>
+    actions.findIndex(
+      (action) =>
+        asDict(asDict(action)?.WFWorkflowActionParameters)?.CustomOutputName ===
+        name,
+    );
+  // Every byte value is listed once, so each pick is uniform over 256 values.
+  const bytes = parametersOf(at("hexBytes"));
+  expect(identifierOf(actions[at("hexBytes")]!)).toBe(
+    "is.workflow.actions.text.split",
   );
+  expect(asString(bytes.text)?.split(" ")).toEqual(
+    Array.from({ length: 256 }, (_, n) => n.toString(16).padStart(2, "0")),
+  );
+
+  // Fifteen distinct random picks (120 bits) fill the UUID's random digits.
+  const picks = Array.from({ length: 15 }, (_, n) => {
+    const index = at(`attemptByte${n + 1}`);
+    const pick = parametersOf(index);
+    expect(identifierOf(actions[index]!)).toBe(
+      "is.workflow.actions.getitemfromlist",
+    );
+    expect(pick.WFItemSpecifier).toBe("Random Item");
+    return pick.UUID;
+  });
+  expect(new Set(picks).size).toBe(15);
+  expect(at("attemptByte16")).toBe(-1);
+  const hex = required(
+    asDict(asDict(parametersOf(at("attemptHex")).WFTextActionText)?.Value),
+    "attempt hex text",
+  );
+  expect(hex.string).toBe("\uFFFC".repeat(15));
+  // Range keys such as "{10, 1}" sort as strings; order them by position.
   expect(
-    randomActions.map((action) => {
-      const parameters = parametersOf(actions.indexOf(action));
-      return [
-        parameters.WFRandomNumberMinimum,
-        parameters.WFRandomNumberMaximum,
-      ];
-    }),
-  ).toEqual([
-    [100_000, 999_999],
-    [100_000, 999_999],
-  ]);
-  const idAction = actions.findIndex(
-    (action) =>
-      asDict(asDict(action)?.WFWorkflowActionParameters)?.CustomOutputName ===
-      "attemptId",
+    Object.entries(asDict(hex.attachmentsByRange) ?? {})
+      .sort(
+        ([a], [b]) => Number.parseInt(a.slice(1)) - Number.parseInt(b.slice(1)),
+      )
+      .map(([, output]) => asDict(output)?.OutputUUID),
+  ).toEqual(picks);
+
+  const id = parametersOf(at("attemptId"));
+  expect(identifierOf(actions[at("attemptId")]!)).toBe(
+    "is.workflow.actions.text.replace",
   );
-  const text = required(
-    asDict(asDict(parametersOf(idAction).WFTextActionText)?.Value),
-    "attempt ID text",
+  expect(id.WFReplaceTextRegularExpression).toBe(true);
+  // Thirty arbitrary hex digits become a UUID the Worker's schema accepts.
+  // JavaScript and ICU regex replacement share the `$n` group syntax.
+  const uuid = "0123456789abcdef0123456789abcd".replace(
+    new RegExp(String(id.WFReplaceTextFind)),
+    String(id.WFReplaceTextReplace),
   );
-  expect(text.string).toBe("00000000-0000-4000-8000-\uFFFC\uFFFC");
+  expect(uuid).toBe("01234567-89ab-4cde-8f01-23456789abcd");
+  expect(uuid).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
 });
 
 test("conditional blocks have distinct IDs and balanced nested boundaries", () => {
@@ -453,7 +490,7 @@ test("the flow is one nonblank gate, a JSON POST, and a receipt check", () => {
     const consumer = required(
       actions
         .map((action) => asDict(asDict(action)?.WFWorkflowActionParameters))
-        .find((parameters) => parameters?.CustomOutputName === key),
+        .find((parameters) => parameters?.WFDictionaryKey === key),
       `receipt ${key}`,
     );
     expect(consumer.WFDictionaryKey).toBe(key);

@@ -43,7 +43,8 @@ Login uses browser-based OAuth authorization code with PKCE and a temporary
 loopback callback listener, validates state, and times out abandoned attempts.
 The CLI never asks for the user's Dotflowy password. Automation can supply an
 existing OAuth bearer through `DOTFLOWY_TOKEN`, never a command-line token flag;
-environment-provided credentials stay in memory. No new API-key system is added.
+environment-provided credentials stay in memory. [ADR 0084](./0084-scoped-expiring-api-keys.md)
+extends the same bearer input to personal API keys, without removing OAuth.
 
 Configuration supports one saved account per server URL, defaults to hosted
 Dotflowy, and allows a server override for self-hosting and local development.

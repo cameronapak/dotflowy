@@ -7,12 +7,6 @@ interface RequestRecord {
   body: unknown;
 }
 
-async function enableExternalCapture(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("dotflowy:flag:external-capture", "on");
-  });
-}
-
 test("serves the signed Dotflowy file at its installation path", async ({
   request,
 }) => {
@@ -31,16 +25,15 @@ async function mountDialog(page: Page) {
   await page.getByRole("button", { name: "Manage", exact: true }).click();
 }
 
-test("CaptureKeysDialog creates, reveals once, copies, and clears the secret on close", async ({
+test("API keys select permissions and expiry, reveal once, copy, and clear on close", async ({
   page,
   context,
 }) => {
-  await enableExternalCapture(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const secret = "dfc_" + "a".repeat(64);
   const requests: RequestRecord[] = [];
-  await page.route("**/api/capture-keys", async (route) => {
+  await page.route("**/api/keys", async (route) => {
     const request = route.request();
     requests.push({ method: request.method(), body: request.postDataJSON() });
     if (request.method() === "GET") {
@@ -55,22 +48,46 @@ test("CaptureKeysDialog creates, reveals once, copies, and clears the secret on 
           suffix: "c123",
           createdAt: Date.UTC(2026, 0, 2),
           lastUsedAt: null,
-          expiresAt: null,
+          expiresAt: Date.UTC(2099, 0, 2),
+          permission: request.postDataJSON().permission,
         },
       },
     });
   });
 
   await mountDialog(page);
+  await expect(page.getByRole("heading", { name: "API keys" })).toBeVisible();
+  await expect(page.getByText("No API keys yet.")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Capture keys" }),
+    page.getByRole("button", { name: "Capture only", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("button", { name: "30 days", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  for (const name of ["Capture only", "Read-only", "Read and write"]) {
+    await expect
+      .poll(() =>
+        page
+          .getByRole("button", { name, exact: true })
+          .evaluate((element) => element.scrollWidth <= element.clientWidth),
+      )
+      .toBe(true);
+  }
+  await page.getByRole("button", { name: "Read-only", exact: true }).click();
+  await expect(
+    page.getByText(/Read, search, and export through MCP/),
   ).toBeVisible();
-  await expect(page.getByText("No capture keys yet.")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Read and write", exact: true })
+    .click();
+  await expect(
+    page.getByText(/Can edit and delete your outline/),
+  ).toBeVisible();
   await page.getByLabel("Name").fill("My iPhone");
-  await page.getByLabel("Expiration").selectOption("90d");
+  await page.getByRole("button", { name: "90 days", exact: true }).click();
   await page.getByRole("button", { name: "Create key" }).click();
 
-  await expect(page.getByLabel("New capture key")).toHaveValue(secret);
+  await expect(page.getByLabel("New API key")).toHaveValue(secret);
   const dialog = page.getByRole("dialog");
   await expect
     .poll(() =>
@@ -86,7 +103,7 @@ test("CaptureKeysDialog creates, reveals once, copies, and clears the secret on 
     .toBeLessThanOrEqual(390);
   expect(requests.at(-1)).toEqual({
     method: "POST",
-    body: { name: "My iPhone", expiry: "90d" },
+    body: { name: "My iPhone", expiry: "90d", permission: "write" },
   });
   await page.getByRole("button", { name: "Copy", exact: true }).click();
   await expect
@@ -95,15 +112,31 @@ test("CaptureKeysDialog creates, reveals once, copies, and clears the secret on 
 
   await page.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Manage", exact: true }).click();
-  await expect(page.getByLabel("New capture key")).toHaveCount(0);
+  await expect(page.getByLabel("New API key")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "30 days", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.getByLabel("Name").fill("Read-only CLI");
+  await page.getByRole("button", { name: "Read-only", exact: true }).click();
+  await page.getByRole("button", { name: "Create key" }).click();
+  await expect(page.getByLabel("New API key")).toHaveValue(secret);
+  expect(requests.at(-1)).toEqual({
+    method: "POST",
+    body: { name: "Read-only CLI", expiry: "30d", permission: "read" },
+  });
 });
 
-test("CaptureKeysDialog retries list failures and confirms individual and all-key revocation", async ({
+test("API keys retry failures, rotate with confirmation, and revoke", async ({
   page,
 }) => {
-  await enableExternalCapture(page);
   let gets = 0;
   const deletes: unknown[] = [];
+  const rotations: unknown[] = [];
+  let releaseRotation!: () => void;
+  const pendingRotation = new Promise<void>((resolve) => {
+    releaseRotation = resolve;
+  });
+  const replacementSecret = "dfk_" + "c".repeat(64);
   const keys = [
     {
       id: "phone",
@@ -111,7 +144,8 @@ test("CaptureKeysDialog retries list failures and confirms individual and all-ke
       suffix: "1111",
       createdAt: 1,
       lastUsedAt: null,
-      expiresAt: null,
+      expiresAt: Date.UTC(2099, 0, 2),
+      permission: "capture",
     },
     {
       id: "tablet",
@@ -120,9 +154,10 @@ test("CaptureKeysDialog retries list failures and confirms individual and all-ke
       createdAt: 2,
       lastUsedAt: 3,
       expiresAt: 4,
+      permission: "read",
     },
   ];
-  await page.route("**/api/capture-keys", async (route) => {
+  await page.route("**/api/keys", async (route) => {
     const request = route.request();
     if (request.method() === "GET") {
       gets += 1;
@@ -133,6 +168,14 @@ test("CaptureKeysDialog retries list failures and confirms individual and all-ke
         });
       return route.fulfill({ json: { keys } });
     }
+    if (request.method() === "PATCH") {
+      rotations.push(request.postDataJSON());
+      if (rotations.length === 1) return route.abort("failed");
+      await pendingRotation;
+      return route.fulfill({
+        json: { key: replacementSecret, entry: keys[0] },
+      });
+    }
     deletes.push(request.postDataJSON());
     return route.fulfill({ json: { revoked: true } });
   });
@@ -141,7 +184,41 @@ test("CaptureKeysDialog retries list failures and confirms individual and all-ke
   await expect(page.getByRole("alert")).toHaveText("Try later");
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByText("Phone", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("listitem").filter({ hasText: "Phone" }),
+  ).toContainText("Capture only · Expires");
+  await expect(
+    page.getByRole("listitem").filter({ hasText: "Tablet" }),
+  ).toContainText("Read-only · Expired");
 
+  await page.getByRole("button", { name: "Rotate Phone" }).click();
+  expect(rotations).toHaveLength(0);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(rotations).toHaveLength(0);
+  await page.getByRole("button", { name: "Rotate Phone" }).click();
+  const expiryGroup = page.getByRole("group", {
+    name: "Replacement expiration",
+  });
+  await expiryGroup
+    .getByRole("button", { name: "90 days", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Confirm rotation" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Rotation may have completed. Rotate again to get a new key",
+  );
+  await page.getByRole("button", { name: "Confirm rotation" }).click();
+  await expect.poll(() => rotations.length).toBe(2);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  releaseRotation();
+  await expect(page.getByLabel("New API key")).toHaveValue(replacementSecret);
+  expect(rotations).toEqual([
+    { id: "phone", expiry: "90d" },
+    { id: "phone", expiry: "90d" },
+  ]);
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Manage", exact: true }).click();
+  await expect(page.getByLabel("New API key")).toHaveCount(0);
   await page.getByRole("button", { name: "Revoke Phone" }).click();
   await page
     .getByRole("button", { name: "Confirm revoke", exact: true })
@@ -151,14 +228,13 @@ test("CaptureKeysDialog retries list failures and confirms individual and all-ke
 
   await page.getByRole("button", { name: "Revoke all" }).click();
   await page.getByRole("button", { name: "Confirm revoke all" }).click();
-  await expect(page.getByText("No capture keys yet.")).toBeVisible();
+  await expect(page.getByText("No API keys yet.")).toBeVisible();
   expect(deletes[1]).toEqual({});
 });
 
 test("Settings opens focused Apple Shortcut setup with manual copy and a separate manager", async ({
   page,
 }) => {
-  await enableExternalCapture(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await seedOutline(page, []);
   await page.route("**/api/auth/subscription/list", (route) =>
@@ -172,7 +248,7 @@ test("Settings opens focused Apple Shortcut setup with manual copy and a separat
   const secret = "dfc_" + "b".repeat(64);
   const requests: RequestRecord[] = [];
   const keys: unknown[] = [];
-  await page.route("**/api/capture-keys", (route) => {
+  await page.route("**/api/keys", (route) => {
     const request = route.request();
     requests.push({
       method: request.method(),
@@ -186,6 +262,7 @@ test("Settings opens focused Apple Shortcut setup with manual copy and a separat
       createdAt: 1,
       lastUsedAt: null,
       expiresAt: 2,
+      permission: "capture",
     };
     keys.push(entry);
     return route.fulfill({ json: { key: secret, entry } });
@@ -198,13 +275,18 @@ test("Settings opens focused Apple Shortcut setup with manual copy and a separat
   await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(
     "iPhone",
   );
-  await expect(dialog.getByLabel("Expiration")).toHaveValue("never");
+  await expect(
+    dialog.getByRole("button", { name: "30 days", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    dialog.getByRole("button", { name: "Read-only", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: "Read and write", exact: true }),
+  ).toHaveCount(0);
   await expect(dialog.getByRole("heading", { name: "Your keys" })).toHaveCount(
     0,
   );
-  await expect(
-    dialog.getByText(/Experimental. Installation and capture/),
-  ).toBeVisible();
   await expect(
     dialog.getByText(
       "Open the signed Dotflowy.shortcut file in Shortcuts and paste your key during setup. Your installed shortcut contains the key, so treat it as a credential.",
@@ -225,9 +307,8 @@ test("Settings opens focused Apple Shortcut setup with manual copy and a separat
   expect(requests).toEqual([]);
 
   await dialog.getByLabel("Name", { exact: true }).fill("My phone");
-  await dialog.getByLabel("Expiration").selectOption("30d");
   await dialog.getByRole("button", { name: "Create key" }).click();
-  const field = dialog.getByLabel("New capture key");
+  const field = dialog.getByLabel("New API key");
   await expect(field).toHaveValue(secret);
   await dialog.getByRole("button", { name: "Copy", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText(
@@ -248,7 +329,10 @@ test("Settings opens focused Apple Shortcut setup with manual copy and a separat
     )
     .toBe(true);
   expect(requests).toEqual([
-    { method: "POST", body: { name: "My phone", expiry: "30d" } },
+    {
+      method: "POST",
+      body: { name: "My phone", expiry: "30d", permission: "capture" },
+    },
   ]);
 
   await dialog.getByRole("button", { name: "Copy installation link" }).click();
@@ -283,29 +367,30 @@ test("Settings opens focused Apple Shortcut setup with manual copy and a separat
   await popup.close();
 
   await dialog
-    .getByRole("link", { name: "Manage capture keys in Settings" })
+    .getByRole("link", { name: "Manage API keys in Settings" })
     .click();
   await expect(dialog).toBeHidden();
   await expect(page).toHaveURL(/\/settings#capture-keys$/);
   await page.getByRole("button", { name: "Manage", exact: true }).click();
-  const manager = page.getByRole("dialog", { name: "Capture keys" });
+  const manager = page.getByRole("dialog", { name: "API keys" });
   await expect(manager.getByText("My phone", { exact: true })).toBeVisible();
-  await expect(manager.getByLabel("New capture key")).toHaveCount(0);
+  await expect(manager.getByLabel("New API key")).toHaveCount(0);
   await manager.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Set up Apple Shortcut" }).click();
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByLabel("New capture key")).toHaveCount(0);
+  await expect(dialog.getByLabel("New API key")).toHaveCount(0);
   await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(
     "iPhone",
   );
-  await expect(dialog.getByLabel("Expiration")).toHaveValue("never");
+  await expect(
+    dialog.getByRole("button", { name: "30 days", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.getByRole("alert")).toHaveCount(0);
 });
 
 test("Apple Shortcut creation errors preserve input and pending creation cannot lose the one-time key", async ({
   page,
 }) => {
-  await enableExternalCapture(page);
   await seedOutline(page, []);
   await page.route("**/api/auth/subscription/list", (route) =>
     route.fulfill({ json: [] }),
@@ -315,7 +400,7 @@ test("Apple Shortcut creation errors preserve input and pending creation cannot 
   const pending = new Promise<void>((resolve) => {
     finish = resolve;
   });
-  await page.route("**/api/capture-keys", async (route) => {
+  await page.route("**/api/keys", async (route) => {
     attempts += 1;
     if (attempts === 1)
       return route.fulfill({
@@ -332,7 +417,8 @@ test("Apple Shortcut creation errors preserve input and pending creation cannot 
           suffix: "test",
           createdAt: 1,
           lastUsedAt: null,
-          expiresAt: null,
+          expiresAt: Date.UTC(2099, 0, 2),
+          permission: "capture",
         },
       },
     });
@@ -340,12 +426,14 @@ test("Apple Shortcut creation errors preserve input and pending creation cannot 
   await page.goto("/settings");
   await page.getByRole("button", { name: "Set up Apple Shortcut" }).click();
   const dialog = page.getByRole("dialog", { name: "Add Apple Shortcut" });
-  await dialog.getByLabel("Expiration").selectOption("1y");
+  await dialog.getByRole("button", { name: "90 days", exact: true }).click();
   await dialog.getByRole("button", { name: "Create key" }).click();
   await expect(dialog.getByRole("alert")).toHaveText(
     "Sign in again to create a key.",
   );
-  await expect(dialog.getByLabel("Expiration")).toHaveValue("1y");
+  await expect(
+    dialog.getByRole("button", { name: "90 days", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await dialog.getByRole("button", { name: "Create key" }).click();
   await expect(
     dialog.getByRole("button", { name: "Creating…" }),
@@ -353,12 +441,12 @@ test("Apple Shortcut creation errors preserve input and pending creation cannot 
   await dialog.getByRole("button", { name: "Close" }).click();
   await page.keyboard.press("Escape");
   await dialog
-    .getByRole("link", { name: "Manage capture keys in Settings" })
+    .getByRole("link", { name: "Manage API keys in Settings" })
     .click({ force: true });
   await expect(dialog).toBeVisible();
   await expect(page).toHaveURL(/\/settings$/);
   finish!();
-  await expect(dialog.getByLabel("New capture key")).toHaveValue("dfc_test");
+  await expect(dialog.getByLabel("New API key")).toHaveValue("dfc_test");
   await expect(dialog.getByRole("alert")).toHaveCount(0);
   await expect(
     dialog.getByRole("button", { name: "Create key" }),

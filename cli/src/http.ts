@@ -34,7 +34,7 @@ export const requestJson = Effect.fn("CLI.requestJson")(
         return yield* Effect.fail(
           fail(
             response.status === 401
-              ? "Authentication expired or invalid. Run dotflowy login."
+              ? "Authentication expired or invalid. If using DOTFLOWY_TOKEN, replace it with a new API key from Dotflowy Settings → Connections → API keys or a valid OAuth token. Otherwise run dotflowy login."
               : `Server returned HTTP ${response.status}.${options.uncertainWrite ? " Write outcome may be unknown; inspect the outline before retrying." : ""}`,
             code,
           ),

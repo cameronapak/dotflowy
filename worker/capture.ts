@@ -9,6 +9,8 @@ import { bareHttpUrl } from "../src/data/links";
 import { parseMarkdownForest } from "../src/data/markdown-import";
 import {
   CaptureBody,
+  ApiKeyCreateBody,
+  ApiKeyRotateBody,
   CaptureKeyCreateBody,
   CaptureKeyRevokeBody,
   captureDigest,
@@ -19,6 +21,7 @@ import {
   createCaptureKey,
   listCaptureKeys,
   revokeCaptureKeys,
+  rotateCaptureKey,
 } from "./capture-keys";
 import { resolveUserId } from "./identity";
 import { getPlan, nodeLimitForPlan } from "./plan";
@@ -152,7 +155,15 @@ export const handleCaptureRequest = Effect.fn("Capture.request")(
             fail(
               401,
               "invalid_key",
-              "Capture key is invalid or expired. Create a replacement in Settings and update this shortcut.",
+              "Capture key is invalid or expired. Create a replacement in Dotflowy Settings → Connections → API keys, then update the key in this shortcut's Text action.",
+            ),
+          );
+        if (key.permission !== "capture" && key.permission !== "write")
+          return yield* Effect.fail(
+            fail(
+              403,
+              "insufficient_permission",
+              "This key cannot capture. Create a Capture only key in Dotflowy Settings → Connections → API keys and update this shortcut.",
             ),
           );
         yield* rateLimit(env, `capture:${key.userId}`);
@@ -267,7 +278,14 @@ export const handleCaptureKeys = Effect.fn("Capture.keys")(
           return json({
             keys: yield* Effect.promise(() => listCaptureKeys(env.DB, userId)),
           });
-        if (request.method !== "POST" && request.method !== "DELETE")
+        if (
+          request.method !== "POST" &&
+          request.method !== "DELETE" &&
+          !(
+            request.method === "PATCH" &&
+            new URL(request.url).pathname === "/api/keys"
+          )
+        )
           return json({ error: "method_not_allowed" }, 405);
         const origins = new Set([
           new URL(request.url).origin,
@@ -281,7 +299,7 @@ export const handleCaptureKeys = Effect.fn("Capture.keys")(
             fail(
               403,
               "invalid_origin",
-              "Open Settings on this Dotflowy server to manage keys.",
+              "Open Dotflowy Settings on this server to manage API keys.",
             ),
           );
         }
@@ -298,11 +316,32 @@ export const handleCaptureKeys = Effect.fn("Capture.keys")(
             fail(
               401,
               "fresh_session_required",
-              "Sign out and sign in again before creating a capture key.",
+              "Sign out and sign in again before creating or rotating an API key.",
             ),
           );
         }
-        const input = yield* decodeBody(request, CaptureKeyCreateBody);
+        if (request.method === "PATCH") {
+          const input = yield* decodeBody(request, ApiKeyRotateBody);
+          const rotated = yield* Effect.promise(() =>
+            rotateCaptureKey(env.DB, userId, input, Date.now()),
+          );
+          if (!rotated)
+            return yield* Effect.fail(
+              fail(
+                404,
+                "key_not_found",
+                "This API key no longer exists. Create a new key.",
+              ),
+            );
+          return json(rotated);
+        }
+        // The old capture-specific endpoint cannot mint broader credentials.
+        const input = yield* decodeBody(
+          request,
+          new URL(request.url).pathname === "/api/capture-keys"
+            ? CaptureKeyCreateBody
+            : ApiKeyCreateBody,
+        );
         if (!input.name.trim())
           return yield* Effect.fail(
             fail(400, "invalid_name", "Give the key a name."),
@@ -315,7 +354,7 @@ export const handleCaptureKeys = Effect.fn("Capture.keys")(
             fail(
               403,
               "credential_required",
-              "Sign in to your account before creating a capture key.",
+              "Sign in to your account before creating an API key.",
             ),
           );
         return json(created, 201);
