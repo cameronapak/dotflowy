@@ -80,6 +80,10 @@ _Avoid_: secret, redaction (that's what MCP does to it, not what it is), hidden 
 A query applied to the current view that prunes it to matches and their context. Purely a way of _looking_ at the outline: it changes nothing — not collapse state, not the caret's location, not where you are. Clearing it restores the exact prior view. Contrast with navigation (Cmd+K), which takes you somewhere.
 _Avoid_: search (that word implies going to a result; a filter stays put)
 
+**Find**:
+Finding a node anywhere in the outline so you can go to it. Distinct from Filter, which keeps you in the current view.
+_Avoid_: global filter
+
 **Operator**:
 A typed term in a filter query that tests something other than the node's text — `is:todo`, `#tag`, `highlight:red`, `-is:complete`. Each operator's meaning belongs to the feature that owns the thing it tests.
 _Avoid_: keyword, flag, modifier

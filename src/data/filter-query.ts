@@ -189,6 +189,17 @@ export function tokenizeQuery(q: string | undefined): string[] {
 const TAG_TOKEN_RE = /^#[\p{L}\p{N}_-]+$/u;
 const OPERATOR_TOKEN_RE = /^([a-zA-Z]+):(.*)$/;
 
+/** Find keeps fuzzy plain words; visible grammar switches to deterministic DQL. */
+export function hasQuerySyntax(query: string): boolean {
+  return tokenizeQuery(query).some(
+    (token) =>
+      token === "OR" ||
+      /^[#"-]/.test(token) ||
+      token.includes('"') ||
+      OPERATOR_TOKEN_RE.test(token),
+  );
+}
+
 /** One classified surface token: a real term, an `OR` separator, or a skip
  *  (an empty phrase / bare `-` that contributes nothing). */
 type Item = { kind: "term"; term: Term } | { kind: "or" } | { kind: "skip" };

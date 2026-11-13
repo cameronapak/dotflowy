@@ -1,11 +1,13 @@
-import { useNavigate } from "@tanstack/react-router";
-import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
+import { ArrowLeft01Icon, Search01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Command as CommandIcon,
-  BookmarkIcon,
-  ChevronRightIcon,
-  FilterIcon,
-} from "lucide-react";
+  useLocation,
+  useNavigate,
+  useParams,
+  useRouter,
+} from "@tanstack/react-router";
+import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
+import { BookmarkIcon, ChevronRightIcon, FilterIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -19,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import type { PluginDef, SearchAction } from "../plugins/types";
+import type { FindRequest } from "./node-switcher-opener";
 
 import { getNodeActionBridge } from "../data/command-bridge";
 import {
@@ -26,16 +29,34 @@ import {
   resolveAmbientTargetId,
   type CommandCenterAction,
 } from "../data/command-center";
+import { localDateKey } from "../data/date-links";
+import {
+  buildFilterSuggestions,
+  caretToken,
+  hasQuerySyntax,
+  nodeMatches,
+  parseFilterQuery,
+  walkQueryNodes,
+} from "../data/filter-query";
 import { isMirrorsEnabled } from "../data/flags";
 import { flattenNodeText } from "../data/node-links";
 import { useSavedQueries } from "../data/saved-queries";
 import { matchSavedQuery } from "../data/saved-queries-core";
-import { buildTrail, type Node, type TreeIndex } from "../data/tree";
+import { collectTagCorpus } from "../data/tags";
+import {
+  buildTrail,
+  trueSourceOf,
+  type Node,
+  type TreeIndex,
+} from "../data/tree";
 import { useTree } from "../data/useTree";
+import { useIsMobile } from "../hooks/use-mobile";
 import {
   usePluginChrome,
   searchActions,
   searchAnnotation,
+  filterOperatorMap,
+  filterOperatorInfos,
 } from "../plugins/registry";
 import { useGlobalActions } from "./command-actions";
 import {
@@ -45,11 +66,13 @@ import {
   setCaretOffset,
 } from "./inline-code";
 import { McpConnectDialog } from "./mcp-connect-dialog";
+import { MenuSheetContent } from "./menu-sheet";
 import {
   setNodeSwitcherOpener,
   openNodeSwitcher,
 } from "./node-switcher-opener";
-import { writeQuery } from "./query-filter-nav";
+import { QueryFilterChips } from "./query-filter-chips";
+import { openFilterInput, writeQuery } from "./query-filter-nav";
 import { readFormatTarget } from "./selection-format";
 import { Button } from "./ui/button";
 import {
@@ -61,6 +84,16 @@ import {
   CommandList,
 } from "./ui/command";
 import { Kbd, KbdGroup } from "./ui/kbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+
+declare module "@tanstack/history" {
+  interface HistoryState {
+    findReturn?: {
+      query: string;
+      selection: string;
+    };
+  }
+}
 
 /**
  * Cmd+K command center (ADR 0034): a keyboard-first door to BOTH nodes and
@@ -155,6 +188,7 @@ function readFocusedNodeId(): string | null {
 export function NodeSwitcher() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [selection, setSelection] = useState("");
   // The ambient target snapshot -- captured at open, frozen for the overlay's
   // lifetime (never re-read while open: `activeElement` is the search input by
   // then). See ADR 0034 / issue #83.
@@ -178,7 +212,9 @@ export function NodeSwitcher() {
   const restoreEditor = useRef<(() => void) | null>(null);
 
   // Capture the ambient target, THEN open -- both before the dialog steals focus.
-  const openWithCapture = useCallback(() => {
+  const openWithCapture = useCallback((request?: FindRequest) => {
+    setQuery(request?.query ?? "");
+    setSelection(request?.selection ?? "");
     setTargetFocusedId(readFocusedNodeId());
     const el = document.activeElement;
     restoreEditor.current = null;
@@ -194,6 +230,15 @@ export function NodeSwitcher() {
       };
     }
     setOpen(true);
+    if (request?.selection) {
+      // cmdk selects the first row after initializing its input search. Restore
+      // the saved row only after that mount-time selection has committed.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (openRef.current) setSelection(request.selection!);
+        }),
+      );
+    }
   }, []);
 
   const onOpenConnect = useCallback(() => setConnectOpen(true), []);
@@ -245,6 +290,8 @@ export function NodeSwitcher() {
         }}
         query={query}
         setQuery={setQuery}
+        selection={selection}
+        setSelection={setSelection}
         targetFocusedId={targetFocusedId}
         restoreEditor={() => restoreEditor.current?.()}
         onOpenConnect={onOpenConnect}
@@ -263,6 +310,8 @@ function SwitcherDialog({
   onOpenChange,
   query,
   setQuery,
+  selection,
+  setSelection,
   targetFocusedId,
   restoreEditor,
   onOpenConnect,
@@ -272,6 +321,8 @@ function SwitcherDialog({
   onOpenChange: (next: boolean) => void;
   query: string;
   setQuery: (q: string) => void;
+  selection: string;
+  setSelection: (selection: string) => void;
   targetFocusedId: string | null;
   restoreEditor: () => void;
   onOpenConnect: () => void;
@@ -285,14 +336,43 @@ function SwitcherDialog({
   const { index } = useTree();
   const { aliasProviders } = usePluginChrome();
   const navigate = useNavigate();
+  const rootId = useParams({ strict: false }).nodeId ?? null;
+  const mobile = useIsMobile();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [caret, setCaret] = useState(0);
+  const [actionNodeId, setActionNodeId] = useState<string | null>(null);
   const bridge = getNodeActionBridge();
   const afterClose = useRef<(() => void) | null>(null);
 
-  // A closed command center must not scan the outline on every keystroke.
-  // Opening it reads the current index, including edits made while closed.
+  // Full-index work stays behind the open palette, never the editor's hot path.
   const nodes = useMemo(
-    () => (open ? Array.from(index.byId.values()) : []),
+    () =>
+      open
+        ? Array.from(
+            walkQueryNodes(index, null, {
+              deduplicate: true,
+              mirrorsEnabled: isMirrorsEnabled(),
+            }),
+            ({ node }) => node,
+          )
+        : [],
     [open, index],
+  );
+  const nearby = useMemo(
+    () =>
+      new Set(
+        open && rootId !== null
+          ? Array.from(
+              walkQueryNodes(index, rootId, {
+                includeRoot: true,
+                deduplicate: true,
+                mirrorsEnabled: isMirrorsEnabled(),
+              }),
+              ({ node }) => [node.id, trueSourceOf(index, node.id)],
+            ).flat()
+          : [],
+      ),
+    [open, index, rootId],
   );
 
   const fuse = useMemo(
@@ -301,7 +381,52 @@ function SwitcherDialog({
   );
 
   const q = query.trim();
-  const results = !q || !fuse ? null : fuse.search(q, { limit: RESULT_LIMIT });
+  const exact = hasQuerySyntax(q);
+  const today = localDateKey();
+  const results = useMemo(() => {
+    if (!q || !fuse) return null;
+    const parsed = parseFilterQuery(q);
+    if (exact && parsed.groups.length === 0) return [];
+    const matched = exact
+      ? nodes
+          .filter(
+            (node) =>
+              node.mirrorOf === null &&
+              nodeMatches(parsed, node, index, filterOperatorMap, today),
+          )
+          .map((node) => ({
+            item: { node },
+            matches: undefined,
+          }))
+      : fuse.search(q);
+    // Stable partition preserves fuzzy rank (or DQL outline order) within each group.
+    return [
+      ...matched.filter(({ item }) => nearby.has(item.node.id)),
+      ...matched.filter(({ item }) => !nearby.has(item.node.id)),
+    ];
+  }, [q, exact, fuse, nodes, index, nearby, today]);
+  const token = caretToken(query, caret);
+  const suggestions =
+    open && !actionNodeId && /^-?(?:#|highlight:)/.test(token.token)
+      ? buildFilterSuggestions(
+          token.token,
+          filterOperatorInfos,
+          collectTagCorpus(index.tagCorpus),
+        )
+      : [];
+
+  function changeQuery(next: string) {
+    setQuery(next);
+    setSelection("");
+    setCaret(next.length);
+  }
+  function insertQuery(next: string) {
+    changeQuery(next);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true });
+      inputRef.current?.setSelectionRange(next.length, next.length);
+    });
+  }
 
   const bookmarks = useMemo(
     () =>
@@ -329,13 +454,11 @@ function SwitcherDialog({
 
   const globalActions = useGlobalActions({ openConnect: onOpenConnect });
 
-  // Saved filters (ADR 0048): listed in the empty state beside Bookmarks and
-  // matchable by name while typing. Running one applies the query to the current
-  // view (query-only scope -- writeQuery keeps wherever you are) and closes.
+  // Saved queries stay in Find when selected; filtering is a separate handoff
+  // through Filter in place or Shift+Enter (ADR 0081).
   const savedQueries = useSavedQueries();
 
   // Per-result "actions for this node" sub-view (ADR 0034 / #83's `->` path).
-  const [actionNodeId, setActionNodeId] = useState<string | null>(null);
   const subActions = actionNodeId
     ? buildNodeActions(actionNodeId, index, bridge)
     : [];
@@ -366,18 +489,59 @@ function SwitcherDialog({
     setActionNodeId(null);
   }
 
+  function afterPaletteClose() {
+    const run = afterClose.current;
+    afterClose.current = null;
+    if (!run) return true;
+    run();
+    return false;
+  }
+
   function go(nodeId: string) {
+    const findReturn = { query, selection: nodeId };
+    if (mobile) {
+      afterClose.current = () => {
+        void navigate({
+          to: "/$nodeId",
+          params: { nodeId },
+          search: {},
+          state: { findReturn },
+        });
+      };
+      close();
+    } else {
+      close();
+      void navigate({
+        to: "/$nodeId",
+        params: { nodeId },
+        search: {},
+        state: { findReturn },
+      });
+    }
+  }
+
+  function filterInPlace(home = false) {
+    const text = query;
+    afterClose.current = () => {
+      if (home) {
+        void navigate({
+          to: "/",
+          search: text.trim() ? { q: text.trim() } : {},
+        });
+      } else {
+        void Promise.resolve(writeQuery(text)).then(() => openFilterInput());
+      }
+    };
     close();
-    navigate({ to: "/$nodeId", params: { nodeId } });
   }
 
   function runAction(action: CommandCenterAction) {
     if (action.disabled) return;
-    if (action.executionPhase === "after-editor-restore") {
-      // Spotlight must see the original editor focused when it turns on.
-      // Wait for the modal focus trap to release before restoring and toggling.
+    if (mobile || action.executionPhase === "after-editor-restore") {
+      // Native sheets must release modality before another overlay opens.
+      // Spotlight also needs its original editor focus restored first.
       afterClose.current = () => {
-        restoreEditor();
+        if (action.executionPhase === "after-editor-restore") restoreEditor();
         action.run();
       };
       close();
@@ -390,28 +554,37 @@ function SwitcherDialog({
     close();
   }
 
-  const actions: SearchAction[] = q
-    ? searchActions(q, {
-        index,
-        goTo: (id, opts) => {
-          close();
-          navigate({
-            to: "/$nodeId",
-            params: { nodeId: id },
-            search: opts?.focus ? { focus: opts.focus } : {},
-          });
-        },
-      })
-    : [];
+  const actions: SearchAction[] =
+    q && !exact
+      ? searchActions(q, {
+          index,
+          goTo: (id, opts) => {
+            const goTo = () => {
+              void navigate({
+                to: "/$nodeId",
+                params: { nodeId: id },
+                search: opts?.focus ? { focus: opts.focus } : {},
+              });
+            };
+            if (mobile) afterClose.current = goTo;
+            else goTo();
+            close();
+          },
+        })
+      : [];
 
-  const shownAmbient = q
-    ? ambientActions.filter((a) => matchAction(q, a))
-    : ambientActions;
+  const shownAmbient = exact
+    ? []
+    : q
+      ? ambientActions.filter((a) => matchAction(q, a))
+      : ambientActions;
   // On an empty query, show every global action so the palette is BROWSABLE
   // (read what exists, try it). On a query, match + cap so nodes aren't buried.
-  const shownGlobals = q
-    ? globalActions.filter((a) => matchAction(q, a)).slice(0, ACTIONS_CAP)
-    : globalActions;
+  const shownGlobals = exact
+    ? []
+    : q
+      ? globalActions.filter((a) => matchAction(q, a)).slice(0, ACTIONS_CAP)
+      : globalActions;
   const shownSub = q ? subActions.filter((a) => matchAction(q, a)) : subActions;
   // Empty query: all saved filters (newest-first from the hook). A query: matches.
   const shownSaved = q
@@ -419,8 +592,7 @@ function SwitcherDialog({
     : savedQueries;
 
   function runSavedFilter(query: string) {
-    close();
-    writeQuery(query);
+    insertQuery(query);
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -449,54 +621,108 @@ function SwitcherDialog({
     }
   }
 
-  return (
-    <CommandDialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) reset();
-        onOpenChange(next);
-      }}
-      title="Command center"
-      description="Search nodes and run actions"
-      finalFocus={() => {
-        const run = afterClose.current;
-        afterClose.current = null;
-        if (!run) return true;
-        run();
-        return false;
+  const content = (
+    <div
+      className="contents"
+      onKeyDown={onKeyDown}
+      onKeyDownCapture={(event) => {
+        if (
+          !actionNodeId &&
+          ((event.key === "Enter" && event.shiftKey) ||
+            ((event.metaKey || event.ctrlKey) &&
+              event.key.toLowerCase() === "f"))
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          filterInPlace();
+        }
       }}
     >
-      {/* onKeyDown rides a display:contents wrapper (bubble phase), NOT the
-          Command prop -- cmdk overrides its root onKeyDown, so a prop handler is
-          dropped. The keys we intercept (Left/Right/Tab/Backspace) are ones cmdk
-          ignores, so bubble-phase interception never fights its arrow nav. */}
-      <div className="contents" onKeyDown={onKeyDown}>
-        <Command shouldFilter={false}>
-          {actionNodeId && (
-            <button
-              type="button"
-              onClick={backToList}
-              className="flex w-full items-center gap-1.5 border-b px-3 py-2 text-left text-xs text-muted-foreground hover:text-foreground"
-            >
-              <ChevronRightIcon className="size-3 rotate-180" />
-              Actions on:{" "}
-              <span className="truncate font-medium">{subLabel}</span>
-            </button>
-          )}
-          <CommandInput
-            value={query}
-            onValueChange={setQuery}
-            placeholder={
-              actionNodeId ? "Filter actions..." : "Search nodes and actions..."
-            }
-          />
-          {actionNodeId ? (
+      <Command
+        className="[@media(pointer:coarse)]:[&_[cmdk-item]]:min-h-11"
+        shouldFilter={false}
+        label={actionNodeId ? "Filter actions" : "Find nodes and actions"}
+        value={selection}
+        onValueChange={setSelection}
+      >
+        {actionNodeId && (
+          <button
+            type="button"
+            onClick={backToList}
+            className="flex w-full items-center gap-1.5 border-b px-3 py-2 text-left text-xs text-muted-foreground hover:text-foreground"
+          >
+            <ChevronRightIcon className="size-3 rotate-180" />
+            Actions on: <span className="truncate font-medium">{subLabel}</span>
+          </button>
+        )}
+        <CommandInput
+          ref={inputRef}
+          data-sheet-autofocus=""
+          value={query}
+          onValueChange={changeQuery}
+          onSelect={(event) =>
+            setCaret(event.currentTarget.selectionStart ?? query.length)
+          }
+          placeholder={
+            actionNodeId ? "Filter actions..." : "Search nodes and actions..."
+          }
+          aria-label={
+            actionNodeId ? "Filter actions" : "Find nodes and actions"
+          }
+        />
+        {!actionNodeId && (
+          <>
+            <div className="flex items-center justify-between gap-2 px-2 pt-2 text-xs text-muted-foreground">
+              <span>Everywhere</span>
+              <Button size="xs" variant="ghost" onClick={() => filterInPlace()}>
+                Filter in place{" "}
+                <span className="hidden sm:inline">⇧ Enter</span>
+              </Button>
+            </div>
+            <QueryFilterChips query={query} onChange={insertQuery} />
+          </>
+        )}
+        {actionNodeId ? (
+          <CommandList>
+            {shownSub.length === 0 ? (
+              <Hint>No matching actions.</Hint>
+            ) : (
+              <CommandGroup heading="Actions">
+                {shownSub.map((a) => (
+                  <ActionCommandRow
+                    key={a.id}
+                    action={a}
+                    onRun={() => runAction(a)}
+                  />
+                ))}
+              </CommandGroup>
+            )}
+          </CommandList>
+        ) : (
+          <>
             <CommandList>
-              {shownSub.length === 0 ? (
-                <Hint>No matching actions.</Hint>
-              ) : (
-                <CommandGroup heading="Actions">
-                  {shownSub.map((a) => (
+              {suggestions.length > 0 && (
+                <CommandGroup heading="Suggestions">
+                  {suggestions.map((suggestion) => (
+                    <CommandItem
+                      key={suggestion.id}
+                      value={`suggest:${suggestion.id}`}
+                      onSelect={() =>
+                        insertQuery(
+                          query.slice(0, token.start) +
+                            suggestion.insert +
+                            query.slice(token.end),
+                        )
+                      }
+                    >
+                      {suggestion.label}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+              {shownAmbient.length > 0 && (
+                <CommandGroup heading={`Acting on: ${ambientLabel}`}>
+                  {shownAmbient.map((a) => (
                     <ActionCommandRow
                       key={a.id}
                       action={a}
@@ -505,111 +731,166 @@ function SwitcherDialog({
                   ))}
                 </CommandGroup>
               )}
-            </CommandList>
-          ) : (
-            <>
-              <CommandList>
-                {shownAmbient.length > 0 && (
-                  <CommandGroup heading={`Acting on: ${ambientLabel}`}>
-                    {shownAmbient.map((a) => (
-                      <ActionCommandRow
-                        key={a.id}
-                        action={a}
-                        onRun={() => runAction(a)}
-                      />
-                    ))}
-                  </CommandGroup>
-                )}
 
-                {(actions.length > 0 || shownGlobals.length > 0) && (
-                  <CommandGroup heading={q ? "Actions" : "Commands"}>
-                    {actions.map((a) => (
-                      <SearchActionRow key={a.key} action={a} />
-                    ))}
-                    {shownGlobals.map((a) => (
-                      <ActionCommandRow
-                        key={a.id}
-                        action={a}
-                        onRun={() => runAction(a)}
-                      />
-                    ))}
-                  </CommandGroup>
-                )}
+              {(actions.length > 0 || shownGlobals.length > 0) && (
+                <CommandGroup heading={q ? "Actions" : "Commands"}>
+                  {actions.map((a) => (
+                    <SearchActionRow key={a.key} action={a} />
+                  ))}
+                  {shownGlobals.map((a) => (
+                    <ActionCommandRow
+                      key={a.id}
+                      action={a}
+                      onRun={() => runAction(a)}
+                    />
+                  ))}
+                </CommandGroup>
+              )}
 
-                {shownSaved.length > 0 && (
-                  <CommandGroup heading={SAVED_FILTERS_HEADING}>
-                    {shownSaved.map((r) => (
-                      <SavedFilterRow
-                        key={r.id}
-                        row={r}
-                        onRun={() => runSavedFilter(r.query)}
-                      />
-                    ))}
-                  </CommandGroup>
-                )}
+              {shownSaved.length > 0 && (
+                <CommandGroup heading={SAVED_FILTERS_HEADING}>
+                  {shownSaved.map((r) => (
+                    <SavedFilterRow
+                      key={r.id}
+                      row={r}
+                      onRun={() => runSavedFilter(r.query)}
+                    />
+                  ))}
+                </CommandGroup>
+              )}
 
-                {results === null ? (
-                  bookmarks.length === 0 ? (
-                    shownSaved.length === 0 ? (
-                      <Hint>
-                        No bookmarks yet. Type to search nodes and actions.
-                      </Hint>
-                    ) : null
-                  ) : (
-                    <CommandGroup heading={BOOKMARKS_HEADING}>
-                      {bookmarks.map((node) => (
-                        <ResultRow
-                          key={node.id}
-                          index={index}
-                          node={node}
-                          onSelect={go}
-                          onOpenActions={setActionNodeId}
-                        />
-                      ))}
-                    </CommandGroup>
-                  )
-                ) : results.length === 0 ? (
-                  actions.length === 0 &&
-                  shownGlobals.length === 0 &&
+              {results === null ? (
+                bookmarks.length === 0 ? (
                   shownSaved.length === 0 ? (
-                    <Hint>No matches.</Hint>
+                    <Hint>
+                      No bookmarks yet. Type to search nodes and actions.
+                    </Hint>
                   ) : null
                 ) : (
-                  <CommandGroup heading="Nodes">
-                    {results.map(({ item, matches }) => (
+                  <CommandGroup heading={BOOKMARKS_HEADING}>
+                    {bookmarks.map((node) => (
                       <ResultRow
-                        key={item.node.id}
+                        key={node.id}
                         index={index}
-                        node={item.node}
-                        matches={matches}
+                        node={node}
                         onSelect={go}
                         onOpenActions={setActionNodeId}
                       />
                     ))}
                   </CommandGroup>
-                )}
-              </CommandList>
-            </>
-          )}
-        </Command>
-      </div>
+                )
+              ) : results.length === 0 ? (
+                actions.length === 0 &&
+                shownGlobals.length === 0 &&
+                shownSaved.length === 0 ? (
+                  <Hint>No matches.</Hint>
+                ) : null
+              ) : (
+                <CommandGroup heading="Nodes">
+                  {results.slice(0, RESULT_LIMIT).map(({ item, matches }) => (
+                    <ResultRow
+                      key={item.node.id}
+                      index={index}
+                      node={item.node}
+                      matches={matches}
+                      nearby={nearby.has(item.node.id)}
+                      onSelect={go}
+                      onOpenActions={openActions}
+                    />
+                  ))}
+                </CommandGroup>
+              )}
+              {results && exact && results.length > RESULT_LIMIT && (
+                <CommandGroup
+                  heading={`Showing 50 of ${results.length} matches`}
+                >
+                  <CommandItem
+                    value="filter-home"
+                    onSelect={() => filterInPlace(true)}
+                  >
+                    <FilterIcon className="size-4" />
+                    <span className="truncate">Filter Home for {q}</span>
+                  </CommandItem>
+                </CommandGroup>
+              )}
+            </CommandList>
+          </>
+        )}
+      </Command>
+    </div>
+  );
+  const changeOpen = (next: boolean) => {
+    if (!next) reset();
+    onOpenChange(next);
+  };
+  return mobile ? (
+    <MenuSheetContent
+      title="Find"
+      detents={["large"]}
+      isOpen={open}
+      onOpenChange={changeOpen}
+      onAfterClose={afterPaletteClose}
+    >
+      {content}
+    </MenuSheetContent>
+  ) : (
+    <CommandDialog
+      open={open}
+      onOpenChange={changeOpen}
+      title="Find"
+      animateResize
+      description="Find nodes everywhere or run actions. Filter in place to stay here."
+      finalFocus={afterPaletteClose}
+    >
+      {content}
     </CommandDialog>
   );
 }
 
-/** Opens the command center from the desktop header, beside the separate
- * view-filter magnifier. Narrow screens use the glass toolbar's Search
- * (ADRs 0034, 0076). */
-export function CommandCenterButton() {
+/** One Find door: the desktop magnifier and Cmd+K open the same palette. */
+export function FindButton() {
   return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      onClick={() => openNodeSwitcher()}
-      aria-label="Command center"
-    >
-      <CommandIcon />
-    </Button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => openNodeSwitcher()}
+            aria-label="Search"
+          />
+        }
+      >
+        <HugeiconsIcon icon={Search01Icon} />
+      </TooltipTrigger>
+      <TooltipContent>
+        Find everywhere <Kbd>⌘K</Kbd>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Return context belongs to the destination's history entry, not a global query. */
+export function BackToFind() {
+  const previous = useLocation({
+    select: (location) => location.state.findReturn,
+  });
+  const router = useRouter();
+  if (!previous) return null;
+  return (
+    <div className="mx-auto w-full max-w-180 px-6 pt-3 max-sm:px-4">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          router.history.back();
+          openNodeSwitcher(previous);
+        }}
+      >
+        <HugeiconsIcon icon={ArrowLeft01Icon} />
+        Back to search
+      </Button>
+    </div>
   );
 }
 
@@ -702,12 +983,14 @@ function ResultRow({
   index,
   node,
   matches,
+  nearby,
   onSelect,
   onOpenActions,
 }: {
   index: TreeIndex;
   node: Node;
   matches?: readonly FuseResultMatch[];
+  nearby?: boolean;
   onSelect: (nodeId: string) => void;
   onOpenActions: (nodeId: string) => void;
 }) {
@@ -734,6 +1017,9 @@ function ResultRow({
           )}
         >
           {highlight(title, textMatchIndices(matches))}
+          {nearby && (
+            <span className="ml-2 text-xs text-muted-foreground">here</span>
+          )}
           {annotation && (
             <span className="ml-1 text-muted-foreground">({annotation})</span>
           )}
@@ -749,6 +1035,7 @@ function ResultRow({
         type="button"
         aria-label="Node actions"
         title="Actions (→)"
+        data-slot="command-shortcut"
         className="ml-auto hidden shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground group-data-[selected=true]:flex hover:bg-muted"
         onClick={(e) => {
           e.stopPropagation();

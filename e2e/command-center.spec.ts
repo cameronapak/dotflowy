@@ -68,9 +68,7 @@ test("Spotlight commands preserve the zoomed child's source caret", async ({
         name: enabled ? /^Spotlight mode/ : /^Turn off spotlight mode/,
       })
       .click();
-    await expect(
-      page.getByRole("dialog", { name: "Command center" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Find" })).toHaveCount(0);
     await expect(child).toBeFocused();
     await expect(
       page.getByRole("button", { name: "Turn off spotlight mode" }),
@@ -96,9 +94,7 @@ test("Spotlight commands preserve title carets and retain no-editor fallbacks", 
     await openPalette(page);
     await page.getByPlaceholder(/Search nodes and actions/).fill("spotlight");
     await page.getByRole("option", { name: /spotlight mode/i }).click();
-    await expect(
-      page.getByRole("dialog", { name: "Command center" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Find" })).toHaveCount(0);
   };
   await placeCaret(title, 2);
   for (const enabled of [true, false]) {
@@ -201,7 +197,7 @@ test.describe("mobile", () => {
     ).toBe(true);
     await text(page, "bravo").click();
     await openPalette(page);
-    const dialog = page.getByRole("dialog", { name: "Command center" });
+    const dialog = page.getByRole("dialog", { name: "Find" });
     const center = () =>
       dialog.evaluate((el) => {
         const rect = el.getBoundingClientRect();
@@ -218,8 +214,8 @@ test.describe("mobile", () => {
     });
     await expect.poll(center).toBeCloseTo(241.5, 0); // 103 + 277 / 2
     const bounds = await dialog.boundingBox();
-    expect(bounds!.y).toBeGreaterThanOrEqual(119); // visible top + 16px
-    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(364); // visible bottom - 16px
+    expect(bounds!.y).toBeGreaterThanOrEqual(103); // native modal follows visible top
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(380); // visible bottom
     const input = page.getByPlaceholder(/Search nodes and actions/);
     await expect(input).toBeFocused();
     const inputTop = (await input.boundingBox())!.y;
@@ -227,15 +223,21 @@ test.describe("mobile", () => {
     expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(
       true,
     );
-    await list.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
-    const last = await dialog.getByRole("option").last().boundingBox();
-    const listBounds = await list.boundingBox();
-    expect(last!.y).toBeGreaterThanOrEqual(listBounds!.y);
-    expect(last!.y + last!.height).toBeLessThanOrEqual(
-      listBounds!.y + listBounds!.height + 1,
-    );
+    // Reach the final action through the keyboard, not the bottom of the
+    // trailing empty-bookmarks hint, which can fill a short keyboard viewport.
+    await input.press("End");
+    const last = dialog.getByRole("option").last();
+    await expect(last).toHaveAttribute("data-selected", "true");
+    await expect
+      .poll(async () => {
+        const bounds = (await last.boundingBox())!;
+        const listBounds = (await list.boundingBox())!;
+        return (
+          bounds.y >= listBounds.y &&
+          bounds.y + bounds.height <= listBounds.y + listBounds.height + 1
+        );
+      })
+      .toBe(true);
     expect((await input.boundingBox())!.y).toBe(inputTop);
 
     await page.evaluate(() => {
@@ -258,6 +260,208 @@ test.describe("mobile", () => {
     });
     await expect.poll(center).toBeCloseTo(450, 0);
   });
+});
+
+test("Find searches everywhere, prioritizes here, returns to selection, and hands off to Filter", async ({
+  page,
+}) => {
+  const many: SeedNode[] = Array.from({ length: 55 }, (_, i) => ({
+    id: `task-${i}`,
+    parentId: "bravo",
+    prevSiblingId: i === 0 ? null : `task-${i - 1}`,
+    text: `Release checklist ${i} #launch`,
+    isTask: true,
+  }));
+  await seedOutline(page, [
+    ...TREE,
+    {
+      id: "near",
+      parentId: "alpha",
+      prevSiblingId: "alpha-1",
+      text: "Release local #launch",
+      isTask: true,
+    },
+    {
+      id: "done",
+      parentId: "alpha",
+      prevSiblingId: "near",
+      text: "Release done #launch",
+      isTask: true,
+      completed: true,
+    },
+    {
+      id: "zephyr-mirror",
+      parentId: "alpha",
+      prevSiblingId: "done",
+      text: "",
+      mirrorOf: "zephyr",
+    },
+    ...many,
+  ]);
+  await openSeededOutline(page, { path: "/bravo", anchorId: "task-0" });
+  await openSeededOutline(page, { path: "/alpha", anchorId: "alpha-1" });
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Find", exact: true });
+  const find = dialog.getByRole("combobox");
+  const results = dialog.locator("[data-result-id]");
+  await find.fill("Zephr"); // Typo tolerance remains available for plain words.
+  await expect(results).toHaveCount(1);
+  await expect(results.first()).toHaveAttribute("data-result-id", "zephyr");
+  await expect(
+    results.first().getByText("here", { exact: true }),
+  ).toBeVisible();
+  await find.fill('"');
+  await expect(results).toHaveCount(0);
+  await find.fill('""');
+  await expect(results).toHaveCount(0);
+  await find.fill('"Zephyr"');
+  await expect(results).toHaveCount(1);
+  await expect(results.first()).toHaveAttribute("data-result-id", "zephyr");
+  await expect(
+    results.first().getByText("here", { exact: true }),
+  ).toBeVisible();
+  await find.fill('"Zephr"'); // Quotes switch to exact DQL, not fuzzy matching.
+  await expect(results).toHaveCount(0);
+  await find.fill("Releese"); // Typo-tolerant overflow must not hand off to literal filtering.
+  await expect(results).toHaveCount(50);
+  await expect(
+    dialog.getByRole("option", { name: /^Filter Home for/ }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: /Filter in place/ }),
+  ).toBeVisible();
+  await find.fill("#launch is:todo -is:complete");
+  await expect(dialog.getByText("Everywhere", { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByText(/DQL|fuzzy matching|exact matching/),
+  ).toHaveCount(0);
+  await expect(results).toHaveCount(50);
+  await expect(results.first()).toHaveAttribute("data-result-id", "near");
+  await expect(
+    results.first().getByText("here", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("group", { name: "Actions", exact: true }),
+  ).toHaveCount(0);
+  await expect(dialog.getByText("Showing 50 of 56 matches")).toBeVisible();
+  await results.nth(2).click();
+  await expect(page).toHaveURL(/\/task-1$/);
+  await expect(page).not.toHaveURL(/q=/);
+  await page.getByRole("button", { name: "Back to search" }).click();
+  await expect(page).toHaveURL(/\/alpha$/);
+  await expect(find).toHaveValue("#launch is:todo -is:complete");
+  await expect(dialog.locator('[data-result-id="task-1"]')).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  await find.press("Escape");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/bravo$/);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/alpha$/);
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await find.fill("#launch is:todo -is:complete");
+  await find.press("Shift+Enter");
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL(/\/alpha\?q=/);
+  await expect(page.locator('li[data-node-id="near"]')).toBeVisible();
+  await expect(page.locator('li[data-node-id="task-0"]')).toHaveCount(0);
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await find.fill("#launch is:todo -is:complete");
+  await dialog.getByRole("option", { name: /^Filter Home for/ }).click();
+  await expect(page).toHaveURL(/\/\?q=/);
+  await expect(page.locator('li[data-node-id="bravo"]')).toBeVisible();
+  await expect(page.locator('li[data-node-id="near"]')).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+k");
+  const todoShortcut = dialog.getByRole("button", {
+    name: "To-do",
+    exact: true,
+  });
+  await todoShortcut.focus();
+  await todoShortcut.press("Enter");
+  await expect(
+    page.getByRole("menuitemradio", { name: "To-do", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(todoShortcut).toBeFocused();
+  await todoShortcut.press("Enter");
+  await page
+    .getByRole("menuitemradio", { name: "To-do", exact: true })
+    .press("Enter");
+  await expect(find).toHaveValue("is:todo");
+  await expect(find).toBeFocused();
+  await dialog.getByRole("button", { name: "Completed", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Not completed", exact: true })
+    .click();
+  await expect(find).toHaveValue("is:todo -is:complete");
+  await dialog.getByRole("button", { name: "Tag", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Include tag…", exact: true })
+    .click();
+  await dialog.getByRole("option", { name: "#launch", exact: true }).click();
+  await expect(find).toHaveValue("is:todo -is:complete #launch ");
+  await find.fill("#launch");
+  await dialog.getByRole("button", { name: "Completed", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Completed", exact: true })
+    .click();
+  await expect(find).toHaveValue("#launch is:complete");
+  await expect(results).toHaveCount(1);
+  await expect(results.first()).toHaveAttribute("data-result-id", "done");
+  await dialog.getByRole("button", { name: "Completed", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Not completed", exact: true })
+    .click();
+  await expect(find).toHaveValue("#launch -is:complete");
+  await dialog
+    .getByRole("button", { name: "Not completed", exact: true })
+    .click();
+  await page
+    .getByRole("menuitemradio", { name: "Completed", exact: true })
+    .click();
+  await expect(find).toHaveValue("#launch is:complete");
+  await find.press("ControlOrMeta+f");
+  await expect(dialog).toHaveCount(0);
+  const filter = page.getByRole("combobox", { name: "Filter query" });
+  await expect(filter).toHaveValue("#launch is:complete");
+  await expect(filter).toBeFocused();
+  await filter.fill("#launch");
+  await expect(filter).toHaveValue("#launch");
+  await page.getByRole("button", { name: "Completed", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Completed", exact: true })
+    .click();
+  await expect(filter).toHaveValue("#launch is:complete");
+  await page.getByRole("button", { name: "#launch", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Exclude #launch", exact: true })
+    .click();
+  await expect(filter).toHaveValue("-#launch is:complete");
+  await page.getByRole("button", { name: "Not #launch", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Remove filter", exact: true })
+    .click();
+  await expect(filter).toHaveValue("is:complete");
+  await filter.fill("");
+  await page.getByRole("button", { name: "Has children", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Has children", exact: true })
+    .click();
+  await expect(filter).toHaveValue("has:children");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await find.fill("");
+  await dialog
+    .getByRole("button", { name: "Has children", exact: true })
+    .click();
+  await page
+    .getByRole("menuitemradio", { name: "Has children", exact: true })
+    .click();
+  await expect(find).toHaveValue("has:children");
+  await expect(results).toHaveCount(3);
+  await expect(results.nth(0)).toHaveAttribute("data-result-id", "alpha");
+  await expect(results.nth(1)).toHaveAttribute("data-result-id", "alpha-1");
+  await expect(results.nth(2)).toHaveAttribute("data-result-id", "bravo");
 });
 
 test("ambient target: a focused bullet's actions run against it", async ({

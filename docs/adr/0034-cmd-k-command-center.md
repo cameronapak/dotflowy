@@ -4,6 +4,14 @@ status: accepted
 
 # Cmd+K command center (nodes + actions)
 
+**Find amendment ([ADR 0083](./0083-find-and-filter.md)).** The command center
+is now Find, shared by Cmd+K and the magnifier. Plain words retain fuzzy
+matching and commands; visible DQL syntax switches nodes to exact matching and
+hides main-list commands. Nearby matches lead, node rows cap at 50, and Filter
+Home handles larger sets. Saved queries fill Find instead of executing a local
+filter. Shift+Enter filters in place; node results offer Back to search.
+The action bridge and text-selection shortcut below remain unchanged.
+
 **What.** The Cmd+K node quick-switcher grows into a keyboard-first **command center**: one box over
 **nodes** AND **actions**. Actions are both global/system (the header + View/App menu items) and
 node-contextual (indent, complete, delete, move, mirror, zoom, plus whole-node plugin `/` commands). A

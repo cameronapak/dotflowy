@@ -140,6 +140,8 @@ test("a saved query can be renamed inline and deleted by its new name", async ({
 test("Cmd+K lists and runs a saved query", async ({ page }) => {
   await load(page);
   await saveWork(page);
+  await page.getByRole("button", { name: "Clear filter" }).click();
+  await expect(page).not.toHaveURL(/q=/);
 
   // Open the command center; the saved filter appears in the empty state.
   await page.keyboard.press("ControlOrMeta+k");
@@ -147,10 +149,13 @@ test("Cmd+K lists and runs a saved query", async ({ page }) => {
 
   await page.getByRole("option", { name: "#work", exact: true }).click();
 
-  // Running it applies the query to the current view and closes the switcher.
-  await expect(page.getByPlaceholder(/Search nodes and actions/)).toHaveCount(
-    0,
+  // Find fills the query without changing the outline. Shift+Enter filters here.
+  await expect(page.getByPlaceholder(/Search nodes and actions/)).toHaveValue(
+    "#work",
   );
+  await expect(page).not.toHaveURL(/q=/);
+  await page.keyboard.press("Shift+Enter");
+  await expect(page.getByRole("dialog", { name: "Find" })).toHaveCount(0);
   await expect(page).toHaveURL(/q=%23work/);
   await expect(row(page, "milk").first()).toBeVisible();
   await expect(row(page, "mom")).toHaveCount(0);

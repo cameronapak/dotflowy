@@ -1,11 +1,18 @@
 # A query grammar for the view filter, with plugin-registered operators
 
+**Find + filter amendment ([ADR 0083](./0083-find-and-filter.md)).** The
+magnifier and Cmd+K open Find; the desktop funnel and Cmd+F filter this view.
+This supersedes the magnifier and command-symbol arrangement in decision 6.
+Find also understands DQL, but remains navigation, not a view transform. Both
+surfaces offer text-producing query chips. Empty local results offer Find
+everywhere. Existing `?q=` links and tag clicks remain local.
+
 **Mobile entry-point amendment ([ADR 0076](./0076-mobile-navigation-dock.md)).**
 Below 768px, Filter this view is the first row of the toolbar's More menu
 (its View section). The toolbar's Search
-magnifier opens the command center. Desktop retains the separate filter
-magnifier and command-center button described below. Filter semantics and
-keyboard shortcuts are unchanged.
+magnifier opens Find. Desktop has separate Find and Filter buttons (ADR 0081),
+superseding the original filter magnifier and command-center symbol. Filter
+semantics and keyboard shortcuts are unchanged.
 
 Filtering by tag exists (`?q=#a #b`, click-driven, AND-only) but nothing else is filterable — no node kind, no completion state, no text — even though every axis is already derivable from `node.text` plus existing fields. We decided to grow `?q=` into a real query grammar rather than build a search feature, and to split the grammar between a core parse engine and plugin-registered operators. Research base: [docs/research/workflowy-search-operators.md](../research/workflowy-search-operators.md).
 
@@ -35,6 +42,11 @@ Filtering by tag exists (`?q=#a #b`, click-driven, AND-only) but nothing else is
    - **Date search, `text:bold`, `is:backlinks`** — natural-language date parsing wants design time; nobody filters by italic; "is a backlink" vs "has backlinks" is ambiguous.
 
 ## Consequences
+
+- _Find + filter shortcut amendment (ADR 0081):_ Core registers `has:children`
+  for nodes whose resolved content has direct children, regardless of collapse
+  or completion. Mirrors use their source's children. The same operator is
+  available in Find, Filter, MCP, and CLI through the shared registry.
 
 - _Amended 2026-10-26 (issue #245):_ **Node selection follows visible sibling order.** Shift+arrow and Cmd+A use `visibleIds` at event time, keyed by the selected instance's render path. This includes dimmed context and revealed descendants, not just literal matches. Hidden sibling roots are excluded; selected roots still imply whole subtrees. The sibling-scoped model, direction reversal, structural batches, and filter-preserving undo remain unchanged. See [ADR 0018](./0018-node-multi-selection.md). This resolves the selection work deferred in the July amendments below.
 - _Amended 2026-10-26 (issue #454):_ **Text/tag field edits update leaf membership without a full query walk.** The tree store retains the previous and next rows from only its latest field-only batch. If the view, focus, local date, and visibility structure are unchanged, `useViewFilter` compares membership and hiding for those rows. Unchanged membership reuses the filter. A leaf entering or leaving the query updates its membership and ancestor context, respecting hidden ancestors, scope, collapse, revealed descendants, and focus-only retention. Published sets are never mutated. A focused leaf can stop matching without changing either set; only its retention metadata changes. Visible rows depend on `visibleIds` identity, not dimming or retention metadata, so that transition avoids a row rebuild too.

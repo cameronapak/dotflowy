@@ -278,7 +278,7 @@ const allFilterOperators = [
   ...CORE_FILTER_OPERATORS,
   ...plugins.flatMap((p) => p.filterOperators ?? []),
 ];
-const filterOperatorMap = buildFilterOperatorMap(allFilterOperators);
+export const filterOperatorMap = buildFilterOperatorMap(allFilterOperators);
 
 /** The registry-driven cheat sheet for the filter input's autocomplete (ADR
  *  0047 §7): one row per distinct operator key, folding shared-key operators

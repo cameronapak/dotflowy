@@ -11,6 +11,8 @@
 
 import type { FilterOperator } from "./filter-query";
 
+import { trueSourceOf } from "./tree";
+
 /**
  * `is:paragraph|todo|bullet` obey ADR 0045's render tie-break: `kind` outranks
  * `isTask`, so a node with `kind === "paragraph"` is a paragraph even if a stale
@@ -41,5 +43,13 @@ export const CORE_FILTER_OPERATORS: FilterOperator[] = [
           return false;
       }
     },
+  },
+  {
+    key: "has",
+    values: ["children"],
+    description: "Filter to nodes with children",
+    predicate: (node, index) =>
+      (index.childrenByParent.get(trueSourceOf(index, node.id))?.length ?? 0) >
+      0,
   },
 ];

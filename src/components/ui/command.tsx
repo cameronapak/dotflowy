@@ -38,6 +38,7 @@ function CommandDialog({
   className,
   showCloseButton = false,
   finalFocus,
+  animateResize = false,
   ...props
 }: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
   title?: string;
@@ -45,9 +46,88 @@ function CommandDialog({
   className?: string;
   showCloseButton?: boolean;
   finalFocus?: React.ComponentProps<typeof DialogContent>["finalFocus"];
+  /** Smooth Find's changing result count, without delaying open or selection. */
+  animateResize?: boolean;
   children: React.ReactNode;
 }) {
   const { height, offsetTop } = useKeyboardViewport();
+  const surfaceRef = React.useRef<HTMLDivElement>(null);
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  // Keep the ref stable across queries so observation retains the previous size.
+  const resizeRef = React.useCallback(
+    (popup: HTMLDivElement | null) => {
+      const surface = surfaceRef.current;
+      const content = contentRef.current;
+      if (!popup || !surface || !content || !animateResize) return;
+      const reducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      );
+      let previousHeight = popup.offsetHeight;
+      let position: Animation | undefined;
+      let surfaceAnimation: Animation | undefined;
+      let revealAnimation: Animation | undefined;
+      const cancelResize = () => {
+        position?.cancel();
+        surfaceAnimation?.cancel();
+        revealAnimation?.cancel();
+      };
+      reducedMotion.addEventListener("change", cancelResize);
+      const observer = new ResizeObserver(() => {
+        const nextHeight = popup.offsetHeight;
+        if (nextHeight === previousHeight || nextHeight === 0) return;
+        // Retarget from the currently drawn position and size if typing interrupts
+        // a resize. Only the backplate scales; glyphs keep their natural size.
+        const offset = new DOMMatrixReadOnly(getComputedStyle(popup).transform)
+          .m42;
+        const scale = new DOMMatrixReadOnly(getComputedStyle(surface).transform)
+          .m22;
+        cancelResize();
+        if (reducedMotion.matches) {
+          previousHeight = nextHeight;
+          return;
+        }
+        const timing = {
+          duration: 160,
+          easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+        };
+        position = popup.animate(
+          [
+            {
+              transform: `translateY(${(nextHeight - previousHeight) / 2 + offset}px)`,
+            },
+            { transform: "translateY(0px)" },
+          ],
+          timing,
+        );
+        surfaceAnimation = surface.animate(
+          [
+            { transform: `scaleY(${(previousHeight * scale) / nextHeight})` },
+            { transform: "scaleY(1)" },
+          ],
+          timing,
+        );
+        // Reveal expanding rows only as their background reaches them. Clip the
+        // content separately so a shrinking backplate can retain its old height.
+        revealAnimation = content.animate(
+          [
+            {
+              clipPath: `inset(0 0 ${Math.max(0, nextHeight - previousHeight * scale)}px 0)`,
+            },
+            { clipPath: "inset(0 0 0px 0)" },
+          ],
+          timing,
+        );
+        previousHeight = nextHeight;
+      });
+      observer.observe(popup);
+      return () => {
+        observer.disconnect();
+        reducedMotion.removeEventListener("change", cancelResize);
+        cancelResize();
+      };
+    },
+    [animateResize],
+  );
 
   return (
     <Dialog {...props}>
@@ -56,8 +136,10 @@ function CommandDialog({
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
       <DialogContent
+        ref={resizeRef}
         className={cn(
           "flex flex-col overflow-hidden rounded-xl! p-0",
+          animateResize && "isolate overflow-visible bg-transparent ring-0",
           className,
         )}
         style={{
@@ -68,7 +150,23 @@ function CommandDialog({
         animate={false}
         finalFocus={finalFocus}
       >
-        {children}
+        {animateResize ? (
+          <>
+            <div
+              ref={surfaceRef}
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 origin-top rounded-xl bg-popover ring-1 ring-foreground/10"
+            />
+            <div
+              ref={contentRef}
+              className="relative flex min-h-0 flex-col overflow-hidden rounded-xl [&_[data-slot=command]]:bg-transparent"
+            >
+              {children}
+            </div>
+          </>
+        ) : (
+          children
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -13,7 +13,7 @@
 | `Arrow ↑` / `↓` at line edges                | Move between bullets (preserves the caret column)                                                               |
 | `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z`            | Undo / redo                                                                                                     |
 | `Shift+↑` / `↓`                              | Select whole nodes (then `Tab` indents the run, `Backspace` deletes it, …)                                      |
-| `Cmd/Ctrl+K`                                 | Open the command center                                                                                         |
+| `Cmd/Ctrl+K`                                 | Open Find (nodes everywhere, DQL, and commands)                                                                 |
 | `Cmd/Ctrl+F`                                 | Filter the current view (`?q=` — tags, operators, free text)                                                    |
 | `q`                                          | Quick-add capture (files to Today without leaving where you are)                                                |
 
