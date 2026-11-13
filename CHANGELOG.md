@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.7.0
+
+### Minor Changes
+
+- ffd61ef: Choose whether AI-created nodes show their source app's logo or a quiet sparkle in Settings → Appearance. App icons stay on by default, and the choice follows your account across devices.
+
 ## 3.6.3
 
 ### Patch Changes
