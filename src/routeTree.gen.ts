@@ -18,6 +18,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ShareRouteImport } from './routes/share'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TodayRouteImport } from './routes/today'
+import { Route as AdminFeedbackRouteImport } from './routes/admin.feedback'
 import { Route as AdminRestoreRouteImport } from './routes/admin.restore'
 import { Route as AdminWaitlistRouteImport } from './routes/admin.waitlist'
 
@@ -66,6 +67,11 @@ const TodayRoute = TodayRouteImport.update({
   path: '/today',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminFeedbackRoute = AdminFeedbackRouteImport.update({
+  id: '/admin/feedback',
+  path: '/admin/feedback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminRestoreRoute = AdminRestoreRouteImport.update({
   id: '/admin/restore',
   path: '/admin/restore',
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/share': typeof ShareRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
+  '/admin/feedback': typeof AdminFeedbackRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
@@ -100,6 +107,7 @@ export interface FileRoutesByTo {
   '/share': typeof ShareRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
+  '/admin/feedback': typeof AdminFeedbackRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
@@ -114,6 +122,7 @@ export interface FileRoutesById {
   '/share': typeof ShareRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
+  '/admin/feedback': typeof AdminFeedbackRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
 }
@@ -129,6 +138,7 @@ export interface FileRouteTypes {
     | '/share'
     | '/terms'
     | '/today'
+    | '/admin/feedback'
     | '/admin/restore'
     | '/admin/waitlist'
   fileRoutesByTo: FileRoutesByTo
@@ -142,6 +152,7 @@ export interface FileRouteTypes {
     | '/share'
     | '/terms'
     | '/today'
+    | '/admin/feedback'
     | '/admin/restore'
     | '/admin/waitlist'
   id:
@@ -155,6 +166,7 @@ export interface FileRouteTypes {
     | '/share'
     | '/terms'
     | '/today'
+    | '/admin/feedback'
     | '/admin/restore'
     | '/admin/waitlist'
   fileRoutesById: FileRoutesById
@@ -169,6 +181,7 @@ export interface RootRouteChildren {
   ShareRoute: typeof ShareRoute
   TermsRoute: typeof TermsRoute
   TodayRoute: typeof TodayRoute
+  AdminFeedbackRoute: typeof AdminFeedbackRoute
   AdminRestoreRoute: typeof AdminRestoreRoute
   AdminWaitlistRoute: typeof AdminWaitlistRoute
 }
@@ -238,6 +251,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TodayRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/feedback': {
+      id: '/admin/feedback'
+      path: '/admin/feedback'
+      fullPath: '/admin/feedback'
+      preLoaderRoute: typeof AdminFeedbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/restore': {
       id: '/admin/restore'
       path: '/admin/restore'
@@ -265,6 +285,7 @@ const rootRouteChildren: RootRouteChildren = {
   ShareRoute: ShareRoute,
   TermsRoute: TermsRoute,
   TodayRoute: TodayRoute,
+  AdminFeedbackRoute: AdminFeedbackRoute,
   AdminRestoreRoute: AdminRestoreRoute,
   AdminWaitlistRoute: AdminWaitlistRoute,
 }

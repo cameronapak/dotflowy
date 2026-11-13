@@ -47,6 +47,10 @@
   //   "ADMIN_USER_IDS": "<owner user.id>",
   "vars": {
     "ADMIN_EMAILS": "cameronandrewpak@gmail.com",
+    // Notification destination only; never grants admin access.
+    "FEEDBACK_NOTIFICATION_EMAIL": "cameronandrewpak@gmail.com",
+    // Enable only after support@dotflowy.com receiving/sending is verified.
+    "FEEDBACK_REPLY_MODE": "disabled",
     // Optional owner-only feedback: leave BOTH unset until separately approved
     // setup. Pin a Better Auth user.id, never an email; the client ID is public.
     // AMP_FEEDBACK_USER_ID and AMP_FEEDBACK_CLIENT_ID: docs/feedback-widget.md.
@@ -78,7 +82,10 @@
   "send_email": [
     {
       "name": "EMAIL",
-      "allowed_sender_addresses": ["no-reply@dotflowy.com"],
+      "allowed_sender_addresses": [
+        "no-reply@dotflowy.com",
+        "support@dotflowy.com",
+      ],
     },
   ],
   "d1_databases": [

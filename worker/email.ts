@@ -31,39 +31,52 @@ export interface EmailMessage {
   subject: string;
   html: string;
   text: string;
+  /** Support replies use a fixed Dotflowy identity, never an arbitrary From. */
+  sender?: "support";
 }
+
+export type EmailSendOutcome =
+  | { status: "accepted"; messageId: string }
+  | { status: "failed" }
+  | { status: "simulated" };
 
 /**
  * Send a transactional email. Never throws: callers sit on non-enumerable
  * endpoints (a failed reset send must not turn into a distinguishable
- * response), so failures are logged for observability and swallowed. Returns
- * true only when the binding accepts the send (not proof of inbox delivery).
+ * response), so failures are logged without private content and returned as an
+ * outcome. Acceptance is not proof of inbox delivery.
  * Existing fire-and-forget callers may ignore the result. Always provide both
  * html and text (spam score + client compatibility).
  */
 export async function sendEmail(
   env: EmailEnv,
   message: EmailMessage,
-): Promise<boolean> {
+): Promise<EmailSendOutcome> {
   if (!env.EMAIL) {
     // No binding in this environment: log the whole message so any embedded
     // URL is copy-pasteable from the console.
     console.log(
       `[email dev fallback] to=${message.to} subject=${JSON.stringify(message.subject)}\n${message.text}`,
     );
-    return false;
+    return { status: "simulated" };
   }
   try {
-    await env.EMAIL.send({
-      from: FROM,
+    const result = await env.EMAIL.send({
+      from:
+        message.sender === "support"
+          ? "Dotflowy Support <support@dotflowy.com>"
+          : FROM,
+      replyTo:
+        message.sender === "support" ? "support@dotflowy.com" : undefined,
       to: message.to,
       subject: message.subject,
       html: message.html,
       text: message.text,
     });
-    return true;
-  } catch (err) {
-    console.error(`email send failed (to=${message.to}):`, err);
-    return false;
+    return { status: "accepted", messageId: result.messageId };
+  } catch {
+    // Provider errors can include message bodies. Never log the raw error.
+    console.error("Email service did not confirm acceptance.");
+    return { status: "failed" };
   }
 }

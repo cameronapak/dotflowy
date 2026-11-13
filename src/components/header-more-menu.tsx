@@ -23,17 +23,20 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 
 import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { openFeedbackReport } from "../data/feedback";
+import { useMembership } from "../data/membership";
 import { toggleBookmark } from "../data/mutations";
 import {
   copyOutlineAsMarkdown,
   setViewCollapsed,
 } from "../data/outline-actions";
+import { PLAN_LABELS } from "../data/plans";
 import { useTree } from "../data/useTree";
 import { getViewRootId } from "../data/view-state";
 import { useIsMobile } from "../hooks/use-mobile";
 import { signOutAndReload, useSession } from "../lib/auth-client";
 import { usePluginChrome } from "../plugins/registry";
 import { openChangelog } from "./changelog-opener";
+import { openMembership } from "./membership-opener";
 import { openFilterInput } from "./query-filter-nav";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
@@ -217,8 +220,24 @@ function AccountAvatar() {
 function AppMenuItems() {
   const navigate = useNavigate();
   const unseen = useUnseenReleaseCount();
+  const { plan } = useMembership();
+  const paid = plan !== null && plan !== "free";
   return (
     <>
+      <DropdownMenuItem
+        onAfterClose={() =>
+          plan === "free"
+            ? openMembership()
+            : void navigate({ to: "/settings", hash: "billing" })
+        }
+      >
+        <HugeiconsIcon icon={SparklesIcon} />
+        {paid ? `${PLAN_LABELS[plan]} member` : "Membership"}
+        {!paid && plan === "free" && (
+          <span className="ml-auto text-xs text-muted-foreground">Free</span>
+        )}
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
       <DropdownMenuItem onAfterClose={() => void navigate({ to: "/settings" })}>
         <HugeiconsIcon icon={Settings01Icon} />
         Settings
@@ -246,9 +265,9 @@ function AppMenuItems() {
         )}
       </DropdownMenuItem>
 
-      <DropdownMenuItem onClick={() => openFeedbackReport()}>
+      <DropdownMenuItem onAfterClose={() => openFeedbackReport()}>
         <HugeiconsIcon icon={BubbleChatNotificationIcon} />
-        Report a bug
+        {paid ? "Send feedback" : "Report a bug"}
       </DropdownMenuItem>
 
       <DropdownMenuItem

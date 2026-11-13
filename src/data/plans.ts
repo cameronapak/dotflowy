@@ -5,6 +5,7 @@ export type PlanName = "free" | "unlimited" | "founding";
 
 export const PLAN_LABELS = {
   free: "Free",
-  unlimited: "Unlimited",
+  // Pro is the public name; keep Better Auth/Stripe's persisted identifier.
+  unlimited: "Pro",
   founding: "Founding",
 } satisfies Record<PlanName, string>;

@@ -89,7 +89,7 @@ Command line (CLI)** in the app.
 
 - **Free:** 10,000 nodes, with the full editor, import, and export. Reaching
   the limit does not prevent you from reading, editing, or exporting.
-- **Unlimited and Founding:** no node limit, plus AI agents over MCP and
+- **Pro and Founding:** no node limit, plus AI agents over MCP and
   the CLI.
 
 See [current pricing](https://dotflowy.com/) for prices and availability.

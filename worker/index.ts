@@ -59,6 +59,7 @@ import {
 } from "./capture";
 import { authenticateCaptureKey } from "./capture-keys";
 import { lookupEmbedE } from "./embeds";
+import { handleFeedbackRequest, handleFeedbackInboxRequest } from "./feedback";
 import { withFramePolicy } from "./frame-policy";
 import {
   OWNER_DO_ID,
@@ -74,6 +75,7 @@ import {
   type InviteBatchResult,
 } from "./invites";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
+import { acknowledgeWelcome, canSaveTheme, readMembership } from "./membership";
 import { legacyNumberedNode } from "./numbered-compat";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
@@ -153,6 +155,9 @@ interface Env extends AuthEnv {
    *  when ADMIN_USER_IDS is empty (so an older deploy keeps working). Prefer
    *  ADMIN_USER_IDS. Fail-closed: neither set = no admins. */
   ADMIN_EMAILS?: string;
+  /** Private feedback alerts; independent of admin authorization. */
+  FEEDBACK_NOTIFICATION_EMAIL?: string;
+  FEEDBACK_REPLY_MODE?: string;
   /** Cloudflare Turnstile SITE key (#293) — PUBLIC (it ships to the browser), so
    *  a wrangler.jsonc var, not a secret. Surfaced to the SPA via
    *  GET /api/auth-config so the AuthScreen can render the widget. Unset = no
@@ -552,6 +557,8 @@ function handleKv(
   request: Request,
   stub: DurableObjectStub<UserOutlineDO>,
   collection: string,
+  env: Env,
+  billingUserId: string,
 ): Effect.Effect<Response, BadRequest> {
   return Effect.gen(function* () {
     switch (request.method) {
@@ -563,6 +570,19 @@ function handleKv(
         // to race-safely create today's note / container (the DO serializes it).
         if (new URL(request.url).searchParams.get("op") === "claim") {
           const { key, value } = yield* decodeBody(request, KvClaimBody);
+          if (
+            collection === "account-prefs" &&
+            (key === "appearance:color-theme" ||
+              Schema.is(
+                Schema.Struct({
+                  key: Schema.Literal("appearance:color-theme"),
+                }),
+              )(value))
+          )
+            return json(
+              { error: "theme preferences do not support claims" },
+              400,
+            );
           // SAFETY: value came from a JSON-parsed request body validated as { nodeId } by the daily claim client
           const claimValue = value as KvClaim;
           const claimed: KvClaim = yield* Effect.promise(() =>
@@ -571,6 +591,45 @@ function handleKv(
           return json({ value: claimed });
         }
         const { rows } = yield* decodeBody(request, KvUpsertBody);
+        if (collection === "account-prefs") {
+          const themeRows = rows.filter(
+            (row) =>
+              row.key === "appearance:color-theme" ||
+              Schema.is(
+                Schema.Struct({
+                  key: Schema.Literal("appearance:color-theme"),
+                }),
+              )(row.value),
+          );
+          if (themeRows.length) {
+            const plan = yield* Effect.promise(() =>
+              getPlan(billingUserId, env),
+            );
+            for (const row of themeRows) {
+              if (row.key !== "appearance:color-theme")
+                return json({ error: "invalid theme key" }, 400);
+              const value = yield* Schema.decodeUnknownEffect(
+                Schema.Struct({
+                  key: Schema.Literal("appearance:color-theme"),
+                  theme: Schema.String,
+                }),
+              )(row.value).pipe(
+                Effect.mapError(
+                  () => new BadRequest({ reason: "invalid theme preference" }),
+                ),
+              );
+              if (!canSaveTheme(billingUserId, plan, value.theme)) {
+                return json(
+                  {
+                    error: "paid_theme",
+                    message: "Themes are included with Unlimited and Founding.",
+                  },
+                  403,
+                );
+              }
+            }
+          }
+        }
         if (rows.length)
           yield* Effect.promise(() => stub.upsertKv(collection, rows));
         return json({ ok: true });
@@ -1176,9 +1235,58 @@ function handleApiRequest(
     const session = yield* Effect.promise(() =>
       auth.api.getSession({ headers: request.headers }),
     );
+    if (url.pathname === "/api/admin/feedback") {
+      return yield* handleFeedbackInboxRequest(
+        request,
+        env,
+        session,
+        executionCtx,
+      );
+    }
     if (!session) return json({ error: "unauthorized" }, 401);
 
     const userId = resolveUserId(session.user.id, env);
+    if (url.pathname === "/api/feedback") {
+      if (
+        request.headers.has("origin") &&
+        request.headers.get("origin") !== url.origin
+      ) {
+        return json({ error: "invalid origin" }, 403);
+      }
+      return yield* handleFeedbackRequest(request, env, session, executionCtx);
+    }
+
+    if (url.pathname === "/api/membership") {
+      if (request.method === "GET") {
+        return json(
+          yield* Effect.promise(() => readMembership(env.DB, session.user.id)),
+          200,
+          { "cache-control": "private, no-store" },
+        );
+      }
+      if (request.method === "POST") {
+        if (
+          !request.headers
+            .get("content-type")
+            ?.startsWith("application/json") ||
+          (request.headers.has("origin") &&
+            request.headers.get("origin") !== url.origin)
+        ) {
+          return json({ error: "invalid origin or content type" }, 403);
+        }
+        const { id } = yield* decodeBody(
+          request,
+          Schema.Struct({ id: Schema.String.check(Schema.isMaxLength(255)) }),
+        );
+        yield* Effect.promise(() =>
+          acknowledgeWelcome(env.DB, session.user.id, id),
+        );
+        return json({ ok: true }, 200, {
+          "cache-control": "private, no-store",
+        });
+      }
+      return json({ error: "method not allowed" }, 405);
+    }
 
     // The share target's Add to Today (ADR 0085): session-only, separate from
     // the key-only /api/capture so neither credential authorizes the other.
@@ -1279,7 +1387,7 @@ function handleApiRequest(
         return yield* Effect.fail(new UnknownCollection({ collection }));
       }
       yield* maybeSeed;
-      return yield* handleKv(request, stub, collection);
+      return yield* handleKv(request, stub, collection, env, session.user.id);
     }
 
     return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));

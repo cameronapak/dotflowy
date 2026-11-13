@@ -119,7 +119,7 @@ function McpPage() {
           <section id="setup" aria-labelledby="setup-heading">
             <h2 id="setup-heading">Connect Claude</h2>
             <p className="mt-4">
-              You need a Dotflowy account with an <strong>Unlimited</strong> or{" "}
+              You need a Dotflowy account with a <strong>Pro</strong> or{" "}
               <strong>Founding</strong> plan. The Free plan does not include MCP
               tool use. Your Claude account must support custom remote
               connectors, and your organization must permit the connection.
@@ -335,8 +335,8 @@ function McpPage() {
                 </dt>
                 <dd className="mt-1">
                   Tool discovery can succeed on a Free account. Tool execution
-                  requires Unlimited or Founding on the Dotflowy account you
-                  used to connect.
+                  requires Pro or Founding on the Dotflowy account you used to
+                  connect.
                 </dd>
               </div>
               <div>

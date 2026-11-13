@@ -27,6 +27,7 @@
  * script refuses. `--dry-run` prints the plan (EXISTS / would CREATE / MISMATCH)
  * without writing a thing.
  */
+import { Schema } from "effect";
 import Stripe from "stripe";
 
 // Canonical source of these strings is worker/auth.ts (STRIPE_LOOKUP_KEYS).
@@ -42,6 +43,7 @@ const LOOKUP_KEYS = {
 const WEBHOOK_URL = "https://app.dotflowy.com/api/auth/stripe/webhook";
 const WEBHOOK_EVENTS = [
   "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
@@ -67,8 +69,8 @@ interface PriceSpec {
 const PRICE_SPECS: PriceSpec[] = [
   {
     lookupKey: LOOKUP_KEYS.unlimitedMonthly,
-    label: "Unlimited monthly ($5/mo)",
-    productName: "Dotflowy Unlimited",
+    label: "Pro monthly ($5/mo)",
+    productName: "Dotflowy Pro",
     unitAmount: 500,
     currency: "usd",
     interval: "month",
@@ -76,8 +78,8 @@ const PRICE_SPECS: PriceSpec[] = [
   },
   {
     lookupKey: LOOKUP_KEYS.unlimitedAnnual,
-    label: "Unlimited annual ($48/yr)",
-    productName: "Dotflowy Unlimited",
+    label: "Pro annual ($48/yr)",
+    productName: "Dotflowy Pro",
     unitAmount: 4800,
     currency: "usd",
     interval: "year",
@@ -117,6 +119,7 @@ function detectMode(key: string): "test" | "live" {
         "(expected an sk_test_… / sk_live_… / rk_test_… / rk_live_… prefix).",
     );
   }
+  // SAFETY: the validated regex restricts capture group 2 to test or live.
   return m![2] as "test" | "live";
 }
 
@@ -209,6 +212,21 @@ async function ensurePrices(stripe: Stripe, dryRun: boolean) {
   }
 
   const productCache = new Map<string, string>();
+  // Resolve identity through existing Prices before creating any missing Price.
+  // A public rename must not split monthly/yearly across duplicate Products.
+  for (const spec of PRICE_SPECS) {
+    const product = byKey.get(spec.lookupKey)?.product;
+    if (product && !Schema.is(Schema.String)(product) && !product.deleted) {
+      if (
+        product.name !== spec.productName &&
+        !productCache.has(spec.productName)
+      )
+        log(
+          `  ${C.yellow}NAME${C.reset} product ${product.id} is "${product.name}"; rename it in place to "${spec.productName}" separately (left untouched).`,
+        );
+      productCache.set(spec.productName, product.id);
+    }
+  }
   let created = 0;
   let mismatches = 0;
 
@@ -322,9 +340,7 @@ async function ensureWebhook(
 
   const created = await stripe.webhookEndpoints.create({
     url: WEBHOOK_URL,
-    enabled_events: [
-      ...WEBHOOK_EVENTS,
-    ] as Stripe.WebhookEndpointCreateParams.EnabledEvent[],
+    enabled_events: [...WEBHOOK_EVENTS],
   });
   log(
     `  ${C.cyan}CREATED${C.reset} ${WEBHOOK_URL} ${C.dim}(${created.id})${C.reset}`,

@@ -297,6 +297,10 @@ export async function seedOutline(
     route.fulfill({ status: 404, json: { error: "not found" } }),
   );
 
+  await page.route("**/api/membership", (route) =>
+    reply(route, { plan: "free", legacyLeaf: false, subs: [], welcome: null }),
+  );
+
   // The app is gated behind a Better Auth session (root AuthGate). The editor
   // only mounts once `useSession()` resolves to a session, so mock the
   // get-session endpoint with a fixed authed user. Without this the specs would

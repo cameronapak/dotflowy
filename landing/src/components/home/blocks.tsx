@@ -129,7 +129,7 @@ export const APP_JSON_LD = {
     "An outliner for notes, tasks, and ideas. Zoom into any bullet, jump anywhere with Cmd+K, import from Workflowy, export OPML or Markdown, and connect AI agents over MCP.",
   offers: [
     { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD" },
-    { "@type": "Offer", name: "Unlimited", price: "5", priceCurrency: "USD" },
+    { "@type": "Offer", name: "Pro", price: "5", priceCurrency: "USD" },
     { "@type": "Offer", name: "Founding", price: "99", priceCurrency: "USD" },
   ],
   author: { "@type": "Person", name: "Cameron Pak" },
@@ -152,17 +152,17 @@ export function PricingCompact({ className }: { className?: string }) {
       line: "10,000 bullets. At the limit nothing locks: you can still read, edit, and export.",
     },
     {
-      name: "Unlimited",
+      name: "Pro",
       price: "$5",
       per: "/mo or $48/yr",
-      line: "No bullet limit. Adds AI agents over MCP and the CLI. Your subscription funds Dotflowy's development.",
+      line: "No bullet limit. Every theme, AI apps over MCP, the CLI, and private ideas and questions to Cam. Your subscription funds Dotflowy's development.",
       accent: true,
     },
     {
       name: "Founding",
       price: "$99",
       per: "for 3 years",
-      line: "Unlimited for 3 years, paid once, to back Dotflowy early. 50 seats. Renews after 3 years unless you cancel.",
+      line: "Pro for 3 years, paid once, to back Dotflowy early. 50 seats. Renews after 3 years unless you cancel.",
     },
   ];
   return (

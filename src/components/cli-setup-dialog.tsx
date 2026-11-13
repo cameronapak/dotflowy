@@ -121,9 +121,9 @@ export function CliSetupDialog({
           it expires. Browser sign-in with OAuth remains available above.
         </p>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          CLI commands use the MCP endpoint and require Unlimited or Founding.
-          Spoiler text stays redacted, including in CLI exports. For a full
-          backup, use the app’s Data exports.
+          CLI commands use the MCP endpoint and require Pro or Founding. Spoiler
+          text stays redacted, including in CLI exports. For a full backup, use
+          the app’s Data exports.
         </p>
         <a
           className="text-sm text-primary underline underline-offset-4"

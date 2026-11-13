@@ -134,9 +134,10 @@ export async function runApiKeyReminderSweep(
           sendTime,
         )
         .first();
-      const delivered = live
+      const outcome = live
         ? await sendEmail(env, reminderEmail(key, settingsUrl))
-        : false;
+        : undefined;
+      const delivered = outcome?.status === "accepted";
       await env.DB.prepare(
         `UPDATE capture_key
          SET reminderNotifiedExpiresAt = CASE WHEN ? THEN ? ELSE reminderNotifiedExpiresAt END,

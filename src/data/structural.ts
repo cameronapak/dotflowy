@@ -37,7 +37,7 @@ async function persistStructuralBatch(
         {
           id: "node-limit",
           description:
-            "Upgrade to Unlimited to keep adding. Your existing outline stays fully editable.",
+            "Upgrade to Pro to keep adding. Your existing outline stays fully editable.",
           // SPA-navigate to /settings' plan & billing (never a hard reload,
           // which would tear down the data layer to change routes). No-op until
           // the SettingsNavRegistrar mounts (it always is, in __root).

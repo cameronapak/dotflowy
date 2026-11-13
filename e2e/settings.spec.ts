@@ -19,12 +19,17 @@ const TREE: SeedNode[] = [
  *  after seedOutline so it wins (Playwright routes are last-registered-first). */
 async function mockFreePlan(page: Page) {
   await page.route(
-    (url) => url.pathname === "/api/auth/subscription/list",
+    (url) => url.pathname === "/api/membership",
     (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: "[]",
+        body: JSON.stringify({
+          plan: "free",
+          legacyLeaf: false,
+          subs: [],
+          welcome: null,
+        }),
       }),
   );
 }
@@ -128,7 +133,18 @@ test("CLI setup explains install, login, and a safe read against this deployment
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await seedOutline(page, TREE);
-  await mockFreePlan(page);
+  await page.route("**/api/membership", (route) =>
+    route.fulfill({
+      json: {
+        plan: "unlimited",
+        legacyLeaf: false,
+        subs: [
+          { plan: "unlimited", status: "active", cancelAtPeriodEnd: false },
+        ],
+        welcome: null,
+      },
+    }),
+  );
   await openSettings(page);
   await page.getByRole("button", { name: "Set up command line (CLI)" }).click();
   const dialog = page.getByRole("dialog", {
@@ -189,13 +205,15 @@ test("free settings exposes its sections, connections nudge, and disclosed upgra
   await mockFreePlan(page);
   await openSettings(page);
 
-  await expect(page.getByText(/Connecting AI apps requires/i)).toBeVisible();
+  await expect(
+    page.getByText("Included with Pro", { exact: true }),
+  ).toHaveCount(3);
   for (const name of ["Connections", "Plugins", "Appearance"]) {
     await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
   }
   await expect(
     page.getByRole("heading", { name: "Plan & billing" }),
-  ).toBeHidden();
+  ).toBeVisible();
   await page.locator("summary", { hasText: "Other settings" }).click();
   for (const name of ["Plan & billing", "Account", "Data"]) {
     await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
@@ -219,6 +237,68 @@ test("free settings exposes its sections, connections nudge, and disclosed upgra
   await expect(
     page.getByText(/Renews after 3 years unless you cancel/i),
   ).toBeVisible();
+});
+
+test("a checkout return waits for server confirmation and the thank-you stays dismissed after reload", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  let activated = false;
+  let seen = false;
+  let failAck = true;
+  await page.route("**/api/membership", (route) => {
+    if (route.request().method() === "POST") {
+      expect(route.request().postDataJSON()).toEqual({ id: "sub_fixture" });
+      if (failAck) {
+        failAck = false;
+        return route.fulfill({ status: 503, json: {} });
+      }
+      seen = true;
+      return route.fulfill({ json: { ok: true } });
+    }
+    return route.fulfill({
+      json: {
+        // An active entitlement can precede delayed payment confirmation.
+        plan: "founding",
+        legacyLeaf: false,
+        subs: [
+          { plan: "founding", status: "active", cancelAtPeriodEnd: false },
+        ],
+        welcome:
+          activated && !seen ? { id: "sub_fixture", plan: "founding" } : null,
+      },
+    });
+  });
+  await page.goto("/settings?checkout=success");
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Confirming your membership" }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog", { name: /Thank you/ })).toHaveCount(0);
+  activated = true;
+  await page.getByRole("button", { name: "Check again" }).click();
+  const thanks = page.getByRole("dialog", { name: "Thank you, Test." });
+  await expect(thanks).toBeVisible();
+  await expect(
+    thanks.getByRole("button", { name: "Back to my outline" }),
+  ).toBeFocused();
+  await thanks.getByRole("button", { name: "Back to my outline" }).click();
+  await expect(thanks.getByRole("alert")).toBeVisible();
+  await thanks.getByRole("button", { name: "Choose a theme" }).click();
+  await expect(thanks).toBeHidden();
+  await expect(page).toHaveURL(/settings#appearance$/);
+  await page.reload();
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
+  await expect(
+    page.getByRole("radio", { name: "Leaf", exact: true }),
+  ).toBeEnabled();
+  await expect(thanks).toHaveCount(0);
+  await page.goto("/settings?checkout=canceled");
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Checkout canceled" }),
+  ).toBeVisible();
+  await expect(thanks).toHaveCount(0);
 });
 
 test("free accounts can manage API keys from Connections", async ({ page }) => {

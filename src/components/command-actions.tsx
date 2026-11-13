@@ -29,6 +29,7 @@ import type { CommandCenterAction } from "../data/command-center";
 
 import { useEditorFeatures } from "../data/editor-features";
 import { openFeedbackReport } from "../data/feedback";
+import { useMembership } from "../data/membership";
 import { toggleBookmark } from "../data/mutations";
 import {
   copyOutlineAsMarkdown,
@@ -42,9 +43,11 @@ import { usePluginChrome } from "../plugins/registry";
 import { openChangelog } from "./changelog-opener";
 import { COLOR_THEMES, setColorTheme, useColorTheme } from "./color-theme";
 import { restoreHistory, useHistoryState } from "./history-restore";
+import { openMembership } from "./membership-opener";
 import { openOpmlImport } from "./opml-import-opener";
 import { openFilterInput } from "./query-filter-nav";
 import { openQuickAdd } from "./quick-add-opener";
+import { openSettings } from "./settings-nav";
 import { useShowCompleted } from "./show-completed-provider";
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
 import { useTextSize, type TextSize } from "./text-size-provider";
@@ -72,6 +75,8 @@ export function useGlobalActions(opts: {
   const { daily } = useEditorFeatures();
   const { theme, setTheme } = useTheme();
   const colorTheme = useColorTheme();
+  const { plan, state: membershipState, legacyLeaf } = useMembership();
+  const paid = plan !== null && plan !== "free";
   const { textSize, setTextSize } = useTextSize();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
@@ -227,13 +232,20 @@ export function useGlobalActions(opts: {
     ];
     // Color themes (ADR 0082), then the light/dark Mode.
     for (const t of COLOR_THEMES) {
+      const locked =
+        plan === "free" &&
+        t.id !== "default" &&
+        !(legacyLeaf && t.id === "leaf");
       a.push({
         id: `g:color-theme-${t.id}`,
         label: `Theme: ${t.label}`,
         description:
           colorTheme === t.id
             ? "Current theme"
-            : `Switch to the ${t.label} theme`,
+            : locked
+              ? "Preview. Keep it with Pro or Founding."
+              : `Switch to the ${t.label} theme`,
+        disabled: membershipState !== "ready",
         icon: PaletteIcon,
         scope: "global",
         keywords: [
@@ -243,7 +255,10 @@ export function useGlobalActions(opts: {
           "palette",
           t.label.toLowerCase(),
         ],
-        run: () => setColorTheme(t.id),
+        run: () => {
+          if (locked) openSettings("appearance");
+          setColorTheme(t.id);
+        },
       });
     }
     for (const t of themes) {
@@ -289,11 +304,14 @@ export function useGlobalActions(opts: {
       {
         id: "g:mcp",
         label: "Connect apps (MCP)",
-        description: "Connect an AI agent to your outline",
+        description: paid
+          ? "Connect an AI agent to your outline"
+          : "Included with Pro",
+        disabled: membershipState !== "ready",
         icon: PlugZapIcon,
         scope: "global",
         keywords: ["mcp", "connect", "apps", "agent", "ai", "claude"],
-        run: openConnect,
+        run: () => (paid ? openConnect() : openMembership("connections")),
       },
       {
         id: "g:changelog",
@@ -306,8 +324,8 @@ export function useGlobalActions(opts: {
       },
       {
         id: "g:feedback",
-        label: "Report a bug",
-        description: "Open a pre-filled GitHub issue",
+        label: paid ? "Send feedback" : "Report a bug",
+        description: "Send a private note to Cam without leaving Dotflowy",
         icon: MessageSquareWarningIcon,
         scope: "global",
         keywords: ["feedback", "bug", "report", "issue", "problem", "github"],
@@ -352,6 +370,10 @@ export function useGlobalActions(opts: {
     ];
   }, [
     globalActions,
+    plan,
+    paid,
+    membershipState,
+    legacyLeaf,
     history,
     theme,
     setTheme,
