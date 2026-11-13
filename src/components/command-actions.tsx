@@ -15,6 +15,7 @@ import {
   MessageSquareWarningIcon,
   MonitorIcon,
   MoonIcon,
+  PaletteIcon,
   PlugZapIcon,
   PlusIcon,
   Undo2Icon,
@@ -39,6 +40,7 @@ import { getViewRootId } from "../data/view-state";
 import { signOutAndReload } from "../lib/auth-client";
 import { usePluginChrome } from "../plugins/registry";
 import { openChangelog } from "./changelog-opener";
+import { COLOR_THEMES, setColorTheme, useColorTheme } from "./color-theme";
 import { restoreHistory, useHistoryState } from "./history-restore";
 import { openOpmlImport } from "./opml-import-opener";
 import { openFilterInput } from "./query-filter-nav";
@@ -69,6 +71,7 @@ export function useGlobalActions(opts: {
   const { globalActions } = usePluginChrome();
   const { daily } = useEditorFeatures();
   const { theme, setTheme } = useTheme();
+  const colorTheme = useColorTheme();
   const { textSize, setTextSize } = useTextSize();
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
@@ -222,18 +225,40 @@ export function useGlobalActions(opts: {
       { value: "dark", label: "Dark", icon: MoonIcon },
       { value: "system", label: "System", icon: MonitorIcon },
     ];
+    // Color themes (ADR 0082), then the light/dark Mode.
+    for (const t of COLOR_THEMES) {
+      a.push({
+        id: `g:color-theme-${t.id}`,
+        label: `Theme: ${t.label}`,
+        description:
+          colorTheme === t.id
+            ? "Current theme"
+            : `Switch to the ${t.label} theme`,
+        icon: PaletteIcon,
+        scope: "global",
+        keywords: [
+          "theme",
+          "color",
+          "appearance",
+          "palette",
+          t.label.toLowerCase(),
+        ],
+        run: () => setColorTheme(t.id),
+      });
+    }
     for (const t of themes) {
       a.push({
         id: `g:theme-${t.value}`,
-        label: `Theme: ${t.label}`,
+        label: `Mode: ${t.label}`,
         description:
           theme === t.value
-            ? "Current theme"
-            : `Switch to the ${t.label.toLowerCase()} theme`,
+            ? "Current mode"
+            : `Switch to ${t.label.toLowerCase()} mode`,
         icon: t.icon,
         scope: "global",
         keywords: [
           "theme",
+          "mode",
           "appearance",
           "dark",
           "light",
@@ -330,6 +355,7 @@ export function useGlobalActions(opts: {
     history,
     theme,
     setTheme,
+    colorTheme,
     textSize,
     setTextSize,
     showCompleted,

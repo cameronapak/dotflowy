@@ -27,6 +27,7 @@ const KEYS = {
   weekStrip: "daily:week-strip",
   emptyDays: "daily:empty-days",
   focus: "focus:settings",
+  colorTheme: "appearance:color-theme",
 } as const;
 export type EditorFeature = "bible" | "daily" | "embeds" | "focusSessions";
 /** A Daily notes option that is a plain on/off switch (ADR 0070). */
@@ -62,6 +63,12 @@ const rowSchema = Schema.Union([
     key: Schema.Literal(KEYS.focus),
     settings: focusSettingsSchema,
   }),
+  // Any string: an id from a newer client must not fail the whole decode.
+  // color-theme.ts maps an unknown id to the default theme (ADR 0082).
+  Schema.Struct({
+    key: Schema.Literal(KEYS.colorTheme),
+    theme: Schema.String,
+  }),
 ]);
 type PreferenceRow = Schema.Schema.Type<typeof rowSchema>;
 const isPreferenceKey = Schema.is(
@@ -77,6 +84,7 @@ const isPreferenceKey = Schema.is(
       KEYS.weekStrip,
       KEYS.emptyDays,
       KEYS.focus,
+      KEYS.colorTheme,
     ]),
   }),
 );
@@ -123,6 +131,8 @@ interface FeatureSnapshot {
   weekStrip: boolean;
   emptyDays: EmptyDaysMode;
   focus: FocusSettings;
+  /** The synced color theme id, or null when the account has none (ADR 0082). */
+  colorTheme: string | null;
   ready: boolean;
   error: boolean;
 }
@@ -139,6 +149,7 @@ const INITIAL: FeatureSnapshot = {
   weekStrip: true,
   emptyDays: "show",
   focus: DEFAULT_FOCUS_SETTINGS,
+  colorTheme: null,
   ready: false,
   error: false,
 };
@@ -163,6 +174,9 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
   const weekStripRow = rows.find((r) => r.key === KEYS.weekStrip);
   const emptyDaysRow = rows.find((r) => r.key === KEYS.emptyDays);
   const focusRow = rows.find((r) => r.key === KEYS.focus);
+  const colorThemeRow = rows.find((r) => r.key === KEYS.colorTheme);
+  const colorTheme =
+    colorThemeRow?.key === KEYS.colorTheme ? colorThemeRow.theme : null;
   const focus =
     focusRow?.key === KEYS.focus ? focusRow.settings : DEFAULT_FOCUS_SETTINGS;
   // Temporarily suspend the stream, including saved opt-ins, without changing
@@ -208,6 +222,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     snapshot.weekStrip === weekStrip &&
     snapshot.emptyDays === emptyDays &&
     snapshot.focus === focus &&
+    snapshot.colorTheme === colorTheme &&
     snapshot.ready === ready &&
     snapshot.error === error
   )
@@ -225,6 +240,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     weekStrip,
     emptyDays,
     focus,
+    colorTheme,
     ready,
     error,
   };
@@ -376,6 +392,19 @@ export async function setFocusSettings(settings: FocusSettings): Promise<void> {
         if ("settings" in draft) draft.settings = settings;
       })
     : collection.insert({ key, settings });
+  await transaction.isPersisted.promise;
+}
+
+/** Persist the account's color theme (ADR 0082). Optimistic: a failed save
+ *  rolls back, and the synced snapshot carries the old theme again. */
+export async function setColorThemePreference(theme: string): Promise<void> {
+  await loadEditorFeatures();
+  const key = KEYS.colorTheme;
+  const transaction = collection.has(key)
+    ? collection.update(key, (draft) => {
+        if ("theme" in draft) draft.theme = theme;
+      })
+    : collection.insert({ key, theme });
   await transaction.isPersisted.promise;
 }
 

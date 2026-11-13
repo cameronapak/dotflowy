@@ -597,7 +597,7 @@ function FocusSurface({
           "flex min-w-0 gap-2",
           card
             ? "flex-col gap-1.5"
-            : "mx-auto max-w-[720px] flex-wrap items-center px-6 py-2 max-sm:px-4",
+            : "relative mx-auto max-w-[720px] flex-wrap items-center px-6 py-2 max-sm:px-4",
         )}
       >
         {card && (
@@ -673,17 +673,17 @@ function FocusSurface({
           {controls}
         </div>
       </div>
+      {/* The band drains like the PiP card's wash (ADR 0074): a
+          full-height fill behind the row, not a thin bar. */}
       {fill && !card && (
-        <>
-          <div className="absolute bottom-0 left-0 h-1 w-full bg-primary-foreground/20" />
-          <div
-            className={cn(
-              "absolute bottom-0 left-0 h-1",
-              breaking ? "bg-primary-foreground/50" : "bg-primary-foreground",
-            )}
-            style={{ width: `${progress * 100}%` }}
-          />
-        </>
+        <div
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-y-0 left-0 transition-[width] duration-1000 ease-linear motion-reduce:transition-none",
+            breaking ? "bg-primary-foreground/5" : "bg-primary-foreground/9",
+          )}
+          style={{ width: `${progress * 100}%` }}
+        />
       )}
     </section>
   );

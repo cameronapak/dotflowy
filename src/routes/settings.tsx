@@ -23,6 +23,11 @@ import { toast } from "sonner";
 import { openAppleShortcut } from "../components/apple-shortcut-opener";
 import { CaptureKeysDialog } from "../components/capture-keys-dialog";
 import { CliSetupDialog } from "../components/cli-setup-dialog";
+import {
+  COLOR_THEMES,
+  setColorTheme,
+  useColorTheme,
+} from "../components/color-theme";
 import { DeleteAccountDialog } from "../components/delete-account-dialog";
 import { McpConnectDialog } from "../components/mcp-connect-dialog";
 import { openOpmlImport } from "../components/opml-import-opener";
@@ -1146,15 +1151,54 @@ function PluginsSection() {
 
 function AppearanceSection() {
   const { theme, setTheme } = useTheme();
+  const colorTheme = useColorTheme();
   const { textSize, setTextSize } = useTextSize();
   return (
     <Section title="Appearance">
       <RowGroup>
+        {/* The color theme (ADR 0082). Six choices don't fit beside the
+            label, so they wrap on their own row. */}
+        <div className="flex flex-col gap-3 bg-card px-4 py-3">
+          <div className="text-sm font-medium text-foreground">Theme</div>
+          <div
+            role="radiogroup"
+            aria-label="Theme"
+            className="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-1 rounded-lg bg-muted p-1"
+          >
+            {COLOR_THEMES.map((t) => {
+              const active = t.id === colorTheme;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setColorTheme(t.id)}
+                  className={cn(
+                    "inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[0.8rem] font-medium transition outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    active
+                      ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/10"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="size-3 shrink-0 rounded-full ring-1 ring-foreground/15"
+                    style={{
+                      background: `linear-gradient(135deg, ${t.swatch[0]} 50%, ${t.swatch[1]} 50%)`,
+                    }}
+                  />
+                  <span className="truncate">{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <SettingRow
-          title="Theme"
+          title="Mode"
           action={
             <Segmented
-              label="Theme"
+              label="Mode"
               value={theme}
               onChange={(v) => setTheme(v)}
               options={[

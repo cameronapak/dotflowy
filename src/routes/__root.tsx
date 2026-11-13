@@ -17,6 +17,7 @@ import { AmpFeedback } from "../components/amp-feedback";
 import { AppleShortcutDialog } from "../components/apple-shortcut-dialog";
 import { AuthScreen } from "../components/auth-screen";
 import { ChangelogDialog } from "../components/changelog-dialog";
+import { ColorThemeSync } from "../components/color-theme";
 import { DeleteConfirmDialog } from "../components/delete-confirm-dialog";
 import { HistoryRestoreDialog } from "../components/history-restore";
 import { MirrorPlaces } from "../components/mirror-places";
@@ -37,12 +38,14 @@ import { useExperimentalCaptureEnabled } from "../data/flags";
 import { hardReset, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
+  COLOR_THEME_KEY,
   LEGACY_THEME_KEY,
   THEME_KEY,
   TEXT_SIZE_KEY,
 } from "../lib/storage-keys";
 import { TagColorStyles } from "../plugins/tags/tag-color-menu";
 import "../styles.css";
+import { THEME_COLORS } from "../themes.generated";
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
 // the resolution logic in theme-provider.tsx (same storage key).
@@ -65,6 +68,15 @@ const noFlashThemeScript = `
     if (dark) document.documentElement.classList.add('dark');
     var favicon = document.getElementById('dotflowy-favicon');
     if (favicon) favicon.href = dark ? '${FAVICON_DARK}' : '${FAVICON_LIGHT}';
+    // Color theme (ADR 0082): its classes, and the status bar color, which
+    // must match before the stylesheet can be read. Mirrors color-theme.ts.
+    var colors = ${JSON.stringify(THEME_COLORS)};
+    var id = localStorage.getItem('${COLOR_THEME_KEY}');
+    var c = id && Object.prototype.hasOwnProperty.call(colors, id) ? colors[id] : null;
+    if (c) document.documentElement.classList.add('themed', 'theme-' + id);
+    var bg = c ? c.background[dark ? 1 : 0] : dark ? '#171717' : '#f9f9f9';
+    var metas = document.querySelectorAll('meta[name="theme-color"]');
+    for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', bg);
   } catch (e) {}
 })();
 `;
@@ -167,6 +179,7 @@ function RootComponent() {
                 {experimentalCapture && <AppleShortcutDialog />}
                 <MirrorPlaces />
                 <TagColorStyles />
+                <ColorThemeSync />
                 <SpotlightController />
                 <PluginEditorAppearance />
                 {/* A distinct mechanism from the changelog (ADR 0046): the
@@ -256,18 +269,11 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
           sizes="180x180"
           href="/apple-touch-icon.png"
         />
-        {/* PWA manifest + browser-UI theme color (light/dark). */}
+        {/* PWA manifest + browser-UI theme color. One unscoped tag: the
+            no-flash script sets it for the Mode and color theme, and
+            color-theme.ts keeps it current (ADR 0082). */}
         <link rel="manifest" href="/manifest.webmanifest" />
-        <meta
-          name="theme-color"
-          media="(prefers-color-scheme: light)"
-          content="#ffffff"
-        />
-        <meta
-          name="theme-color"
-          media="(prefers-color-scheme: dark)"
-          content="#171717"
-        />
+        <meta name="theme-color" content="#ffffff" />
         <script dangerouslySetInnerHTML={{ __html: noFlashThemeScript }} />
         <script dangerouslySetInnerHTML={{ __html: noFlashTextSizeScript }} />
         <HeadContent />
