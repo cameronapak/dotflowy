@@ -66,7 +66,9 @@ function corsHeaders(request: Request) {
  */
 export async function proxyPostHog(
   request: Request,
-  fetcher: typeof fetch = fetch,
+  fetcher: (
+    ...args: Parameters<typeof fetch>
+  ) => ReturnType<typeof fetch> = fetch,
 ): Promise<Response> {
   const cors = corsHeaders(request);
 
