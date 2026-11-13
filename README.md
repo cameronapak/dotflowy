@@ -72,7 +72,8 @@ redacted before it reaches agents, not just hidden visually.
 
 The [MCP guide](./docs/mcp.md) covers connections, tools, and security.
 The [Dotflowy CLI](./cli/README.md) uses the same tools, with browser login
-and JSON output for scripts. Use Node.js 22.19.0 or newer:
+or expiring API keys and JSON output for scripts. Manage capture-only,
+read-only, and read/write keys in Settings → Connections → API keys. Use Node.js 22.19.0 or newer:
 
 ```sh
 npm install --global dotflowy

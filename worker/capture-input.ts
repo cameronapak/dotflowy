@@ -19,9 +19,22 @@ export const CaptureBody = Schema.Struct({
   title: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
 });
 
+export const ApiKeyPermission = Schema.Literals(["capture", "read", "write"]);
+export type ApiKeyPermission = typeof ApiKeyPermission.Type;
+
 export const CaptureKeyCreateBody = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)),
-  expiry: Schema.Literals(["never", "30d", "90d", "1y"]),
+  expiry: Schema.optionalKey(Schema.Literals(["30d", "90d"])),
+});
+
+export const ApiKeyCreateBody = Schema.Struct({
+  ...CaptureKeyCreateBody.fields,
+  permission: Schema.optionalKey(ApiKeyPermission),
+});
+
+export const ApiKeyRotateBody = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(36)),
+  expiry: CaptureKeyCreateBody.fields.expiry,
 });
 
 export const CaptureKeyRevokeBody = Schema.Struct({
@@ -65,17 +78,8 @@ export function normalizeCapture(input: typeof CaptureBody.Type) {
 export function captureKeyExpiration(
   expiry: typeof CaptureKeyCreateBody.Type.expiry,
   now: number,
-): number | null {
-  if (expiry === "never") return null;
-  if (expiry === "1y") {
-    const date = new Date(now);
-    const month = date.getUTCMonth();
-    date.setUTCFullYear(date.getUTCFullYear() + 1);
-    // February 29 becomes February 28, rather than rolling into March.
-    if (date.getUTCMonth() !== month) date.setUTCDate(0);
-    return date.getTime();
-  }
-  return now + (expiry === "30d" ? 30 : 90) * 86_400_000;
+): number {
+  return now + (expiry === "90d" ? 90 : 30) * 86_400_000;
 }
 
 export async function captureDigest(value: string): Promise<string> {

@@ -58,10 +58,23 @@ entry. If the keyring is unavailable, login succeeds with a warning and records
 pending cleanup. Unlock the keyring and run `logout` to remove both. Until then,
 logout fails rather than claiming that all saved credentials were removed.
 
-For automation, inject an existing OAuth bearer as `DOTFLOWY_TOKEN` through your
-secret manager. Do not put it in command arguments or shell history. Environment
-tokens override saved credentials and are never persisted or refreshed by the
-CLI. Saved OAuth credentials refresh automatically before expiry.
+For automation, create a personal API key in **Dotflowy Settings → Connections →
+API keys** and inject it as `DOTFLOWY_TOKEN` through your secret manager. Choose
+**Read-only** for outline reads, search, and export, or **Read and write** for all
+tools. **Capture only** keys cannot authenticate the CLI. An existing OAuth bearer
+also works as `DOTFLOWY_TOKEN`. Do not put credentials in command arguments or
+shell history. Environment tokens override saved credentials and are never
+persisted or refreshed by the CLI. Saved OAuth credentials refresh automatically.
+
+API keys expire after 30 days by default, with a 90-day maximum. Dotflowy emails
+verified account owners within seven days of expiration. In Dotflowy Settings,
+rotate a key to replace its secret without changing its permission. Rotation
+invalidates the old secret immediately, so update your secret manager afterward.
+For an overlapping handoff, create a separate replacement, update your secret
+manager, then revoke the old key. Expired or revoked keys stop working without
+waiting for a refresh.
+API keys preserve the MCP paid-plan requirement, limits, and spoiler redaction;
+read-only permissions are enforced by the server, including direct tool calls.
 
 `dotflowy logout` deletes the selected server's local credentials. **It does not
 revoke server tokens or change environment variables.** The current auth provider

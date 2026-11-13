@@ -34,7 +34,6 @@ import { TextSizeProvider } from "../components/text-size-provider";
 import { ThemeProvider } from "../components/theme-provider";
 import { Toaster } from "../components/ui/sonner";
 import { UpdateAvailableToast } from "../components/update-available";
-import { useExperimentalCaptureEnabled } from "../data/flags";
 import { hardReset, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
@@ -147,7 +146,6 @@ export const Route = createRootRoute({
 const PUBLIC_ROUTES = new Set(["/reset-password", "/terms", "/privacy"]);
 
 function RootComponent() {
-  const experimentalCapture = useExperimentalCaptureEnabled();
   // Trailing-slash-tolerant: the router matches `/reset-password/` to the
   // route without normalizing location.pathname, so a naive equality would
   // render the reset page inside the gate and kill the emailed link.
@@ -176,7 +174,7 @@ function RootComponent() {
                 <DeleteConfirmDialog />
                 <HistoryRestoreDialog />
                 <ChangelogDialog />
-                {experimentalCapture && <AppleShortcutDialog />}
+                <AppleShortcutDialog />
                 <MirrorPlaces />
                 <TagColorStyles />
                 <ColorThemeSync />

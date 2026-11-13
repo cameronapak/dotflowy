@@ -98,7 +98,8 @@ export default {
         input.userId,
         {
           name: input.name ?? "fixture key",
-          expiry: input.expiry ?? "never",
+          expiry: input.expiry,
+          permission: input.permission,
         },
         Date.now(),
       );

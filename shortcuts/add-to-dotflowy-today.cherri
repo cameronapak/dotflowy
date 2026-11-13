@@ -15,8 +15,11 @@
  */
 
 #define name Dotflowy
-#define glyph list
-#define color lightblue
+/* The circular glyph and neutral palette echo Dotflowy's dot logo.
+ * Apple only supports built-in glyphs here; the exact logo can be chosen
+ * separately when adding this shortcut to the Home Screen. */
+#define glyph targetAlt
+#define color gray
 #define inputs text, url
 #define from sharesheet, search, spotlight
 
@@ -36,12 +39,29 @@ const captureText = if ShortcutInput {
 /* One capture, one bullet: blank input creates nothing, including no scaffold. */
 const nonblank = matchText('\S', "{captureText}")
 if nonblank {
-	/* No built-in action generates a UUID, so the attempt ID is a UUID-shaped
-	 * opaque per-invocation token. Shortcuts clamps Random Number to a signed
-	 * 32-bit integer, so join two six-digit numbers for the 12-digit tail. */
-	const attemptFirst = randomNumber(100000, 999999)
-	const attemptLast = randomNumber(100000, 999999)
-	const attemptId = "00000000-0000-4000-8000-{attemptFirst}{attemptLast}"
+	/* No built-in action generates a UUID, so build a random version 4 UUID:
+	 * 15 random bytes (120 bits) from Get Random Item, plus the fixed version
+	 * and variant digits. Avoid Number and Random Number: on macOS 26.7.1,
+	 * a setup-question import containing either action shows Calculator's
+	 * icon in the library and editor instead of the glyph. */
+	const hexBytes = splitText('00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f 60 61 62 63 64 65 66 67 68 69 6a 6b 6c 6d 6e 6f 70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f 80 81 82 83 84 85 86 87 88 89 8a 8b 8c 8d 8e 8f 90 91 92 93 94 95 96 97 98 99 9a 9b 9c 9d 9e 9f a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 aa ab ac ad ae af b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 ba bb bc bd be bf c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 ca cb cc cd ce cf d0 d1 d2 d3 d4 d5 d6 d7 d8 d9 da db dc dd de df e0 e1 e2 e3 e4 e5 e6 e7 e8 e9 ea eb ec ed ee ef f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 fa fb fc fd fe ff', ' ')
+	const attemptByte1 = getRandomItem(hexBytes)
+	const attemptByte2 = getRandomItem(hexBytes)
+	const attemptByte3 = getRandomItem(hexBytes)
+	const attemptByte4 = getRandomItem(hexBytes)
+	const attemptByte5 = getRandomItem(hexBytes)
+	const attemptByte6 = getRandomItem(hexBytes)
+	const attemptByte7 = getRandomItem(hexBytes)
+	const attemptByte8 = getRandomItem(hexBytes)
+	const attemptByte9 = getRandomItem(hexBytes)
+	const attemptByte10 = getRandomItem(hexBytes)
+	const attemptByte11 = getRandomItem(hexBytes)
+	const attemptByte12 = getRandomItem(hexBytes)
+	const attemptByte13 = getRandomItem(hexBytes)
+	const attemptByte14 = getRandomItem(hexBytes)
+	const attemptByte15 = getRandomItem(hexBytes)
+	const attemptHex = "{attemptByte1}{attemptByte2}{attemptByte3}{attemptByte4}{attemptByte5}{attemptByte6}{attemptByte7}{attemptByte8}{attemptByte9}{attemptByte10}{attemptByte11}{attemptByte12}{attemptByte13}{attemptByte14}{attemptByte15}"
+	const attemptId = replaceText('^(.{8})(.{4})(.{3})(.{3})(.{12})$', '$1-$2-4$3-8$4-$5', attemptHex, true, true)
 	const captureDate = formatTimestamp(CurrentDate, 'Custom', 'None', 'yyyy-MM-dd')
 	const captureKey = text(key)
 	const response = jsonRequest('https://app.dotflowy.com/api/capture', 'POST', {
@@ -52,16 +72,16 @@ if nonblank {
 		"Authorization": "Bearer {captureKey}",
 		"Content-Type": "application/json"
 	})
-	const saved = getValue(response, 'saved')
 	const nodeId = getValue(response, 'nodeId')
 	const dailyNoteId = getValue(response, 'dailyNoteId')
 	const receiptDate = getValue(response, 'date')
 	const receipt = "{nodeId}\n{dailyNoteId}\n{receiptDate}"
 	const receiptMatch = matchText('(?s)^.+\n.+\n\d{4}-\d{2}-\d{2}$', receipt)
 	/* A Boolean renders as localized text ("Yes" on English macOS), not "true".
-	 * Check its numeric value only after the other receipt fields are present. */
+	 * Check its numeric value only after the other receipt fields are present.
+	 * The If coerces it to a number, so no Number action is needed. */
 	const receiptSaved = if receiptMatch {
-		number(saved)
+		getValue(response, 'saved')
 	} else {
 		text('0')
 	}
@@ -70,6 +90,10 @@ if nonblank {
 	} else {
 		const errorCode = getValue(response, 'error')
 		const errorMessage = getValue(response, 'message')
-		show("Capture failed ({errorCode}): {errorMessage}")
+		if errorCode.text == 'invalid_key' {
+			show('Your Dotflowy key is invalid or expired. Open Dotflowy Settings → Connections → API keys and create a Capture only key. Edit this shortcut and replace the key in its Text action. This capture was not saved.')
+		} else {
+			show("Capture failed ({errorCode}): {errorMessage}")
+		}
 	}
 }

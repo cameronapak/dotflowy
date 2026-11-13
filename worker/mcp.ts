@@ -244,7 +244,8 @@ function handleToolCall(
   id: JsonRpcId,
   params: RpcJson,
   store: OutlineStore,
-  afterTextWrite?: AfterTextWrite,
+  afterTextWrite: AfterTextWrite | undefined,
+  permission: "read" | "write",
 ): Effect.Effect<Response> {
   const call = decodeOrNull(CallToolParamsSchema, params);
   if (!call) {
@@ -256,6 +257,20 @@ function handleToolCall(
   if (!tool)
     return Effect.succeed(
       rpcError(id, INVALID_PARAMS, `unknown tool: ${call.name}`),
+    );
+
+  // Discovery is not authorization: refuse direct calls to hidden write tools.
+  if (permission === "read" && !tool.readOnly)
+    return Effect.succeed(
+      rpcResult(id, {
+        content: [
+          {
+            type: "text",
+            text: "This API key is read-only. Create a Read and write key in Dotflowy Settings → Connections → API keys to make changes.",
+          },
+        ],
+        isError: true,
+      }),
     );
 
   const decodeInput = Schema.decodeUnknownEffect(tool.input);
@@ -297,6 +312,7 @@ function dispatch(
   store: OutlineStore,
   agentAccess: boolean,
   afterTextWrite?: AfterTextWrite,
+  permission: "read" | "write" = "write",
 ): Effect.Effect<Response> {
   // A notification (no id) never gets a JSON-RPC response body, whatever the
   // method — `notifications/initialized` and friends land here.
@@ -309,13 +325,20 @@ function dispatch(
     case "ping":
       return Effect.succeed(rpcResult(id, {}));
     case "tools/list":
-      return Effect.succeed(rpcResult(id, { tools: toolList }));
+      return Effect.succeed(
+        rpcResult(id, {
+          tools:
+            permission === "read"
+              ? toolList.filter((tool) => tool.annotations.readOnlyHint)
+              : toolList,
+        }),
+      );
     case "tools/call":
       // The entitlement gate: initialize/ping/tools/list stay open so a free
       // connection can handshake and see WHY, but every tool call — read AND
       // write — is refused until the plan includes agent access (#170).
       return agentAccess
-        ? handleToolCall(id, message.params, store, afterTextWrite)
+        ? handleToolCall(id, message.params, store, afterTextWrite, permission)
         : Effect.succeed(rpcError(id, UPGRADE_REQUIRED, UPGRADE_MESSAGE));
     default:
       return Effect.succeed(
@@ -343,6 +366,7 @@ export function handleMcp(
   store: OutlineStore,
   agentAccess: boolean,
   afterTextWrite?: AfterTextWrite,
+  permission: "read" | "write" = "write",
 ): Effect.Effect<Response> {
   switch (request.method) {
     case "OPTIONS":
@@ -383,7 +407,13 @@ export function handleMcp(
         rpcError(null, INVALID_REQUEST, issue.message),
       ),
     );
-    return yield* dispatch(message, store, agentAccess, afterTextWrite);
+    return yield* dispatch(
+      message,
+      store,
+      agentAccess,
+      afterTextWrite,
+      permission,
+    );
   }).pipe(
     // The typed error channel only ever carries already-built error Responses.
     Effect.catch((response) => Effect.succeed(response)),

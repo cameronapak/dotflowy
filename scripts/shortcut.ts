@@ -86,30 +86,35 @@ const DEFAULT_SERVER = "https://app.dotflowy.com";
  * Every action the template may contain. Cherri refuses to compile an action it
  * does not define, and this list keeps the compiled output honest: an identifier
  * outside it is one Shortcuts may not recognize.
+ *
+ * Number and Random Number are deliberately absent. On macOS 26.7.1, a fresh
+ * import that answers a setup question shows Calculator's icon in the library
+ * and editor instead of the glyph when either action is present.
  */
 export const ALLOWED_ACTIONS: ReadonlySet<string> = new Set([
   "is.workflow.actions.ask",
   "is.workflow.actions.conditional",
   "is.workflow.actions.downloadurl",
   "is.workflow.actions.format.date",
+  "is.workflow.actions.getitemfromlist",
   "is.workflow.actions.gettext",
   "is.workflow.actions.getvalueforkey",
   "is.workflow.actions.nothing",
   "is.workflow.actions.notification",
-  "is.workflow.actions.number",
-  "is.workflow.actions.number.random",
   "is.workflow.actions.setvariable",
   "is.workflow.actions.showresult",
   "is.workflow.actions.text.match",
+  "is.workflow.actions.text.replace",
+  "is.workflow.actions.text.split",
 ]);
 
 const REQUIRED_ACTIONS = [
   "is.workflow.actions.ask",
   "is.workflow.actions.downloadurl",
   "is.workflow.actions.format.date",
+  "is.workflow.actions.getitemfromlist",
   "is.workflow.actions.getvalueforkey",
   "is.workflow.actions.notification",
-  "is.workflow.actions.number.random",
   "is.workflow.actions.showresult",
   "is.workflow.actions.text.match",
 ];
@@ -120,6 +125,7 @@ const FORBIDDEN_MARKERS = [
   "Bearer dotflowy_",
   "api_key=",
   "dfc_",
+  "dfk_",
 ];
 
 /* --- Cherri ---------------------------------------------------------------- */
@@ -575,7 +581,7 @@ function validateSignedArtifact(): void {
     }
   }
   console.log(
-    `valid Apple-signed envelope (payload was validated before signing): ${SIGNED_OUTPUT}`,
+    `valid Apple-signed envelope (does not compare payload with unsigned input): ${SIGNED_OUTPUT}`,
   );
 }
 

@@ -2,7 +2,49 @@
 
 The official template is the signed [`Dotflowy.shortcut`](../public/shortcuts/Dotflowy.shortcut), distributed at `https://app.dotflowy.com/shortcuts/Dotflowy.shortcut`. It accepts text or a URL from the share sheet and enables Spotlight visibility and input. When launched directly, it asks “What do you want to add to today?”; the standard keyboard dictation button works in that text field. Cancelling or submitting only whitespace sends nothing.
 
-## Release state
+## Scoped-key update
+
+[ADR 0086](./adr/0086-scoped-expiring-api-keys.md) promotes setup to Connections
+and requires new keys to expire after 30 days by default, with a 90-day maximum.
+The Cherri source, unsigned input, and Apple-signed public file now use a gray
+circular glyph inspired by Dotflowy's dot logo and a dedicated invalid/expired-key
+message directing users to **Dotflowy Settings → Connections → API keys**. The
+setup dialog also offers [the exact Dotflowy logo](../public/apple-touch-icon.png)
+for manual Home Screen customization. Apple's documented collection icon options
+remain built-in glyphs and colors, not arbitrary custom images.
+
+The final input was signed on Cam's iCloud-signed-in Mac on 2026-11-13
+(macOS 26.7.1). Two pinned Cherri v2.3.0 builds produced identical bytes;
+Apple signing and validation passed, as did all 15 template tests, including the
+Mac-only credential-rejection test. The final signed file's SHA-256 is
+`1ce388a5ccc897c418e35495fb96e5d3ac796b3fe79fcc2a83a0bda142bc8341`
+(26,926 bytes). This file is prepared locally, not deployed. Installed shortcuts
+do not acquire new actions or icon metadata automatically.
+
+Fresh setup imports on this Mac showed a calculator in the library and editor
+when the workflow contained either Number or Random Number. Removing only one
+was insufficient; removing both fixed the display. Tests ruled out the glyph,
+request URL, and name conflict. The shipped template was also affected.
+The final workflow avoids both actions and retains random capture IDs. A fresh
+setup import of the exact final signed bytes showed the circular glyph in the
+preview, setup, library tile, and editor title, including after relaunching
+Shortcuts. Existing installed copies were not repaired.
+
+Native import exposed Share Sheet and Spotlight input, with one capture-key
+question whose dummy answer persisted in its Text action. A loopback copy of
+the final template displayed the complete 401 `invalid_key` replacement
+instructions, including **Dotflowy Settings** and **This capture was not saved**.
+Success, false-`saved`, and missing-`saved` controls selected the expected branches;
+the latter two retained the previous template's empty generic failure detail.
+Twenty runs produced twenty distinct, schema-valid version 4 UUIDs. A 500
+`server_error` control passed in the initial signing round. No production capture
+was sent. First use can show Shortcuts' network-permission prompt for the host.
+
+Real-iPhone behavior, actual Spotlight input, and a real expired key against the
+deployed Worker remain unverified. The six pre-existing shortcuts were unchanged
+during verification.
+
+## Previous signed release
 
 The local generated file is now an **Apple-signed AEA1 artifact**. Its unsigned
 workflow was compiled from
@@ -18,8 +60,9 @@ The template this replaced was hand-written plist data and shipped two actions
 Shortcuts does not know:
 `is.workflow.actions.matchtext` (macOS rendered “Unknown Action” there) and
 `is.workflow.actions.generateuuid`, which is not a built-in action at all. The
-template now uses `is.workflow.actions.text.match` and two bounded random numbers
-for its attempt ID.
+template switched to `is.workflow.actions.text.match` and initially used two
+bounded random numbers for its attempt ID. The scoped-key update replaces those
+Number actions to fix fresh-import icon rendering.
 
 The deployed installer points directly to the signed file on `app.dotflowy.com`.
 No short URL, Dub destination, or iCloud sharing link is required for official
@@ -55,10 +98,10 @@ revalidation, and ETag headers. The deployed installer was visually checked at
 phone width using mocked account/data APIs, without production writes. Finder
 metadata is excluded through `public/.assetsignore`; live requests for it and
 the private unsigned file returned the HTML fallback, not those files.
-Safari and Home Screen PWA handoff, setup-answer persistence on a fresh import,
-and the full iPhone
-share-sheet and failure-case checks remain unverified. Keep External quick-add
-default-off until those checks pass.
+At that release, Safari and Home Screen PWA handoff, setup-answer persistence on
+a fresh import, and the full iPhone share-sheet and failure-case checks remained
+unverified. The scoped-key update above verifies Mac setup persistence and
+promotes discovery under ADR 0086; the iPhone checks remain outstanding.
 
 The local template now asks only for a Dotflowy capture key. The repository
 contains only the placeholder `PASTE_CAPTURE_KEY_DURING_IMPORT`, never a working
@@ -74,17 +117,17 @@ Sign-in, account selection, and capture-key revocation remain web tasks.
 
 ## Setup surfaces
 
-In **Settings → Experimental**, turn on **External quick-add**. This temporary
-flag defaults off and persists per browser/device as
-`dotflowy:flag:external-capture` (`on` or `off`). It controls discovery, not API
-authorization. Turning it off hides setup without revoking existing keys.
+**Dotflowy Settings → Connections → API keys → Manage** creates and revokes all
+personal API keys. Choose **Capture only** for a shortcut. Read-only keys cannot
+capture, and capture-only keys cannot access MCP or the CLI. New keys default to
+30 days and have a 90-day maximum. Existing long-lived keys receive up to 90 days
+from migration, without extending any earlier expiration. Each key's expiration
+is shown in management; create a replacement before that date, update each
+shortcut or script, then revoke the old key.
 
-**Experimental → Capture keys → Manage** creates and revokes keys for any
-shortcut or script. It does not contain installation instructions.
-
-**Experimental → Apple Shortcut → Set up** and **More → Add Apple Shortcut** open
-the same focused setup dialog. You create a key named **iPhone** by default,
-choose its expiration, and copy it. If automatic copying fails, select the
+**Connections → Apple Shortcut → Set up** opens the focused setup dialog. There
+is no experimental discovery toggle. You create a capture-only key named
+**iPhone** by default, choose its expiration, and copy it. If automatic copying fails, select the
 read-only key field and use your device's **Copy** command. Closing the dialog
 clears the revealed secret. The Settings link leads back to key management.
 
@@ -126,7 +169,8 @@ parameter in this action”). It also assigns distinct conditional grouping IDs
 and remaps conditional-output references to their closing actions. It decodes
 XML newline entities so receipt variable offsets stay correct. Immutable
 conditional outputs for input selection and receipt status replace mutable
-variables, reducing the generated workflow from 40 actions to 37.
+variables. The current generated workflow has 56 actions, including the dedicated
+invalid-key failure branch.
 A signed export of the clean master can be retained
 with the release, but never commit or upload a personalized shortcut containing
 a working key.
@@ -154,7 +198,7 @@ The existing input-selection branch uses that input or prompts when none arrives
 Apple introduced the Spotlight controls in OS 26; test Spotlight input on a
 supported Mac separately from iPhone share-sheet behavior.
 
-Each nonblank invocation creates a UUID-shaped attempt ID by joining two six-digit outputs from the built-in Random Number action. This avoids Shortcuts' signed 32-bit limit, which clamps a single 12-digit random number to `2147483647` and produces an invalid attempt ID. The shortcut formats the phone's current local date as `yyyy-MM-dd` immediately before submission. It sends:
+Each nonblank invocation creates a random version 4 UUID as its attempt ID. Shortcuts has no built-in UUID action, so the template picks 30 random hex digits (120 bits) with **Get Item from List → Random Item** and adds the fixed version and variant digits. It deliberately avoids **Number** and **Random Number**: on macOS 26.7.1, a fresh import that answers the setup question shows Calculator's icon in the library and editor when either action is present. The shortcut formats the phone's current local date as `yyyy-MM-dd` immediately before submission. It sends:
 
 ```http
 POST /api/capture
@@ -242,7 +286,7 @@ separate unsigned input, so a changed source still requires signing before
 publication. Keep the final release sequence build, test, sign, validate.
 The static download headers specify an attachment named `Dotflowy.shortcut`.
 
-Before general release, import the signed file on a current iPhone and verify both direct launch and the share sheet with text and a URL, blank/cancel, a valid key, an invalid key, a server error receipt, and an offline request. Confirm a successful run creates the expected nodes in the phone-local daily note, including a single Markdown task and a nested list. Keep discovery experimental until these checks pass.
+Before claiming iPhone verification, import the signed file on a current iPhone and verify both direct launch and the share sheet with text and a URL, blank/cancel, a valid key, an invalid key, a server error receipt, and an offline request. Confirm a successful run creates the expected nodes in the phone-local daily note, including a single Markdown task and a nested list. Discovery is promoted under ADR 0086; that decision does not establish these device results.
 
 Before claiming that sharing clears the capture key:
 

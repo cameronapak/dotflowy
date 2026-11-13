@@ -24,10 +24,29 @@ import {
 } from "./ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "./ui/field";
 import { Input } from "./ui/input";
-import { NativeSelect, NativeSelectOption } from "./ui/native-select";
 import { Separator } from "./ui/separator";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 
-type Expiry = "never" | "30d" | "90d" | "1y";
+type Expiry = "30d" | "90d";
+type Permission = "capture" | "read" | "write";
+
+const PERMISSIONS = {
+  capture: {
+    label: "Capture only",
+    description:
+      "Append to daily notes. Cannot read, edit, or delete existing content.",
+  },
+  read: {
+    label: "Read-only",
+    description:
+      "Read, search, and export through MCP or the CLI. Cannot change your outline.",
+  },
+  write: {
+    label: "Read and write",
+    description:
+      "All MCP and CLI operations, plus capture. Can edit and delete your outline.",
+  },
+} satisfies Record<Permission, { label: string; description: string }>;
 
 const APPLE_SHORTCUT_URL =
   "https://app.dotflowy.com/shortcuts/Dotflowy.shortcut";
@@ -38,7 +57,8 @@ interface CaptureKeyEntry {
   suffix: string;
   createdAt: number;
   lastUsedAt: number | null;
-  expiresAt: number | null;
+  expiresAt: number;
+  permission: Permission;
 }
 
 interface ApiErrorBody {
@@ -69,7 +89,7 @@ interface CaptureDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function CaptureKeysDialog(props: CaptureDialogProps) {
+export function ApiKeysDialog(props: CaptureDialogProps) {
   return <CaptureDialog {...props} setup={false} />;
 }
 
@@ -77,7 +97,7 @@ export function AppleShortcutSetupDialog(props: CaptureDialogProps) {
   return <CaptureDialog {...props} setup />;
 }
 
-// Both surfaces create the same scoped credential. Only management loads and
+// Both surfaces use the same API. Only management loads and
 // revokes keys; setup stays focused on creating, copying, and installing.
 function CaptureDialog({
   open,
@@ -85,15 +105,21 @@ function CaptureDialog({
   setup,
 }: CaptureDialogProps & { setup: boolean }) {
   const [keys, setKeys] = useState<CaptureKeyEntry[]>([]);
+  const [now, setNow] = useState(() => Date.now());
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [name, setName] = useState(setup ? "iPhone" : "");
-  const [expiry, setExpiry] = useState<Expiry>("never");
+  const [expiry, setExpiry] = useState<Expiry>("30d");
+  const [permission, setPermission] = useState<Permission>("capture");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [secret, setSecret] = useState<{ id: string; value: string } | null>(
-    null,
-  );
+  const [secret, setSecret] = useState<{
+    id: string;
+    value: string;
+    permission: Permission;
+    expiresAt: number;
+    rotated: boolean;
+  } | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const [linkCopyError, setLinkCopyError] = useState(false);
@@ -102,20 +128,26 @@ function CaptureDialog({
     null,
   );
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [confirmRotate, setConfirmRotate] = useState<string | null>(null);
+  const [rotateExpiry, setRotateExpiry] = useState<Expiry>("30d");
+  const [rotating, setRotating] = useState<string | null>(null);
+  const [rotateError, setRotateError] = useState<string | null>(null);
+  const busy = creating || rotating !== null || revoking !== null;
   const loadSequence = useRef(0);
 
   const loadKeys = useCallback(async () => {
     const sequence = ++loadSequence.current;
+    setNow(Date.now());
     setLoading(true);
     setListError(null);
     try {
-      const response = await fetch("/api/capture-keys");
+      const response = await fetch("/api/keys");
       if (!response.ok) {
         throw new Error(
-          await responseError(response, "Couldn't load your capture keys."),
+          await responseError(response, "Couldn't load your API keys."),
         );
       }
-      // SAFETY: This is the fixed GET /api/capture-keys response contract.
+      // SAFETY: This is the fixed GET /api/keys response contract.
       const body = (await response.json()) as { keys: CaptureKeyEntry[] };
       if (sequence === loadSequence.current) setKeys(body.keys);
     } catch (error) {
@@ -123,7 +155,7 @@ function CaptureDialog({
         setListError(
           error instanceof Error
             ? error.message
-            : "Couldn't load your capture keys.",
+            : "Couldn't load your API keys.",
         );
       }
     } finally {
@@ -144,27 +176,41 @@ function CaptureDialog({
         setCopyError(false);
         setLinkCopyError(false);
         setName(setup ? "iPhone" : "");
-        setExpiry("never");
+        setExpiry("30d");
+        setPermission("capture");
         setCreateError(null);
         setRevokeError(null);
         setConfirmRevoke(null);
+        setConfirmRotate(null);
+        setRotateExpiry("30d");
+        setRotateError(null);
       });
     }
     return undefined;
   }, [loadKeys, open, setup]);
 
+  useEffect(() => {
+    if (!open || setup) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [open, setup]);
+
   async function createKey(event: React.FormEvent) {
     event.preventDefault();
     const trimmedName = name.trim();
-    if (!trimmedName || creating || secret) return;
+    if (!trimmedName || busy || secret) return;
     setCreating(true);
     setCreateError(null);
     setSecret(null);
     try {
-      const response = await fetch("/api/capture-keys", {
+      const response = await fetch("/api/keys", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: trimmedName, expiry }),
+        body: JSON.stringify({
+          name: trimmedName,
+          expiry,
+          permission: setup ? "capture" : permission,
+        }),
       });
       if (!response.ok) {
         throw new Error(
@@ -174,13 +220,19 @@ function CaptureDialog({
           ),
         );
       }
-      // SAFETY: This is the fixed POST /api/capture-keys response contract.
+      // SAFETY: This is the fixed POST /api/keys response contract.
       const body = (await response.json()) as {
         key: string;
         entry: CaptureKeyEntry;
       };
       setKeys((current) => [body.entry, ...current]);
-      setSecret({ id: body.entry.id, value: body.key });
+      setSecret({
+        id: body.entry.id,
+        value: body.key,
+        permission: body.entry.permission,
+        expiresAt: body.entry.expiresAt,
+        rotated: false,
+      });
     } catch (error) {
       setCreateError(
         error instanceof Error
@@ -192,19 +244,69 @@ function CaptureDialog({
     }
   }
 
+  async function rotate(target: string) {
+    if (busy || revoking || secret) return;
+    setRotating(target);
+    setRotateError(null);
+    setCopied(false);
+    setCopyError(false);
+    let response: Response | undefined;
+    try {
+      response = await fetch("/api/keys", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: target, expiry: rotateExpiry }),
+      });
+      if (!response.ok)
+        throw new Error(
+          await responseError(
+            response,
+            "Couldn't rotate the API key. Sign in again if needed.",
+          ),
+        );
+      // SAFETY: PATCH /api/keys returns the same one-time key contract as creation.
+      const body = (await response.json()) as {
+        key: string;
+        entry: CaptureKeyEntry;
+      };
+      setKeys((current) =>
+        current.map((key) => (key.id === target ? body.entry : key)),
+      );
+      setSecret({
+        id: body.entry.id,
+        value: body.key,
+        permission: body.entry.permission,
+        expiresAt: body.entry.expiresAt,
+        rotated: true,
+      });
+      setConfirmRotate(null);
+      toast.success("Key rotated");
+    } catch (error) {
+      setRotateError(
+        !response || response.ok
+          ? "Couldn't receive the replacement key. Rotation may have completed. Rotate again to get a new key, then update each connection that uses it."
+          : error instanceof Error
+            ? error.message
+            : "Couldn't rotate the API key.",
+      );
+    } finally {
+      setRotating(null);
+    }
+  }
+
   async function revoke(target: string | "all") {
-    if (revoking) return;
+    if (busy) return;
     setRevoking(target);
     setRevokeError(null);
     try {
-      const response = await fetch("/api/capture-keys", {
+      const response = await fetch("/api/keys", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(target === "all" ? {} : { id: target }),
       });
       if (!response.ok) {
         throw new Error(
-          await responseError(response, "Couldn't revoke the capture key."),
+          await responseError(response, "Couldn't revoke the API key."),
         );
       }
       setKeys((current) =>
@@ -218,9 +320,7 @@ function CaptureDialog({
       toast.success(target === "all" ? "All keys revoked" : "Key revoked");
     } catch (error) {
       setRevokeError(
-        error instanceof Error
-          ? error.message
-          : "Couldn't revoke the capture key.",
+        error instanceof Error ? error.message : "Couldn't revoke the API key.",
       );
     } finally {
       setRevoking(null);
@@ -233,7 +333,7 @@ function CaptureDialog({
       await navigator.clipboard.writeText(secret.value);
       setCopied(true);
       setCopyError(false);
-      toast.success("Capture key copied");
+      toast.success("API key copied");
     } catch {
       setCopyError(true);
     }
@@ -253,9 +353,9 @@ function CaptureDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        // Do not abandon an in-flight creation: the server may have created a
-        // secret that can only be shown in this response.
-        if (creating) return;
+        // Do not abandon an in-flight creation or rotation: the server may
+        // have issued a secret that can only be shown in this response.
+        if (creating || rotating) return;
         onOpenChange(next);
       }}
     >
@@ -268,33 +368,21 @@ function CaptureDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <HugeiconsIcon icon={setup ? SmartPhone01Icon : Key01Icon} />
-            {setup ? "Add Apple Shortcut" : "Capture keys"}
+            {setup ? "Add Apple Shortcut" : "API keys"}
           </DialogTitle>
           <DialogDescription>
             {setup
               ? "Add text and links to today's note from the share sheet or by running a shortcut. Available on every plan."
-              : "Keys let shortcuts and scripts add new items to your daily notes. They can't read, edit, or delete your outline."}
+              : "Create personal API keys for shortcuts, MCP, and the CLI. Give each connection only the access it needs. Existing capture keys remain capture only."}
           </DialogDescription>
         </DialogHeader>
-
-        {setup && (
-          <p className="text-sm text-muted-foreground">
-            Experimental. Installation and capture are not fully tested on
-            iPhone yet. Check today's note if a save cannot be confirmed.
-          </p>
-        )}
 
         <form onSubmit={createKey} className="flex flex-col gap-3">
           <h3 className="text-sm font-medium">
             {setup ? "1. Create a capture key" : "Create a key"}
           </h3>
-          <FieldGroup
-            className={cn(
-              "gap-3",
-              !setup && "sm:grid sm:grid-cols-[1fr_11rem_auto] sm:items-end",
-            )}
-          >
-            <Field data-disabled={creating || !!secret}>
+          <FieldGroup className="gap-3">
+            <Field data-disabled={busy || !!secret}>
               <FieldLabel htmlFor="capture-key-name">Name</FieldLabel>
               <Input
                 id="capture-key-name"
@@ -302,32 +390,82 @@ function CaptureDialog({
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Shortcut or script name"
                 maxLength={80}
-                disabled={creating || !!secret}
+                disabled={busy || !!secret}
               />
             </Field>
-            <Field data-disabled={creating || !!secret}>
-              <FieldLabel htmlFor="capture-key-expiry">Expiration</FieldLabel>
-              <NativeSelect
-                id="capture-key-expiry"
-                value={expiry}
-                onChange={(event) => {
-                  // SAFETY: Every option value is one of the Expiry literals.
-                  setExpiry(event.target.value as Expiry);
+            {!setup && (
+              <Field data-disabled={busy || !!secret}>
+                <FieldLabel id="api-key-permission-label">
+                  Permission
+                </FieldLabel>
+                <ToggleGroup
+                  aria-labelledby="api-key-permission-label"
+                  variant="selection"
+                  className="w-full flex-wrap"
+                  value={[permission]}
+                  onValueChange={(values) => {
+                    const next = values[0];
+                    if (
+                      next === "capture" ||
+                      next === "read" ||
+                      next === "write"
+                    )
+                      setPermission(next);
+                  }}
+                  disabled={busy || !!secret}
+                >
+                  {Object.entries(PERMISSIONS).map(([value, option]) => (
+                    <ToggleGroupItem key={value} value={value}>
+                      <HugeiconsIcon
+                        icon={Tick02Icon}
+                        className={
+                          permission !== value ? "invisible" : undefined
+                        }
+                      />
+                      {option.label}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+                <p className="text-xs text-muted-foreground">
+                  {PERMISSIONS[permission].description}
+                </p>
+              </Field>
+            )}
+            {setup && (
+              <p className="text-sm text-muted-foreground">
+                Capture only: append to daily notes, without reading or changing
+                existing content.
+              </p>
+            )}
+            <Field data-disabled={busy || !!secret}>
+              <FieldLabel id="api-key-expiry-label">Expiration</FieldLabel>
+              <ToggleGroup
+                aria-labelledby="api-key-expiry-label"
+                variant="selection"
+                value={[expiry]}
+                onValueChange={(values) => {
+                  const next = values[0];
+                  if (next === "30d" || next === "90d") setExpiry(next);
                 }}
-                disabled={creating || !!secret}
+                disabled={busy || !!secret}
               >
-                <NativeSelectOption value="never">
-                  No expiration
-                </NativeSelectOption>
-                <NativeSelectOption value="30d">30 days</NativeSelectOption>
-                <NativeSelectOption value="90d">90 days</NativeSelectOption>
-                <NativeSelectOption value="1y">1 year</NativeSelectOption>
-              </NativeSelect>
+                <ToggleGroupItem value="30d">
+                  <HugeiconsIcon
+                    icon={Tick02Icon}
+                    className={expiry !== "30d" ? "invisible" : undefined}
+                  />
+                  30 days
+                </ToggleGroupItem>
+                <ToggleGroupItem value="90d">
+                  <HugeiconsIcon
+                    icon={Tick02Icon}
+                    className={expiry !== "90d" ? "invisible" : undefined}
+                  />
+                  90 days
+                </ToggleGroupItem>
+              </ToggleGroup>
             </Field>
-            <Button
-              type="submit"
-              disabled={creating || !!secret || !name.trim()}
-            >
+            <Button type="submit" disabled={busy || !!secret || !name.trim()}>
               {creating && (
                 <HugeiconsIcon
                   icon={Loading03Icon}
@@ -356,9 +494,19 @@ function CaptureDialog({
             <p className="text-xs text-muted-foreground">
               This key won't be shown again after you close this dialog.
             </p>
+            <p className="text-xs text-muted-foreground">
+              {PERMISSIONS[secret.permission].label} · Expires{" "}
+              {formatDate(secret.expiresAt)}
+            </p>
+            {secret.rotated && (
+              <p className="text-sm">
+                The old key no longer works. Copy this replacement and update
+                your shortcut, app, or DOTFLOWY_TOKEN.
+              </p>
+            )}
             <div className="flex items-center gap-2">
               <Input
-                aria-label="New capture key"
+                aria-label="New API key"
                 value={secret.value}
                 readOnly
                 autoComplete="off"
@@ -431,6 +579,19 @@ function CaptureDialog({
                 <HugeiconsIcon icon={Copy01Icon} data-icon="inline-start" />
                 Copy installation link
               </Button>
+              <p className="text-xs text-muted-foreground">
+                For the Dotflowy logo on your Home Screen,{" "}
+                <a
+                  href="/apple-touch-icon.png"
+                  download="Dotflowy.png"
+                  className="underline underline-offset-4"
+                >
+                  download the Dotflowy icon
+                </a>
+                , then choose that file as the icon when using Add to Home
+                Screen in Shortcuts. The shortcut collection uses Apple's
+                built-in glyphs.
+              </p>
               {linkCopyError && (
                 <Field>
                   <FieldLabel htmlFor="shortcut-install-link">
@@ -460,7 +621,7 @@ function CaptureDialog({
                 else onOpenChange(false);
               }}
             >
-              Manage capture keys in Settings
+              Manage API keys in Settings
             </Link>
           </>
         ) : (
@@ -480,7 +641,11 @@ function CaptureDialog({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => setConfirmRevoke("all")}
+                    disabled={busy}
+                    onClick={() => {
+                      setConfirmRotate(null);
+                      setConfirmRevoke("all");
+                    }}
                   >
                     Revoke all
                   </Button>
@@ -515,14 +680,14 @@ function CaptureDialog({
                 </div>
               ) : keys.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No capture keys yet.
+                  No API keys yet.
                 </p>
               ) : (
                 <ul className="flex flex-col divide-y divide-border rounded-lg ring-1 ring-foreground/10">
                   {keys.map((key) => (
                     <li
                       key={key.id}
-                      className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between"
+                      className="flex flex-col gap-2 p-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">
@@ -530,7 +695,9 @@ function CaptureDialog({
                         </p>
                         <p className="text-xs text-muted-foreground">
                           ••••{key.suffix} · Created {formatDate(key.createdAt)}{" "}
-                          · Last used {formatDate(key.lastUsedAt)} · Expires{" "}
+                          · Last used {formatDate(key.lastUsedAt)} ·{" "}
+                          {PERMISSIONS[key.permission].label} ·{" "}
+                          {key.expiresAt <= now ? "Expired" : "Expires"}{" "}
                           {formatDate(key.expiresAt)}
                         </p>
                       </div>
@@ -540,7 +707,7 @@ function CaptureDialog({
                             type="button"
                             variant="ghost"
                             size="sm"
-                            disabled={revoking !== null}
+                            disabled={busy}
                             onClick={() => setConfirmRevoke(null)}
                           >
                             Cancel
@@ -549,7 +716,7 @@ function CaptureDialog({
                             type="button"
                             variant="destructive"
                             size="sm"
-                            disabled={revoking !== null}
+                            disabled={busy}
                             onClick={() => void revoke(key.id)}
                           >
                             {revoking === key.id && (
@@ -563,16 +730,106 @@ function CaptureDialog({
                           </Button>
                         </div>
                       ) : (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`Revoke ${key.name}`}
-                          disabled={revoking !== null}
-                          onClick={() => setConfirmRevoke(key.id)}
-                        >
-                          <HugeiconsIcon icon={Delete02Icon} />
-                        </Button>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            aria-label={`Rotate ${key.name}`}
+                            disabled={busy || !!secret}
+                            onClick={() => {
+                              setConfirmRevoke(null);
+                              setRotateError(null);
+                              setRotateExpiry("30d");
+                              setConfirmRotate(key.id);
+                            }}
+                          >
+                            Rotate
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Revoke ${key.name}`}
+                            disabled={busy}
+                            onClick={() => {
+                              setConfirmRotate(null);
+                              setConfirmRevoke(key.id);
+                            }}
+                          >
+                            <HugeiconsIcon icon={Delete02Icon} />
+                          </Button>
+                        </div>
+                      )}
+                      {confirmRotate === key.id && (
+                        <div className="flex w-full flex-col gap-3 rounded-lg bg-muted p-3">
+                          <p className="text-sm">
+                            Rotate {key.name}? The old key will stop working
+                            immediately. Its permission stays{" "}
+                            {PERMISSIONS[key.permission].label.toLowerCase()}.
+                            Update each shortcut or script with the replacement.
+                          </p>
+                          <Field>
+                            <FieldLabel id={`rotate-expiry-${key.id}`}>
+                              Replacement expiration
+                            </FieldLabel>
+                            <ToggleGroup
+                              aria-labelledby={`rotate-expiry-${key.id}`}
+                              variant="selection"
+                              value={[rotateExpiry]}
+                              disabled={busy}
+                              onValueChange={(values) => {
+                                const value = values[0];
+                                if (value === "30d" || value === "90d")
+                                  setRotateExpiry(value);
+                              }}
+                            >
+                              <ToggleGroupItem value="30d">
+                                <HugeiconsIcon
+                                  icon={Tick02Icon}
+                                  className={
+                                    rotateExpiry !== "30d"
+                                      ? "invisible"
+                                      : undefined
+                                  }
+                                />
+                                30 days
+                              </ToggleGroupItem>
+                              <ToggleGroupItem value="90d">
+                                <HugeiconsIcon
+                                  icon={Tick02Icon}
+                                  className={
+                                    rotateExpiry !== "90d"
+                                      ? "invisible"
+                                      : undefined
+                                  }
+                                />
+                                90 days
+                              </ToggleGroupItem>
+                            </ToggleGroup>
+                          </Field>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() => setConfirmRotate(null)}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() => void rotate(key.id)}
+                            >
+                              {rotating === key.id
+                                ? "Rotating…"
+                                : "Confirm rotation"}
+                            </Button>
+                          </div>
+                        </div>
                       )}
                     </li>
                   ))}
@@ -582,7 +839,7 @@ function CaptureDialog({
               {confirmRevoke === "all" && (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted p-3">
                   <p className="text-sm">
-                    Revoke every capture key? Existing shortcuts and scripts
+                    Revoke every API key? Existing shortcuts, apps, and scripts
                     will stop working.
                   </p>
                   <div className="flex items-center gap-2">
@@ -590,7 +847,7 @@ function CaptureDialog({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      disabled={revoking !== null}
+                      disabled={busy}
                       onClick={() => setConfirmRevoke(null)}
                     >
                       Cancel
@@ -599,7 +856,7 @@ function CaptureDialog({
                       type="button"
                       variant="destructive"
                       size="sm"
-                      disabled={revoking !== null}
+                      disabled={busy}
                       onClick={() => void revoke("all")}
                     >
                       {revoking === "all" && (
@@ -613,6 +870,11 @@ function CaptureDialog({
                     </Button>
                   </div>
                 </div>
+              )}
+              {rotateError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {rotateError}
+                </p>
               )}
               {revokeError && (
                 <p role="alert" className="text-sm text-destructive">

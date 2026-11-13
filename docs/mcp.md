@@ -18,8 +18,20 @@ shows that app's logo on each node the call creates, and `is:agent` finds them.
 See [ADR 0081](./adr/0081-source-app-attribution.md).
 
 For terminal access, use the [Dotflowy CLI](../cli/README.md). Settings →
-Connections has separate setup actions for MCP apps and the CLI. Both require
-Unlimited or Founding and preserve spoiler redaction. Turning Daily notes off
+Connections has setup actions for MCP apps and the CLI, plus unified API key
+management. Both MCP and CLI require Unlimited or Founding and preserve spoiler
+redaction. Clients that support a manually configured bearer can use a personal
+API key instead of OAuth. Create it in **Dotflowy Settings → Connections → API
+keys**: Read-only permits outline reads, search, and export; Read and write
+permits all tools. The server filters tool discovery and rejects direct write
+calls for a read-only key. Capture only permits `/api/capture`, not MCP or CLI.
+Keys default to 30 days and cannot exceed 90 days. Revocation takes effect on the
+next request. Rotation replaces the secret immediately while preserving permission;
+update every client that uses it. For a handoff without interruption, create a
+separate key, update clients, then revoke the old one. Verified account owners
+receive an email reminder within seven days of expiration. API keys never
+authenticate browser APIs or key management.
+Turning Daily notes off
 in Settings → Plugins does not disable explicit MCP or CLI daily operations.
 
 ## Search with DQL

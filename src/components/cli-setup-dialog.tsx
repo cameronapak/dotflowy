@@ -113,6 +113,14 @@ export function CliSetupDialog({
           ))}
         </ol>
         <p className="text-xs leading-relaxed text-muted-foreground">
+          For scripts, set DOTFLOWY_TOKEN to a personal API key from Dotflowy
+          Settings → Connections → API keys, or an existing OAuth bearer token.
+          Choose Read-only for reads, search, and exports, or Read and write for
+          changes. Capture-only keys cannot run CLI commands. API keys expire
+          after 30 or 90 days; replace the key and update DOTFLOWY_TOKEN before
+          it expires. Browser sign-in with OAuth remains available above.
+        </p>
+        <p className="text-xs leading-relaxed text-muted-foreground">
           CLI commands use the MCP endpoint and require Unlimited or Founding.
           Spoiler text stays redacted, including in CLI exports. For a full
           backup, use the app’s Data exports.

@@ -5,7 +5,8 @@ export type FixtureInput = {
   userId: string;
   password?: string;
   name?: string;
-  expiry?: "never" | "30d" | "90d" | "1y";
+  expiry?: "30d" | "90d";
+  permission?: "capture" | "read" | "write";
   expiresAt?: number | null;
   attemptId?: string;
   date?: string;

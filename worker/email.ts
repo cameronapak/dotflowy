@@ -36,20 +36,22 @@ export interface EmailMessage {
 /**
  * Send a transactional email. Never throws: callers sit on non-enumerable
  * endpoints (a failed reset send must not turn into a distinguishable
- * response), so failures are logged for observability and swallowed. Always
- * provide both html and text (spam score + client compatibility).
+ * response), so failures are logged for observability and swallowed. Returns
+ * true only when the binding accepts the send (not proof of inbox delivery).
+ * Existing fire-and-forget callers may ignore the result. Always provide both
+ * html and text (spam score + client compatibility).
  */
 export async function sendEmail(
   env: EmailEnv,
   message: EmailMessage,
-): Promise<void> {
+): Promise<boolean> {
   if (!env.EMAIL) {
     // No binding in this environment: log the whole message so any embedded
     // URL is copy-pasteable from the console.
     console.log(
       `[email dev fallback] to=${message.to} subject=${JSON.stringify(message.subject)}\n${message.text}`,
     );
-    return;
+    return false;
   }
   try {
     await env.EMAIL.send({
@@ -59,7 +61,9 @@ export async function sendEmail(
       html: message.html,
       text: message.text,
     });
+    return true;
   } catch (err) {
     console.error(`email send failed (to=${message.to}):`, err);
+    return false;
   }
 }
