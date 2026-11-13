@@ -2,7 +2,38 @@
 status: accepted
 ---
 
-# faith.tools PostHog proxy lives on e.dotflowy.com
+# Separate faith.tools analytics from Dotflowy
+
+## Approved replacement, awaiting cutover
+
+Cam approved this separation on November 13, 2026. Use the dedicated
+`faith-tools-analytics` Worker at `e.faith.tools`, with code in faith.tools's
+`analytics/` directory and an independent Wrangler config and deployment
+workflow. It must not share Dotflowy's app Worker, storage bindings, secrets,
+or release lifecycle. Verify hostname availability before provisioning it.
+
+The Dotflowy removal is prepared locally only. Do not merge or deploy it until
+the API-key, Android-share, and mobile-changelog releases finish, the replacement
+passes real ingestion checks, and `e.dotflowy.com` is served outside the Dotflowy app Worker.
+Keep that old hostname working on the replacement for cached and already-open
+faith.tools pages; do not redirect event POSTs. Transfer it only after checking
+Cloudflare's custom-domain handoff and rollback behavior. Subsequent Dotflowy
+deploys and rollbacks must not reclaim it from the analytics Worker.
+
+Move faith.tools's browser `api_host` to the new hostname,
+preserving its PostHog project, US upstreams, `ui_host`, and cookieless settings.
+Server capture and query clients remain direct to PostHog. Retire the old
+hostname only after traffic evidence and separate approval, not after an
+arbitrary DNS TTL.
+
+Remove the proxy's v3.3.1 fragment and its `CHANGELOG.md` bullet. Rebuild both
+sites to clear their JSON feeds and compiled changelog views. Edit the existing
+GitHub v3.3.1 release body as part of the cutover; keep the version, date,
+zoom-out entry, and tag. This is not new user-facing news and gets only an
+empty changeset. Old tagged source and already-loaded bundles remain historical
+copies; do not rewrite tags or reset users' changelog cursors.
+
+## Original decision, accepted November 13, 2026
 
 faith.tools sent its browser analytics through a Val Town reverse proxy
 (`cameronapak/reverse-proxy-posthog-faith-tools`). Val Town is shutting down:

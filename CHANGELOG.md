@@ -22,7 +22,6 @@
 
 ### Patch Changes
 
-- b4c16d8: Serve the faith.tools PostHog reverse proxy on e.dotflowy.com (replaces the retired Val Town val).
 - 7c4c7a1: Keep the node you zoomed out from in view during the zoom animation, including in long outlines.
 
 ## 3.3.0
