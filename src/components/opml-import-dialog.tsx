@@ -1,7 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { CircleCheckIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
+
+import { CircleCheckIcon, LoaderIcon, WarningIcon } from "@/lib/icons";
 
 import { nodesCollection } from "../data/collection";
 import { capture } from "../data/history";
@@ -313,7 +314,7 @@ export function OpmlImportDialog() {
               className="flex flex-col items-center gap-3 py-6"
               data-testid="opml-importing"
             >
-              <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+              <LoaderIcon className="size-6 animate-spin text-muted-foreground" />
               <DialogTitle>Importing…</DialogTitle>
               <DialogDescription>
                 {stage.applied < stage.count
@@ -358,7 +359,7 @@ export function OpmlImportDialog() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <TriangleAlertIcon className="size-4 text-destructive" />
+                  <WarningIcon className="size-4 text-destructive" />
                   {stage.title}
                 </DialogTitle>
                 <DialogDescription data-testid="opml-error">

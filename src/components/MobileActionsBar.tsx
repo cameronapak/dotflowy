@@ -1,12 +1,4 @@
 import {
-  Indent,
-  Outdent,
-  Redo2,
-  SquareCheck,
-  SquareSlash,
-  Undo2,
-} from "lucide-react";
-import {
   Fragment,
   lazy,
   Suspense,
@@ -17,6 +9,14 @@ import {
   type ReactNode,
 } from "react";
 
+import {
+  IndentIcon,
+  OutdentIcon,
+  RedoIcon,
+  SquareCheckIcon,
+  SquareSlashIcon,
+  UndoIcon,
+} from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 import { getOutlineScroller } from "../data/outline-scroll";
@@ -520,10 +520,10 @@ export function MobileActionsBar({
           ) : (
             <>
               <BarButton label="Outdent" onRun={actions.outdent}>
-                <Outdent className="size-5" />
+                <OutdentIcon className="size-5" />
               </BarButton>
               <BarButton label="Indent" onRun={actions.indent}>
-                <Indent className="size-5" />
+                <IndentIcon className="size-5" />
               </BarButton>
               <Divider />
               <BarButton
@@ -531,24 +531,24 @@ export function MobileActionsBar({
                 onRun={actions.undo}
                 disabled={!history.canUndo}
               >
-                <Undo2 className="size-5" />
+                <UndoIcon className="size-5" />
               </BarButton>
               <BarButton
                 label={history.redoLabel}
                 onRun={actions.redo}
                 disabled={!history.canRedo}
               >
-                <Redo2 className="size-5" />
+                <RedoIcon className="size-5" />
               </BarButton>
               <Divider />
               {/* A boxed check, deliberately NOT a bare ✓ — iOS's accessory pill shows a
               bare "Done" check right below, and two identical checks that mean
               different things (complete-bullet vs dismiss-keyboard) read as a bug. */}
               <BarButton label="Toggle complete" onRun={actions.toggleComplete}>
-                <SquareCheck className="size-5" />
+                <SquareCheckIcon className="size-5" />
               </BarButton>
               <BarButton label="Command menu" onRun={actions.insertSlash}>
-                <SquareSlash className="size-5" />
+                <SquareSlashIcon className="size-5" />
               </BarButton>
             </>
           )}

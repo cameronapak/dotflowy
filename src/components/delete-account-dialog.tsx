@@ -1,5 +1,6 @@
-import { Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
+
+import { LoaderIcon, WarningIcon } from "@/lib/icons";
 
 import { deleteUser, hardReset } from "../lib/auth-client";
 import { Button } from "./ui/button";
@@ -86,7 +87,7 @@ export function DeleteAccountDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <TriangleAlertIcon className="size-5 text-destructive" />
+            <WarningIcon className="size-5 text-destructive" />
             Delete your account
           </DialogTitle>
           <DialogDescription>
@@ -136,7 +137,7 @@ export function DeleteAccountDialog({
               variant="destructive"
               disabled={busy || !password}
             >
-              {busy && <Loader2Icon className="animate-spin" />}
+              {busy && <LoaderIcon className="animate-spin" />}
               {busy ? "Deleting…" : "Delete account"}
             </Button>
           </DialogFooter>

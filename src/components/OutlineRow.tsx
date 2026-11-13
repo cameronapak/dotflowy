@@ -1,4 +1,3 @@
-import { ChevronRight, LockIcon } from "lucide-react";
 import {
   Fragment,
   memo,
@@ -7,6 +6,8 @@ import {
   type CSSProperties,
   type RefObject,
 } from "react";
+
+import { ChevronRightIcon, LockIcon } from "@/lib/icons";
 
 import type { QueryFilter } from "../data/filter-query";
 import type { Node } from "../data/schema";
@@ -431,7 +432,7 @@ function RowChrome({
             }
             tabIndex={-1}
           >
-            <ChevronRight size={14} strokeWidth={2.5} />
+            <ChevronRightIcon size={14} />
           </button>
         ) : (
           <span

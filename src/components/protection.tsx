@@ -1,5 +1,7 @@
 import type { ComponentType } from "react";
 
+import { toast } from "sonner";
+
 /**
  * Protected nodes -- the core half of the seam.
  *
@@ -18,8 +20,7 @@ import type { ComponentType } from "react";
  * real, legible block rather than a silent no-op. The plugin overrides the copy
  * only when it cares; the core never depends on it doing so. See ADR 0015.
  */
-import { ShieldIcon } from "lucide-react";
-import { toast } from "sonner";
+import { ShieldIcon } from "@/lib/icons";
 
 import type { NodeProtection } from "../plugins/types";
 
@@ -159,11 +160,11 @@ export function ProtectionIndicator({
 }: {
   size?: number;
   label?: string;
-  icon?: ComponentType<{ size?: number; strokeWidth?: number }>;
+  icon?: ComponentType<{ size?: number }>;
 }) {
   return (
     <span className="protection-indicator" title={label} aria-label={label}>
-      <Icon size={size} strokeWidth={2.5} />
+      <Icon size={size} />
     </span>
   );
 }

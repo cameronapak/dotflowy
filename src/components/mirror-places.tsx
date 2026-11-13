@@ -1,5 +1,4 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronRight, CopyPlus } from "lucide-react";
 import {
   Fragment,
   useEffect,
@@ -7,6 +6,8 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+
+import { ChevronRightIcon, CopyPlusIcon } from "@/lib/icons";
 
 import { flattenNodeText } from "../data/node-links";
 import {
@@ -129,7 +130,7 @@ function MirrorPlacesInner({
       <DialogContent className="gap-0 p-0 sm:max-w-md">
         <DialogHeader className="min-w-0 px-4 pt-4 pb-2">
           <DialogTitle className="flex items-center gap-1.5 text-base">
-            <CopyPlus className="size-4 shrink-0 text-muted-foreground" />
+            <CopyPlusIcon className="size-4 shrink-0 text-muted-foreground" />
             Appears in {places.length} places
           </DialogTitle>
           <DialogDescription className="line-clamp-4 text-left">
@@ -183,7 +184,7 @@ function PlaceRow({
           {place.isSource ? "Source" : "Mirror"}
         </Badge>
         <Crumbs crumbs={crumbs} />
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
       </button>
     </li>
   );

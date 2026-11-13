@@ -10,7 +10,7 @@
 // no logic with a node link (no fold/reveal, no unfurl, no bracket editing --
 // the chip is a BibleChip-class atom, backspace deletes it whole).
 
-import { CalendarDaysIcon, Link2 } from "lucide-react";
+import { CalendarIcon, LinkIcon } from "@/lib/icons";
 
 import type { Node } from "../../data/tree";
 
@@ -126,7 +126,7 @@ export default definePlugin({
           key: `date:${s.key}`,
           render: () => (
             <span className="flex min-w-0 items-center gap-1.5">
-              <CalendarDaysIcon
+              <CalendarIcon
                 className="size-3.5 shrink-0 text-muted-foreground"
                 aria-hidden="true"
               />
@@ -159,7 +159,7 @@ export default definePlugin({
           key: n.id,
           render: () => (
             <span className="flex min-w-0 items-center gap-1.5">
-              <Link2
+              <LinkIcon
                 className="size-3.5 shrink-0 text-muted-foreground"
                 aria-hidden="true"
               />

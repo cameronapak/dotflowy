@@ -1,5 +1,6 @@
-import { ExternalLinkIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+
+import { ExternalLinkIcon } from "@/lib/icons";
 
 import type { Bump, Release } from "../data/changelog-data";
 

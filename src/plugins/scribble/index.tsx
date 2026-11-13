@@ -1,6 +1,6 @@
-import { PencilEdit02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useSyncExternalStore } from "react";
+
+import { PencilIcon } from "@/lib/icons";
 import "@fontsource/redacted-script/400.css";
 
 import { hasWindow } from "../../env";
@@ -46,10 +46,6 @@ function setEnabled(next: boolean) {
   for (const notify of listeners) notify();
 }
 
-function ScribbleIcon({ className }: { className?: string }) {
-  return <HugeiconsIcon icon={PencilEdit02Icon} className={className} />;
-}
-
 function ScribbleIndicator() {
   const on = useSyncExternalStore(subscribe, enabled, () => false);
   if (!on) return null;
@@ -62,7 +58,7 @@ function ScribbleIndicator() {
       title="Scribble mode is on. Click to turn off."
       onClick={() => setEnabled(false)}
     >
-      <ScribbleIcon />
+      <PencilIcon />
     </Button>
   );
 }
@@ -74,7 +70,7 @@ export default definePlugin({
       id: "toggle",
       label: `Turn ${enabled() ? "off" : "on"} Scribble mode`,
       description: "Scribble all node text, including the active node",
-      icon: ScribbleIcon,
+      icon: PencilIcon,
       keywords: ["scribble", "font", "writing", "focus"],
       menuLabel: "Scribble mode",
       checked: enabled(),

@@ -6,7 +6,7 @@
 // The pure link layer (parse/strip/encode) stays in src/data/links.ts; this is
 // just the decoration half expressed as El descriptors.
 
-import { LinkIcon } from "lucide-react";
+import { LinkIcon } from "@/lib/icons";
 
 import {
   getSelectionRange,

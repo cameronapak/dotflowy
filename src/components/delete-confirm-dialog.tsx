@@ -1,6 +1,7 @@
-import { Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+
+import { LoaderIcon, WarningIcon } from "@/lib/icons";
 
 import { nodesCollection } from "../data/collection";
 import { capture } from "../data/history";
@@ -133,7 +134,7 @@ export function DeleteConfirmDialog() {
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <TriangleAlertIcon className="size-4 text-destructive" />
+                <WarningIcon className="size-4 text-destructive" />
                 Delete {stage.req.count.toLocaleString()} bullets?
               </DialogTitle>
               <DialogDescription data-testid="delete-confirm-summary">
@@ -168,7 +169,7 @@ export function DeleteConfirmDialog() {
             className="flex flex-col items-center gap-3 py-6"
             data-testid="delete-deleting"
           >
-            <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+            <LoaderIcon className="size-6 animate-spin text-muted-foreground" />
             <DialogTitle>Deleting…</DialogTitle>
             <DialogDescription>
               {stage.applied < stage.count
@@ -181,7 +182,7 @@ export function DeleteConfirmDialog() {
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <TriangleAlertIcon className="size-4 text-destructive" />
+                <WarningIcon className="size-4 text-destructive" />
                 Delete failed
               </DialogTitle>
               <DialogDescription>

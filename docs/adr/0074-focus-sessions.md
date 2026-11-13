@@ -16,7 +16,9 @@ a session never dims the outline.
   caret. "Focus on this page…" in the View menu starts one on the current zoom
   root and is hidden at Home. The picker offers 15, 25, 45, or 60 minutes,
   Pomodoro, or a custom length, and remembers the last choice. Starting does not
-  move you or change the node.
+  move you or change the node. Focus session actions use a stopwatch icon to
+  distinguish timed work from Spotlight's view-mode icon. An hourglass was
+  considered, but can also suggest waiting rather than starting a session.
 - **One at a time.** Starting a new session while one runs shows
   "Replaces: …" in the picker. The old session ends as Let go with no
   reflection prompt. While a session runs, the View menu also offers

@@ -1,5 +1,3 @@
-import { ArrowLeft01Icon, Search01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import {
   useLocation,
   useNavigate,
@@ -7,7 +5,6 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch, type IFuseOptions } from "fuse.js";
-import { BookmarkIcon, ChevronRightIcon, FilterIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -18,6 +15,13 @@ import {
   type ReactNode,
 } from "react";
 
+import {
+  BookmarkIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  FilterIcon,
+  SearchIcon,
+} from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 import type { PluginDef, SearchAction } from "../plugins/types";
@@ -861,7 +865,7 @@ export function FindButton() {
           />
         }
       >
-        <HugeiconsIcon icon={Search01Icon} />
+        <SearchIcon />
       </TooltipTrigger>
       <TooltipContent>
         Find everywhere <Kbd>⌘K</Kbd>
@@ -887,7 +891,7 @@ export function BackToFind() {
           openNodeSwitcher(previous);
         }}
       >
-        <HugeiconsIcon icon={ArrowLeft01Icon} />
+        <ChevronLeftIcon />
         Back to search
       </Button>
     </div>

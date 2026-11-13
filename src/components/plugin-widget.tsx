@@ -7,7 +7,7 @@
 // 0017's caret machinery), and the browser re-upgrades it on every innerHTML
 // parse. On connect it mounts a React root rendering the token's component; on
 // disconnect it unmounts. So the hot path stays string-based while the chip's
-// interior is true TSX (components, lucide icons, Tailwind classes -- no plugin
+// interior is true TSX (components, Hugeicons, Tailwind classes -- no plugin
 // CSS).
 //
 // One generic element, not one per plugin: the registry registers each widget

@@ -5,7 +5,7 @@
 // Detection is liberal-regex-PROPOSES (BIBLE_REF_PATTERN) /
 // grab-bcv-parser-DISPOSES (resolveBibleRef returns null -> the core renders raw
 // text). The chip is an ATOMIC WIDGET (ADR 0006): Seam A's React mode, so the
-// chip is REAL TSX (BibleChip -- lucide icons + Tailwind classes) mounted inside
+// chip is REAL TSX (BibleChip -- Hugeicons + Tailwind classes) mounted inside
 // a `<dotflowy-widget>` atom, with NO plugin CSS. The atom carries its source in
 // `data-src`, so `readSource`/the caret math treat it as one opaque unit (the
 // caret jumps over it). The pure layer (pattern + parse + URL) lives in ./bible.ts.

@@ -65,8 +65,8 @@ export type Json =
 
 /**
  * Seam A (React mode -- ADR 0006): an ATOMIC widget. Unlike an `El` (serialized
- * to an innerHTML string), a widget renders REAL TSX -- a component, lucide
- * icons, Tailwind classes, no plugin CSS. The core serializes it to one custom
+ * to an innerHTML string), a widget renders REAL TSX -- a component, Hugeicons,
+ * Tailwind classes, no plugin CSS. The core serializes it to one custom
  * element that is an opaque atom (`contenteditable="false"` + `data-src`, so the
  * existing caret math jumps over it and `readSource` reads `source`, never the
  * rendered interior), then mounts the token's `component` with `props` when the
@@ -380,8 +380,8 @@ export interface CommandSpec {
   id: string;
   label: string;
   description: string;
-  /** The option's leading icon. Any component taking `className` works (lucide
-   *  icons do); the core renders it -- so the type stays icon-library-agnostic. */
+  /** The option's leading icon. Any component taking `className` works; the
+   *  core renders it, so the type stays icon-library-agnostic. */
   icon: ComponentType<{ className?: string }>;
   /** Extra fuzzy-match terms beyond the label. */
   keywords: string[];
@@ -508,7 +508,7 @@ export interface NodeProtection {
    *  renders it in the shared protection position on rows and zoomed titles.
    *  Omit for the generic core protection indicator. */
   indicator?: {
-    icon: ComponentType<{ size?: number; strokeWidth?: number }>;
+    icon: ComponentType<{ size?: number }>;
     label: string;
   };
   /** General "why" toasted for any rejected action, overriding the core default.

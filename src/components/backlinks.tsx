@@ -15,8 +15,9 @@
 // mid-list).
 
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronRight, Link2 } from "lucide-react";
 import { useState } from "react";
+
+import { ChevronRightIcon, LinkIcon } from "@/lib/icons";
 
 import type { Node } from "../data/tree";
 
@@ -61,7 +62,7 @@ export function Backlinks({ nodeId }: { nodeId: string }) {
         onClick={() => setOpen(true)}
         className="mt-1 mb-3 inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
-        <Link2 className="size-3.5" aria-hidden="true" />
+        <LinkIcon className="size-3.5" aria-hidden="true" />
         {count} backlink{count === 1 ? "" : "s"}
       </button>
       {open && (
@@ -117,7 +118,7 @@ function BacklinksDialog({
       <DialogContent className="gap-0 p-0 sm:max-w-md">
         <DialogHeader className="min-w-0 px-4 pt-4 pb-2">
           <DialogTitle className="flex items-center gap-1.5 text-base">
-            <Link2 className="size-4 shrink-0 text-muted-foreground" />
+            <LinkIcon className="size-4 shrink-0 text-muted-foreground" />
             {referrers.length} backlink{referrers.length === 1 ? "" : "s"}
           </DialogTitle>
           <DialogDescription className="text-left">
@@ -138,7 +139,7 @@ function BacklinksDialog({
                   </span>
                   <Crumbs crumbs={crumbsFor(index, referrer.id)} />
                 </span>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
               </button>
             </li>
           ))}

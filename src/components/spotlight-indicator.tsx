@@ -1,4 +1,4 @@
-import { FocusIcon } from "lucide-react";
+import { FocusIcon } from "@/lib/icons";
 
 import { setSpotlightEnabled, useSpotlightEnabled } from "./spotlight-mode";
 import { Button } from "./ui/button";

@@ -22,7 +22,7 @@
 // desktop selection toolbar's Eye button (ADR 0036) is wired in
 // SelectionFormatToolbar.tsx via the shared plain-marker toggle.
 
-import { EyeOffIcon } from "lucide-react";
+import { SpoilerIcon } from "@/lib/icons";
 
 import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
 import { SPOILER_PATTERN, spoilerInterior } from "../../data/spoiler";
@@ -127,7 +127,7 @@ export default definePlugin({
       id: "spoiler",
       label: "Spoiler",
       description: "Wrap in ||spoiler|| (hidden from humans, redacted from AI)",
-      icon: EyeOffIcon,
+      icon: SpoilerIcon,
       keywords: ["spoiler", "hide", "redact", "secret", "mask", "markdown"],
       available: () => true,
       // Wrap is caret/selection-scoped -- excluded from the Cmd+K command

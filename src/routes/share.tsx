@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Loader2Icon } from "lucide-react";
 import { useRef, useState } from "react";
+
+import { LoaderIcon } from "@/lib/icons";
 
 import { Button } from "../components/ui/button";
 import { localDateKey } from "../data/date-links";
@@ -162,7 +163,7 @@ function SharePage() {
             Cancel
           </Button>
           <Button className="flex-1" disabled={saving} onClick={add}>
-            {saving && <Loader2Icon className="animate-spin" />}
+            {saving && <LoaderIcon className="animate-spin" />}
             Add to Today
           </Button>
         </div>

@@ -13,10 +13,10 @@
 // instead of corrupting the line -- the Edit Link popover's contract. A mirror
 // row edits its SOURCE node (`mirrorOf`), matching where the text lives.
 
-import { Ban, Check } from "lucide-react";
 import { useRef } from "react";
 import { createPortal } from "react-dom";
 
+import { BanIcon, CheckIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 import type { NodeCommands } from "../../components/node-commands";
@@ -130,7 +130,7 @@ export function HighlightColorMenu({
           className={ROW_CLASS}
           onClick={() => onPick(color)}
         >
-          <Check
+          <CheckIcon
             className={cn(
               "size-3.5 shrink-0",
               current !== color && "invisible",
@@ -154,7 +154,7 @@ export function HighlightColorMenu({
         className={cn(ROW_CLASS, "text-muted-foreground")}
         onClick={() => onPick(null)}
       >
-        <Ban className="size-3.5 shrink-0" />
+        <BanIcon className="size-3.5 shrink-0" />
         Remove highlight
       </button>
     </div>,

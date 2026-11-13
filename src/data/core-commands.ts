@@ -1,14 +1,12 @@
-import { LeftToRightListNumberIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import {
   AlignLeftIcon,
   CopyPlusIcon,
-  CornerUpRightIcon,
+  ForwardIcon,
   LockIcon,
-  Trash2Icon,
+  NumberedIcon,
+  TrashIcon,
   UnlockIcon,
-} from "lucide-react";
-import { createElement } from "react";
+} from "@/lib/icons";
 
 import type { CommandSpec } from "../plugins/types";
 
@@ -42,9 +40,6 @@ export const paragraphCommand: CommandSpec = {
   run: (id, ctx) => ctx.mutations.onSetKind(id, "paragraph"),
   runMany: (ids, ctx) => ctx.mutations.onSetKind(ids, "paragraph"),
 };
-
-const NumberedIcon: CommandSpec["icon"] = (props) =>
-  createElement(HugeiconsIcon, { ...props, icon: LeftToRightListNumberIcon });
 
 export const numberedCommand: CommandSpec = {
   id: "numbered",
@@ -140,7 +135,7 @@ export const CORE_COMMANDS: CommandSpec[] = [
     id: "move",
     label: "Move",
     description: "Move under another node",
-    icon: CornerUpRightIcon,
+    icon: ForwardIcon,
     keywords: ["move", "reparent", "under", "into", "relocate", "home"],
     available: () => true,
     run: (id, ctx) => ctx.mutations.onRequestMove(id),
@@ -171,7 +166,7 @@ export const CORE_COMMANDS: CommandSpec[] = [
     id: "delete",
     label: "Delete",
     description: "Delete this node and its subtree",
-    icon: Trash2Icon,
+    icon: TrashIcon,
     keywords: ["delete", "remove", "trash", "destroy"],
     available: () => true,
     run: (id, ctx) => ctx.mutations.onDeleteNode(id),

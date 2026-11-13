@@ -1,16 +1,16 @@
-import {
-  Tick02Icon,
-  Copy01Icon,
-  Key01Icon,
-  SmartPhone01Icon,
-  Loading03Icon,
-  RefreshIcon,
-  Delete02Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+
+import {
+  CheckIcon,
+  CopyIcon,
+  KeyIcon,
+  LoaderIcon,
+  RefreshIcon,
+  SmartphoneIcon,
+  TrashIcon,
+} from "@/lib/icons";
 
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
@@ -367,7 +367,7 @@ function CaptureDialog({
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <HugeiconsIcon icon={setup ? SmartPhone01Icon : Key01Icon} />
+            {setup ? <SmartphoneIcon /> : <KeyIcon />}
             {setup ? "Add Apple Shortcut" : "API keys"}
           </DialogTitle>
           <DialogDescription>
@@ -416,8 +416,7 @@ function CaptureDialog({
                 >
                   {Object.entries(PERMISSIONS).map(([value, option]) => (
                     <ToggleGroupItem key={value} value={value}>
-                      <HugeiconsIcon
-                        icon={Tick02Icon}
+                      <CheckIcon
                         className={
                           permission !== value ? "invisible" : undefined
                         }
@@ -450,15 +449,13 @@ function CaptureDialog({
                 disabled={busy || !!secret}
               >
                 <ToggleGroupItem value="30d">
-                  <HugeiconsIcon
-                    icon={Tick02Icon}
+                  <CheckIcon
                     className={expiry !== "30d" ? "invisible" : undefined}
                   />
                   30 days
                 </ToggleGroupItem>
                 <ToggleGroupItem value="90d">
-                  <HugeiconsIcon
-                    icon={Tick02Icon}
+                  <CheckIcon
                     className={expiry !== "90d" ? "invisible" : undefined}
                   />
                   90 days
@@ -467,11 +464,7 @@ function CaptureDialog({
             </Field>
             <Button type="submit" disabled={busy || !!secret || !name.trim()}>
               {creating && (
-                <HugeiconsIcon
-                  icon={Loading03Icon}
-                  data-icon="inline-start"
-                  className="animate-spin"
-                />
+                <LoaderIcon data-icon="inline-start" className="animate-spin" />
               )}
               {creating ? "Creating…" : "Create key"}
             </Button>
@@ -520,9 +513,9 @@ function CaptureDialog({
                 onClick={() => void copySecret()}
               >
                 {copied ? (
-                  <HugeiconsIcon icon={Tick02Icon} data-icon="inline-start" />
+                  <CheckIcon data-icon="inline-start" />
                 ) : (
-                  <HugeiconsIcon icon={Copy01Icon} data-icon="inline-start" />
+                  <CopyIcon data-icon="inline-start" />
                 )}
                 {copied ? "Copied" : "Copy"}
               </Button>
@@ -576,7 +569,7 @@ function CaptureDialog({
                 open it in Safari.
               </p>
               <Button variant="outline" onClick={() => void copyInstallLink()}>
-                <HugeiconsIcon icon={Copy01Icon} data-icon="inline-start" />
+                <CopyIcon data-icon="inline-start" />
                 Copy installation link
               </Button>
               <p className="text-xs text-muted-foreground">
@@ -654,11 +647,7 @@ function CaptureDialog({
 
               {loading ? (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <HugeiconsIcon
-                    icon={Loading03Icon}
-                    className="animate-spin"
-                  />{" "}
-                  Loading keys…
+                  <LoaderIcon className="animate-spin" /> Loading keys…
                 </p>
               ) : listError ? (
                 <div className="flex items-center justify-between gap-3">
@@ -671,11 +660,7 @@ function CaptureDialog({
                     size="sm"
                     onClick={() => void loadKeys()}
                   >
-                    <HugeiconsIcon
-                      icon={RefreshIcon}
-                      data-icon="inline-start"
-                    />{" "}
-                    Retry
+                    <RefreshIcon data-icon="inline-start" /> Retry
                   </Button>
                 </div>
               ) : keys.length === 0 ? (
@@ -720,8 +705,7 @@ function CaptureDialog({
                             onClick={() => void revoke(key.id)}
                           >
                             {revoking === key.id && (
-                              <HugeiconsIcon
-                                icon={Loading03Icon}
+                              <LoaderIcon
                                 data-icon="inline-start"
                                 className="animate-spin"
                               />
@@ -757,7 +741,7 @@ function CaptureDialog({
                               setConfirmRevoke(key.id);
                             }}
                           >
-                            <HugeiconsIcon icon={Delete02Icon} />
+                            <TrashIcon />
                           </Button>
                         </div>
                       )}
@@ -785,8 +769,7 @@ function CaptureDialog({
                               }}
                             >
                               <ToggleGroupItem value="30d">
-                                <HugeiconsIcon
-                                  icon={Tick02Icon}
+                                <CheckIcon
                                   className={
                                     rotateExpiry !== "30d"
                                       ? "invisible"
@@ -796,8 +779,7 @@ function CaptureDialog({
                                 30 days
                               </ToggleGroupItem>
                               <ToggleGroupItem value="90d">
-                                <HugeiconsIcon
-                                  icon={Tick02Icon}
+                                <CheckIcon
                                   className={
                                     rotateExpiry !== "90d"
                                       ? "invisible"
@@ -860,8 +842,7 @@ function CaptureDialog({
                       onClick={() => void revoke("all")}
                     >
                       {revoking === "all" && (
-                        <HugeiconsIcon
-                          icon={Loading03Icon}
+                        <LoaderIcon
                           data-icon="inline-start"
                           className="animate-spin"
                         />

@@ -1,5 +1,6 @@
-import { Ellipsis } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
+
+import { MoreIcon } from "@/lib/icons";
 
 import type { Node } from "../data/tree";
 import type { PluginContext, SlotPosition } from "../plugins/types";
@@ -131,7 +132,7 @@ export function NodeDecorations({
           onClick={handleExpand}
           tabIndex={-1}
         >
-          <Ellipsis size={14} />
+          <MoreIcon size={14} />
         </button>
       )}
     </span>

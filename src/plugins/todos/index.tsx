@@ -12,8 +12,7 @@
 // Backspace-on-the-checkbox demotion read `completed`/`isTask` in OutlineRow --
 // they await a row-decoration / reserved-key seam.
 
-import { ListIcon, SquareCheckIcon } from "lucide-react";
-
+import { ListIcon, SquareCheckIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/plugins/kit";
 

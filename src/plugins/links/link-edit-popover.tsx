@@ -7,15 +7,10 @@
 // changes underneath it (another device, a late unfurl), Done drops the edit
 // rather than guessing which occurrence the user meant.
 
-import {
-  LinkSquare02Icon,
-  TextIcon,
-  Link01Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { EmbedIcon, LinkIcon, TextIcon } from "@/lib/icons";
 import {
   Button,
   Input,
@@ -377,14 +372,14 @@ export function LinkEditPopover({
                 value="link"
                 className="h-16 min-w-0 flex-1 flex-col gap-1"
               >
-                <HugeiconsIcon icon={Link01Icon} />
+                <LinkIcon />
                 Link Title
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="plain"
                 className="h-16 min-w-0 flex-1 flex-col gap-1"
               >
-                <HugeiconsIcon icon={TextIcon} />
+                <TextIcon />
                 Plain URL
               </ToggleGroupItem>
               <ToggleGroupItem
@@ -395,7 +390,7 @@ export function LinkEditPopover({
                 }
                 className="h-16 min-w-0 flex-1 flex-col gap-1"
               >
-                <HugeiconsIcon icon={LinkSquare02Icon} />
+                <EmbedIcon />
                 Embed
               </ToggleGroupItem>
             </ToggleGroup>

@@ -1,5 +1,3 @@
-import { Home01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { TabBar } from "@onlymoein/liquidglass";
 import {
   Link,
@@ -14,6 +12,8 @@ import {
   useState,
   type ComponentProps,
 } from "react";
+
+import { HomeIcon } from "@/lib/icons";
 
 import type { HeaderSlotSpec, PluginContext } from "../plugins/types";
 
@@ -101,7 +101,7 @@ export default function MobileNavigation({
       value: "home",
       label: "Home",
       href: "/",
-      icon: <HugeiconsIcon icon={Home01Icon} aria-hidden="true" />,
+      icon: <HomeIcon aria-hidden="true" />,
     },
     ...destinations,
   ];

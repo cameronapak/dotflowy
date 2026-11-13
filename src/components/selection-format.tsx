@@ -3,17 +3,17 @@
 // read. The desktop floating toolbar and the mobile actions bar's format mode
 // both render from FORMAT_BUTTONS, so the two can't drift apart.
 
+import { useEffect, type ComponentType } from "react";
+
 import {
   BoldIcon,
-  EyeOffIcon,
   HighlighterIcon,
   ItalicIcon,
   LinkIcon,
+  SpoilerIcon,
   StrikethroughIcon,
   UnderlineIcon,
-  type LucideIcon,
-} from "lucide-react";
-import { useEffect } from "react";
+} from "@/lib/icons";
 
 import { getHistoryState } from "../data/history";
 import { getSelectedAtom, getSelectionRange } from "./inline-code";
@@ -91,7 +91,7 @@ export function useNativeFormatInput(
 export interface FormatButton {
   key: string;
   label: string;
-  Icon: LucideIcon;
+  Icon: ComponentType<{ className?: string }>;
   /** Buttons in the same group sit together; a divider separates groups. */
   group: number;
   /** The marker whose wrap lights the button. Link is create-only, so none. */
@@ -153,7 +153,7 @@ export const FORMAT_BUTTONS: readonly FormatButton[] = [
   {
     key: "spoiler",
     label: "Spoiler",
-    Icon: EyeOffIcon,
+    Icon: SpoilerIcon,
     group: 1,
     marker: SPOILER,
     action: toggle(SPOILER),

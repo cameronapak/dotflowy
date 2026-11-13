@@ -2,6 +2,8 @@
 
 Status: accepted (2026-07-10) — design settled, implementation not started.
 
+> **Amended 2026-11-13:** the app-wide icon consolidation uses Hugeicons `TextAlignLeftIcon` at its default stroke for the paragraph glyph. Its position, size, and zoom/drag behavior are unchanged.
+
 > **Amended 2026-07-18:** the paragraph glyph is now lucide `AlignLeft`, not `Pilcrow` — the pilcrow read visually unbalanced and too harsh in color. The decision below (kind as an additive field, the glyph as the dot) is unchanged; only the glyph and its muted color changed. References to "the pilcrow" throughout read as "the paragraph glyph."
 
 A **paragraph** is a third node kind alongside bullet and task: a node that reads as prose. A

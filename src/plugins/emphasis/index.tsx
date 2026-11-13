@@ -25,7 +25,7 @@ import {
   ItalicIcon,
   StrikethroughIcon,
   UnderlineIcon,
-} from "lucide-react";
+} from "@/lib/icons";
 
 import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
 import {

@@ -19,8 +19,8 @@ import {
   SiWindsurf,
   SiZedindustries,
 } from "@icons-pack/react-simple-icons";
-import { BotIcon, TerminalIcon } from "lucide-react";
 
+import { BotIcon, TerminalIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 import { knownSourceApp, type SourceApp } from "../../data/source-apps";
@@ -36,7 +36,7 @@ type Mark = (
   | { icon: Glyph; brand?: never }
   | { brand: keyof typeof BRAND_MARKS; icon?: never }
 ) & {
-  /** Lucide stroke icons carry their own padding, so they draw full-size. */
+  /** Hugeicons stroke icons carry their own padding, so they draw full-size. */
   stroke?: true;
   /** OpenAI and xAI allow their marks only in black or white ("use the logo
    *  exactly as provided"), so these take the text color, not the muted one. */

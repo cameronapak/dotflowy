@@ -10,7 +10,7 @@
 // renders a ghosted "missing link" chip; undoing the delete restores the target
 // and this heals automatically (the id-pointer model paying off).
 
-import { Link2, Unlink } from "lucide-react";
+import { LinkIcon, UnlinkIcon } from "@/lib/icons";
 
 import type { WidgetProps } from "../types";
 
@@ -39,7 +39,7 @@ export function NodeLinkChip({ source }: WidgetProps) {
         className="inline-flex max-w-full items-center gap-1 align-baseline text-[0.95em] text-muted-foreground line-through decoration-muted-foreground/50 select-none"
         title="This node no longer exists"
       >
-        <Unlink className="size-[0.85em] shrink-0" aria-hidden="true" />
+        <UnlinkIcon className="size-[0.85em] shrink-0" aria-hidden="true" />
         missing link
       </span>
     );
@@ -61,7 +61,10 @@ export function NodeLinkChip({ source }: WidgetProps) {
       className="inline-flex max-w-full cursor-pointer items-center gap-1 align-baseline text-[0.95em] font-medium text-primary-ink underline decoration-primary-ink/35 underline-offset-2 select-none hover:decoration-primary-ink"
       title={title}
     >
-      <Link2 className="size-[0.85em] shrink-0 opacity-80" aria-hidden="true" />
+      <LinkIcon
+        className="size-[0.85em] shrink-0 opacity-80"
+        aria-hidden="true"
+      />
       {label}
     </span>
   );

@@ -1,4 +1,4 @@
-import { CopyPlus } from "lucide-react";
+import { CopyPlusIcon } from "@/lib/icons";
 
 import { openMirrorPlaces } from "./mirror-places-opener";
 
@@ -38,7 +38,7 @@ export function MirrorBadge({
       onPointerDown={(e) => e.stopPropagation()}
       tabIndex={-1}
     >
-      <CopyPlus size={11} strokeWidth={2.5} aria-hidden="true" />
+      <CopyPlusIcon size={11} aria-hidden="true" />
       {places}
     </button>
   );
