@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.6.3
+
+### Patch Changes
+
+- 90368bc: Improve the Active plan badge and on/off switch contrast in every color theme and mode.
+
 ## 3.6.2
 
 ### Patch Changes
