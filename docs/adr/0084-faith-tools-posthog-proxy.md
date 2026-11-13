@@ -4,7 +4,7 @@ status: accepted
 
 # Separate faith.tools analytics from Dotflowy
 
-## Approved replacement, awaiting cutover
+## Approved replacement
 
 Cam approved this separation on November 13, 2026. Use the dedicated
 `faith-tools-analytics` Worker at `e.faith.tools`, with code in faith.tools's
@@ -12,7 +12,7 @@ Cam approved this separation on November 13, 2026. Use the dedicated
 workflow. It must not share Dotflowy's app Worker, storage bindings, secrets,
 or release lifecycle. Verify hostname availability before provisioning it.
 
-The Dotflowy removal is prepared locally only. Do not merge or deploy it until
+The Dotflowy removal must follow the cutover. Do not merge or deploy it until
 the API-key, Android-share, and mobile-changelog releases finish, the replacement
 passes real ingestion checks, and `e.dotflowy.com` is served outside the Dotflowy app Worker.
 Keep that old hostname working on the replacement for cached and already-open
