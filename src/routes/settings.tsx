@@ -53,6 +53,7 @@ import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import {
   retryEditorFeatures,
+  setAiAppIcons,
   setDailyToggle,
   setEditorFeature,
   setEmptyDaysMode,
@@ -1094,6 +1095,23 @@ function AppearanceSection() {
   const preview = useColorThemePreview();
   const membership = useMembership();
   const { textSize, setTextSize } = useTextSize();
+  const preferences = useEditorFeatures();
+  const [savingAiAppIcons, setSavingAiAppIcons] = useState(false);
+  const toggleAiAppIcons = (enabled: boolean) => {
+    setSavingAiAppIcons(true);
+    void Effect.runPromise(
+      Effect.tryPromise(() => setAiAppIcons(enabled)).pipe(
+        Effect.catch(() =>
+          Effect.sync(() =>
+            toast.error(
+              "Couldn't save AI app icons. Your previous setting was restored.",
+            ),
+          ),
+        ),
+        Effect.ensuring(Effect.sync(() => setSavingAiAppIcons(false))),
+      ),
+    );
+  };
   return (
     <div id="appearance" className="scroll-mt-20">
       <Section title="Appearance">
@@ -1208,6 +1226,26 @@ function AppearanceSection() {
                   { value: "system", label: <MonitorIcon />, title: "System" },
                 ]}
               />
+            }
+          />
+          <SettingRow
+            title="Show AI app icons"
+            description={
+              <span id="ai-app-icons-description">
+                Show which AI app created each node. Turn off to use a generic
+                sparkle instead.
+              </span>
+            }
+            action={
+              <SettingsSwitchTarget>
+                <Switch
+                  aria-label="Show AI app icons"
+                  aria-describedby="ai-app-icons-description"
+                  checked={preferences.aiAppIcons}
+                  disabled={!preferences.ready || savingAiAppIcons}
+                  onCheckedChange={toggleAiAppIcons}
+                />
+              </SettingsSwitchTarget>
             }
           />
           <SettingRow

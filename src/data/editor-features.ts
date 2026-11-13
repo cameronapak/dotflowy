@@ -28,6 +28,7 @@ const KEYS = {
   emptyDays: "daily:empty-days",
   focus: "focus:settings",
   colorTheme: "appearance:color-theme",
+  aiAppIcons: "appearance:ai-app-icons",
 } as const;
 export type EditorFeature = "bible" | "daily" | "embeds" | "focusSessions";
 /** A Daily notes option that is a plain on/off switch (ADR 0070). */
@@ -43,6 +44,7 @@ const featureRowSchema = Schema.Struct({
     KEYS.embeds,
     KEYS.focusSessions,
     KEYS.externalEmbeds,
+    KEYS.aiAppIcons,
   ]),
   enabled: Schema.Boolean,
 });
@@ -79,6 +81,7 @@ const isPreferenceKey = Schema.is(
       KEYS.embeds,
       KEYS.focusSessions,
       KEYS.externalEmbeds,
+      KEYS.aiAppIcons,
       KEYS.weekStart,
       KEYS.dayStream,
       KEYS.weekStrip,
@@ -133,6 +136,7 @@ interface FeatureSnapshot {
   focus: FocusSettings;
   /** The synced color theme id, or null when the account has none (ADR 0082). */
   colorTheme: string | null;
+  aiAppIcons: boolean;
   ready: boolean;
   error: boolean;
 }
@@ -150,6 +154,7 @@ const INITIAL: FeatureSnapshot = {
   emptyDays: "show",
   focus: DEFAULT_FOCUS_SETTINGS,
   colorTheme: null,
+  aiAppIcons: true,
   ready: false,
   error: false,
 };
@@ -177,6 +182,9 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
   const colorThemeRow = rows.find((r) => r.key === KEYS.colorTheme);
   const colorTheme =
     colorThemeRow?.key === KEYS.colorTheme ? colorThemeRow.theme : null;
+  const aiAppIconsRow = rows.find((r) => r.key === KEYS.aiAppIcons);
+  const aiAppIcons =
+    aiAppIconsRow?.key === KEYS.aiAppIcons ? aiAppIconsRow.enabled : true;
   const focus =
     focusRow?.key === KEYS.focus ? focusRow.settings : DEFAULT_FOCUS_SETTINGS;
   // Temporarily suspend the stream, including saved opt-ins, without changing
@@ -223,6 +231,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     snapshot.emptyDays === emptyDays &&
     snapshot.focus === focus &&
     snapshot.colorTheme === colorTheme &&
+    snapshot.aiAppIcons === aiAppIcons &&
     snapshot.ready === ready &&
     snapshot.error === error
   )
@@ -241,6 +250,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     emptyDays,
     focus,
     colorTheme,
+    aiAppIcons,
     ready,
     error,
   };
@@ -405,6 +415,18 @@ export async function setColorThemePreference(theme: string): Promise<void> {
         if ("theme" in draft) draft.theme = theme;
       })
     : collection.insert({ key, theme });
+  await transaction.isPersisted.promise;
+}
+
+/** Choose source logos or a generic AI mark without changing attribution. */
+export async function setAiAppIcons(enabled: boolean): Promise<void> {
+  await loadEditorFeatures();
+  const key = KEYS.aiAppIcons;
+  const transaction = collection.has(key)
+    ? collection.update(key, (draft) => {
+        if ("enabled" in draft) draft.enabled = enabled;
+      })
+    : collection.insert({ key, enabled });
   await transaction.isPersisted.promise;
 }
 
