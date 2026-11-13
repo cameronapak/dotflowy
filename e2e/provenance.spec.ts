@@ -44,6 +44,12 @@ const TREE: SeedNode[] = [
 const mark = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"] > .outline-row [data-origin]`);
 
+// Hand-verified signatures from the approved Simple Icons Claude and Hugeicons
+// multi-sparkle artwork. Do not derive the oracle from the rendered result:
+// every surface rendering the same wrong icon must still fail this journey.
+const CLAUDE_GLYPH = /^m4\.7144 15\.9555 4\.7174-2\.6471/;
+const SPARKLE_GLYPH = /^M15 2L15\.5387 4\.39157/;
+
 test("agent task continuation lines wrap underneath the checkbox and source mark", async ({
   page,
 }) => {
@@ -115,7 +121,10 @@ test("AI app icons default on, switch to a shared sparkle, and keep attribution 
   const titleMark = page.locator(`.zoomed-title [data-origin]`);
   await expect(titleMark).toBeVisible();
   await expect(titleMark).toHaveAttribute("data-origin", "Claude");
-  const claudeLogo = await titleMark.locator("svg").innerHTML();
+  await expect(titleMark.locator("svg path").first()).toHaveAttribute(
+    "d",
+    CLAUDE_GLYPH,
+  );
 
   await page.goto("/settings#appearance");
   const toggle = page.getByRole("switch", { name: "Show AI app icons" });
@@ -129,18 +138,21 @@ test("AI app icons default on, switch to a shared sparkle, and keep attribution 
   await expect(toggle).not.toBeChecked();
   await page.getByRole("button", { name: "Back to outline" }).click();
   await expect(mark(page, "mine")).toHaveCount(0);
-  const sparkle = await mark(page, "ai").locator("svg").innerHTML();
-  expect(sparkle.length).toBeGreaterThan(0);
-  expect(sparkle).not.toBe(claudeLogo);
-  for (const id of ["amp", "unknown"]) {
+  for (const id of ["ai", "amp", "unknown"]) {
     await expect(mark(page, id)).toBeVisible();
-    expect(await mark(page, id).locator("svg").innerHTML()).toBe(sparkle);
+    await expect(mark(page, id).locator("svg path").first()).toHaveAttribute(
+      "d",
+      SPARKLE_GLYPH,
+    );
   }
   await mark(page, "ai").hover();
   await expect(page.getByText(/^Created by Claude ·/)).toBeVisible();
   await page.locator('li[data-node-id="ai"] .bullet').first().click();
   await expect(titleMark).toBeVisible();
-  expect(await titleMark.locator("svg").innerHTML()).toBe(sparkle);
+  await expect(titleMark.locator("svg path").first()).toHaveAttribute(
+    "d",
+    SPARKLE_GLYPH,
+  );
   await expect(titleMark).toHaveAttribute("aria-label", /Created by Claude/);
 
   // A failed change rolls back instead of silently restoring the logos.
@@ -162,10 +174,13 @@ test("AI app icons default on, switch to a shared sparkle, and keep attribution 
   await page.reload();
   await expect(toggle).toBeChecked();
   await page.getByRole("button", { name: "Back to outline" }).click();
-  expect(await mark(page, "ai").locator("svg").innerHTML()).toBe(claudeLogo);
-  expect(await mark(page, "amp").locator("svg").innerHTML()).not.toBe(
-    claudeLogo,
+  await expect(mark(page, "ai").locator("svg path").first()).toHaveAttribute(
+    "d",
+    CLAUDE_GLYPH,
   );
+  await expect(
+    mark(page, "amp").locator("svg path").first(),
+  ).not.toHaveAttribute("d", SPARKLE_GLYPH);
 
   // An account change from another tab/device is picked up on focus.
   await page.evaluate(async () => {
@@ -178,7 +193,8 @@ test("AI app icons default on, switch to a shared sparkle, and keep attribution 
     if (!response.ok) throw new Error("preference update failed");
     window.dispatchEvent(new Event("focus"));
   });
-  await expect(async () => {
-    expect(await mark(page, "ai").locator("svg").innerHTML()).toBe(sparkle);
-  }).toPass();
+  await expect(mark(page, "ai").locator("svg path").first()).toHaveAttribute(
+    "d",
+    SPARKLE_GLYPH,
+  );
 });
