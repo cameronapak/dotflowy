@@ -300,6 +300,9 @@ export async function seedOutline(
   await page.route("**/api/membership", (route) =>
     reply(route, { plan: "free", legacyLeaf: false, subs: [], welcome: null }),
   );
+  await page.route("**/api/mcp-connections", (route) =>
+    reply(route, { connections: [] }),
+  );
 
   // The app is gated behind a Better Auth session (root AuthGate). The editor
   // only mounts once `useSession()` resolves to a session, so mock the
