@@ -64,8 +64,8 @@ export function McpConnections() {
   }
 
   return (
-    <div id="authorized-apps" className="flex scroll-mt-20 flex-col gap-3 py-4">
-      <h3 className="text-sm font-medium">Authorized apps</h3>
+    <div id="authorized-apps" className="flex scroll-mt-20 flex-col gap-3 p-4">
+      <h4 className="text-sm font-medium">Authorized apps</h4>
       <p className="text-sm text-muted-foreground">
         OAuth apps can read and change your entire outline. Revoking access
         invalidates all their access and refresh tokens for your account. It

@@ -1,6 +1,11 @@
-import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  useLocation,
+  useRouter,
+} from "@tanstack/react-router";
 import { Effect } from "effect";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import {
@@ -9,7 +14,6 @@ import {
   CopyIcon,
   DownloadIcon,
   FileUploadIcon,
-  KeyIcon,
   LinkIcon,
   LoaderIcon,
   LogoutIcon,
@@ -23,7 +27,7 @@ import {
 } from "@/lib/icons";
 
 import { openAppleShortcut } from "../components/apple-shortcut-opener";
-import { ApiKeysDialog } from "../components/capture-keys-dialog";
+import { ApiKeysSettings } from "../components/capture-keys-dialog";
 import { CliSetupDialog } from "../components/cli-setup-dialog";
 import {
   COLOR_THEMES,
@@ -606,111 +610,173 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
   const [cliOpen, setCliOpen] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
   const free = plan === "free";
+  const hash = useLocation({ select: (location) => location.hash });
+  const [open, setOpen] = useState<string[]>(() =>
+    hash === "authorized-apps" || hash === "capture-keys" ? ["access"] : [],
+  );
+  const router = useRouter();
+  useEffect(
+    () =>
+      router.subscribe("onBeforeNavigate", ({ toLocation }) => {
+        if (
+          toLocation.pathname === "/settings" &&
+          (toLocation.hash === "authorized-apps" ||
+            toLocation.hash === "capture-keys")
+        ) {
+          setOpen((current) => [...new Set([...current, "access"])]);
+        }
+      }),
+    [router],
+  );
 
   return (
     <Section
       title="Connections"
       description="Use your outline from other apps, your terminal, or scripts."
     >
-      <McpConnections />
-      <RowGroup>
-        <SettingRow
-          icon={<PlugIcon />}
-          title={
-            <span className="flex flex-wrap items-center gap-2">
-              Connect apps (MCP)
-              <Badge variant="secondary">
-                {plan && !free
-                  ? "Included with your subscription"
-                  : "Included with Pro"}
-              </Badge>
+      <Accordion
+        multiple
+        value={open}
+        onValueChange={(value) => setOpen(value.map(String))}
+        className="gap-4"
+      >
+        <AccordionItem
+          value="setup"
+          className="overflow-hidden rounded-xl border-0 ring-1 ring-foreground/10"
+        >
+          <AccordionTrigger
+            aria-label="Set up connections"
+            className="group items-center gap-3 rounded-none bg-card px-4 py-3 hover:no-underline focus-visible:ring-inset"
+          >
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span>Set up</span>
+              <span className="text-sm font-normal text-muted-foreground">
+                Connect a new app, terminal, or shortcut.
+              </span>
             </span>
-          }
-          description="Let Claude, Cursor, VS Code, ChatGPT, and more work with your outline."
-          action={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={plan === null}
-              onClick={() =>
-                free ? openMembership("connections") : setConnectOpen(true)
-              }
+            <span
+              aria-hidden="true"
+              className="text-xs font-normal text-muted-foreground"
             >
-              {free ? "Unlock app connections" : "Set up"}
-            </Button>
-          }
-        />
-        <SettingRow
-          icon={<TerminalIcon />}
-          title={
-            <span className="flex flex-wrap items-center gap-2">
-              Command line (CLI)
-              <Badge variant="secondary">
-                {plan && !free
-                  ? "Included with your subscription"
-                  : "Included with Pro"}
-              </Badge>
+              {open.includes("setup") ? "Collapse" : "Expand"}
             </span>
-          }
-          description="Use Dotflowy from your terminal or scripts."
-          action={
-            <Button
-              variant="outline"
-              size="sm"
-              aria-label={
-                free ? "Unlock command line (CLI)" : "Set up command line (CLI)"
+          </AccordionTrigger>
+          <AccordionContent className="divide-y divide-border border-t pb-0">
+            <SettingRow
+              icon={<PlugIcon />}
+              title={
+                <span className="flex flex-wrap items-center gap-2">
+                  Connect apps (MCP)
+                  <Badge variant="secondary">
+                    {plan && !free
+                      ? "Included with your subscription"
+                      : "Included with Pro"}
+                  </Badge>
+                </span>
               }
-              disabled={plan === null}
-              onClick={() =>
-                free ? openMembership("connections") : setCliOpen(true)
+              description="Let Claude, Cursor, VS Code, ChatGPT, and more work with your outline."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={plan === null}
+                  onClick={() =>
+                    free ? openMembership("connections") : setConnectOpen(true)
+                  }
+                >
+                  {free ? "Unlock app connections" : "Set up"}
+                </Button>
               }
+            />
+            <SettingRow
+              icon={<TerminalIcon />}
+              title={
+                <span className="flex flex-wrap items-center gap-2">
+                  Command line (CLI)
+                  <Badge variant="secondary">
+                    {plan && !free
+                      ? "Included with your subscription"
+                      : "Included with Pro"}
+                  </Badge>
+                </span>
+              }
+              description="Use Dotflowy from your terminal or scripts."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label={
+                    free
+                      ? "Unlock command line (CLI)"
+                      : "Set up command line (CLI)"
+                  }
+                  disabled={plan === null}
+                  onClick={() =>
+                    free ? openMembership("connections") : setCliOpen(true)
+                  }
+                >
+                  {free ? "See plans" : "Set up"}
+                </Button>
+              }
+            />
+            <SettingRow
+              icon={<SmartphoneIcon />}
+              title="Apple Shortcut"
+              description="Send text and links from other apps to today's note with the share sheet on iPhone or Mac. Available on every plan."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="Set up Apple Shortcut"
+                  onClick={openAppleShortcut}
+                >
+                  Set up
+                </Button>
+              }
+            />
+            {free && (
+              <p className="bg-card px-4 py-3 text-sm text-muted-foreground">
+                App connections and the CLI are included with Pro and Founding.
+                Try asking your AI app to organize meeting notes, find an idea,
+                or add a task to today.
+              </p>
+            )}
+          </AccordionContent>
+        </AccordionItem>
+        <AccordionItem
+          value="access"
+          className="overflow-hidden rounded-xl border-0 ring-1 ring-foreground/10"
+        >
+          <AccordionTrigger
+            aria-label="Connection access"
+            className="items-center gap-3 rounded-none bg-card px-4 py-3 hover:no-underline focus-visible:ring-inset"
+          >
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span>Access</span>
+              <span className="text-sm font-normal text-muted-foreground">
+                Review authorized apps and personal API keys.
+              </span>
+            </span>
+            <span
+              aria-hidden="true"
+              className="text-xs font-normal text-muted-foreground"
             >
-              {free ? "See plans" : "Set up"}
-            </Button>
-          }
-        />
-        <div id="capture-keys" className="scroll-mt-20">
-          <SettingRow
-            icon={<KeyIcon />}
-            title="API keys"
-            description="Personal keys for shortcuts, MCP, and the CLI. Choose capture-only, read-only, or read and write access."
-            action={
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setKeysOpen(true)}
-              >
-                Manage
-              </Button>
-            }
-          />
-        </div>
-        <SettingRow
-          icon={<SmartphoneIcon />}
-          title="Apple Shortcut"
-          description="Send text and links from other apps to today's note with the share sheet on iPhone or Mac. Available on every plan."
-          action={
-            <Button
-              variant="outline"
-              size="sm"
-              aria-label="Set up Apple Shortcut"
-              onClick={openAppleShortcut}
-            >
-              Set up
-            </Button>
-          }
-        />
-      </RowGroup>
-      {free && (
-        <p className="text-sm text-muted-foreground">
-          App connections and the CLI are included with Pro and Founding. Try
-          asking your AI app to organize meeting notes, find an idea, or add a
-          task to today.
-        </p>
-      )}
+              {open.includes("access") ? "Collapse" : "Expand"}
+            </span>
+          </AccordionTrigger>
+          <AccordionContent
+            keepMounted
+            className="divide-y divide-border border-t bg-card pb-0 [&_p:not(:last-child)]:mb-0"
+          >
+            <McpConnections />
+            <div id="capture-keys" className="scroll-mt-20 p-4">
+              <ApiKeysSettings open={keysOpen} onOpenChange={setKeysOpen} />
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
       <McpConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
       <CliSetupDialog open={cliOpen} onOpenChange={setCliOpen} />
-      <ApiKeysDialog open={keysOpen} onOpenChange={setKeysOpen} />
     </Section>
   );
 }

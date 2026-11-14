@@ -103,6 +103,30 @@ with the same rollback toast, and plugin settings share one row layout
   and the section caption carry the same promise: turning a plugin off never
   deletes notes.
 
+## November 2026 amendment: Connections setup and access
+
+Connections separates **Set up** (MCP, CLI, Apple Shortcut) from **Access**
+(authorized OAuth apps and personal API keys). Each group has its own
+Expand/Collapse control; both start collapsed and may remain open together. This is
+page-local disclosure state, not another account preference. Closing a group
+never revokes access or changes plan eligibility.
+
+Access lists app and key metadata inline, with revocation available on every
+plan. API-key revocation asks for confirmation. Creation, rotation, and one-time
+secret display remain in the existing API-key dialog; closing it refreshes the
+inline metadata. Successful key issuance also signals the metadata overview,
+including issuance through Apple Shortcut setup; the signal contains no secret.
+OAuth apps and personal keys remain separate credentials.
+`/settings#authorized-apps` and `#capture-keys` retain their destinations and
+reopen Access when reached through navigation, even at the current anchor.
+
+Connections and Plugins share measured Base UI panel-height transitions in both
+directions, following the feedback disclosure precedent: 200ms with
+`cubic-bezier(0.23, 1, 0.32, 1)`. Height reflow is intentional for these occasional
+disclosures. Reduced motion changes height immediately. Closed and closing
+panels are inert and hidden from assistive navigation. Plugins still opens only
+one options panel at a time.
+
 ## November 2026 amendment: Color theme
 
 `appearance:color-theme` stores the account's color theme in the same

@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -91,6 +91,170 @@ interface CaptureDialogProps {
 
 export function ApiKeysDialog(props: CaptureDialogProps) {
   return <CaptureDialog {...props} setup={false} />;
+}
+
+// The access overview never issues or rotates secrets. Those flows stay in the
+// focused dialog, which also refreshes this list when it closes.
+export function ApiKeysSettings(props: CaptureDialogProps) {
+  const hash = useLocation({ select: (location) => location.hash });
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const [keys, setKeys] = useState<CaptureKeyEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    const refresh = () => setRevision((value) => value + 1);
+    window.addEventListener("dotflowy:api-keys-changed", refresh);
+    return () =>
+      window.removeEventListener("dotflowy:api-keys-changed", refresh);
+  }, []);
+
+  useEffect(() => {
+    if (props.open) return;
+    let current = true;
+    void fetch("/api/keys", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Couldn't load your API keys.");
+        // SAFETY: GET /api/keys returns metadata only, never the key secret.
+        const body = (await response.json()) as { keys: CaptureKeyEntry[] };
+        if (current) {
+          setKeys(body.keys);
+          setError(null);
+        }
+      })
+      .catch(() => {
+        if (current) setError("Couldn't load your API keys.");
+      });
+    return () => {
+      current = false;
+    };
+  }, [props.open, revision, hash]);
+
+  async function revoke(id: string) {
+    setBusy(id);
+    setError(null);
+    try {
+      const response = await fetch("/api/keys", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!response.ok) throw new Error("Couldn't revoke the API key.");
+      setKeys((current) => current?.filter((key) => key.id !== id) ?? null);
+      setConfirm(null);
+      toast.success("Key revoked");
+    } catch {
+      setError("Couldn't revoke the API key. Try again.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <>
+      <section className="flex flex-col gap-3" aria-label="Personal API keys">
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="text-sm font-medium">API keys</h4>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy !== null}
+            onClick={() => props.onOpenChange(true)}
+          >
+            Manage
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Personal keys for shortcuts, MCP, and the CLI. Choose capture-only,
+          read-only, or read and write access.
+        </p>
+        {error && (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => setRevision((value) => value + 1)}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
+        {keys === null ? (
+          !error && (
+            <p role="status" className="text-sm text-muted-foreground">
+              Loading keys…
+            </p>
+          )
+        ) : keys.length === 0 ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            No API keys yet.
+          </p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-border">
+            {keys.map((key) => (
+              <li
+                key={key.id}
+                className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+              >
+                <div className="min-w-0 flex-1 basis-40">
+                  <p className="text-sm font-medium break-words">{key.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    ••••{key.suffix} · {PERMISSIONS[key.permission].label} ·{" "}
+                    {key.expiresAt <= now ? "Expired" : "Expires"}{" "}
+                    {formatDate(key.expiresAt)}
+                  </p>
+                </div>
+                {confirm === key.id ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="w-full text-xs text-muted-foreground">
+                      The connection using this key will stop working.
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy !== null}
+                      onClick={() => setConfirm(null)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={busy !== null}
+                      onClick={() => void revoke(key.id)}
+                    >
+                      {busy === key.id ? "Revoking…" : "Confirm revoke"}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Revoke ${key.name}`}
+                    disabled={busy !== null}
+                    onClick={() => setConfirm(key.id)}
+                  >
+                    Revoke
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <ApiKeysDialog {...props} />
+    </>
+  );
 }
 
 export function AppleShortcutSetupDialog(props: CaptureDialogProps) {
@@ -226,6 +390,7 @@ function CaptureDialog({
         entry: CaptureKeyEntry;
       };
       setKeys((current) => [body.entry, ...current]);
+      window.dispatchEvent(new Event("dotflowy:api-keys-changed"));
       setSecret({
         id: body.entry.id,
         value: body.key,
