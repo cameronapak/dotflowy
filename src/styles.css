@@ -838,12 +838,26 @@ body:has(.outline-shell) {
   --lg-size-curve: initial;
   --lg-mask: initial;
   overflow: clip;
+  /* The dialog follows the visual viewport, which on iOS Safari ends above the
+     floating address bar and the keyboard's accessory bar. A full-height sheet
+     continues its opaque surface below that edge, so the page does not show
+     between the sheet and the keyboard. Partial detents keep their rounded,
+     floating bottom: the strip fades with the sheet's opaque fill. */
+  border: 0 solid transparent;
+  border-image: linear-gradient(var(--lg-sheet-floor), var(--lg-sheet-floor)) 0
+    0 1 0 / 0 0 100vh 0 / 0 0 100vh 0;
+  --lg-sheet-floor: color-mix(
+    in srgb,
+    var(--lg-sheet-opaque) calc(var(--lg-sheet-full, 0) * 100%),
+    transparent
+  );
 }
 
 .lg-sheet-dialog {
   /* Only the content scrolls. Safari focus panning must not scroll the whole
-     modal while its sheet is entering from below the viewport. */
-  overflow: clip;
+     modal while its sheet is entering from below the viewport. The bottom stays
+     unclipped for the sheet's surface below the visual viewport. */
+  overflow: clip visible;
   left: env(safe-area-inset-left);
   right: env(safe-area-inset-right);
   width: calc(100% - env(safe-area-inset-left) - env(safe-area-inset-right));
