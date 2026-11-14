@@ -795,7 +795,7 @@ test("deep nodes keep readable width and focus reveals them horizontally", async
     kind: depth === 8 ? "embed" : null,
   }));
   await seedOutline(page, chain, { kv: { "account-prefs": [allowed] } });
-  await page.goto("/");
+  await openSeededOutline(page, { anchorId: "depth-0" });
   const viewport = page.locator(".outline-canvas-viewport");
   const frame = page.locator('[data-node-body="depth-8"] iframe');
   await expect(frame).toHaveCSS("opacity", "1", { timeout: 15000 });
