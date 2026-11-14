@@ -133,9 +133,6 @@ export function MembershipDialog() {
             Continue to checkout
           </Button>
         </DialogFooter>
-        <p className="text-xs text-muted-foreground">
-          Checkout opens Stripe. Bug reporting stays free on every plan.
-        </p>
       </DialogContent>
     </Dialog>
   );
