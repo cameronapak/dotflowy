@@ -239,6 +239,113 @@ test("free settings exposes its sections, connections nudge, and disclosed upgra
   ).toBeVisible();
 });
 
+test("cardless trial requires a deliberate checkout, retries failures and distinguishes trial access from payment", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  let status: "eligible" | "trialing" | "expired" | "active" | "comp" =
+    "eligible";
+  await page.route("**/api/membership", (route) =>
+    route.fulfill({
+      json: {
+        plan:
+          status === "eligible" || status === "expired" ? "free" : "unlimited",
+        trialEligible: status === "eligible",
+        legacyLeaf: false,
+        welcome: null,
+        subs:
+          status === "eligible" || status === "expired"
+            ? []
+            : [
+                {
+                  plan: "unlimited",
+                  status: status === "trialing" ? "trialing" : "active",
+                  cancelAtPeriodEnd: false,
+                  stripeSubscriptionId:
+                    status === "comp" ? null : "sub_trial_fixture",
+                  trialEnd:
+                    status === "trialing" ? "2030-06-15T12:00:00.000Z" : null,
+                },
+              ],
+      },
+    }),
+  );
+  let attempts = 0;
+  await page.route("**/api/membership/trial", (route) => {
+    expect(route.request().postDataJSON()).toEqual({ consent: true });
+    attempts++;
+    return route.fulfill(
+      attempts === 1
+        ? {
+            status: 503,
+            json: { error: "Trial checkout unavailable. Try again." },
+          }
+        : { json: { url: "https://checkout.stripe.com/c/pay/trial-fixture" } },
+    );
+  });
+  await page.route("https://checkout.stripe.com/**", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: "<h1>Checkout transport fixture</h1>",
+    }),
+  );
+  await openSettings(page);
+  const start = page.getByRole("button", { name: "Start 14-day Pro trial" });
+  await expect(start).toBeVisible();
+  await expect(
+    page.getByText("No card required.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Complete setup in Stripe. Without a payment method/),
+  ).toBeVisible();
+  expect(attempts).toBe(0);
+  await start.click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Trial checkout unavailable",
+  );
+  await expect(start).toBeEnabled();
+  await start.click();
+  await expect(page).toHaveURL(
+    "https://checkout.stripe.com/c/pay/trial-fixture",
+  );
+  // A browser return alone never grants access or claims a payment.
+  await page.goto("/settings?checkout=trial");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Confirming your membership" }),
+  ).toBeVisible();
+  status = "trialing";
+  await page.getByRole("button", { name: "Check again" }).click();
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "Your 14-day Pro trial is active" }),
+  ).toBeVisible();
+  await expect(page.getByText("Pro trial", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Trial ends/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Continue Pro" }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog", { name: /Thank you/ })).toHaveCount(0);
+  await expect(start).toHaveCount(0);
+  status = "expired";
+  await page.goto("/settings");
+  await page.getByText("Current plan").waitFor();
+  await expect(page.getByText("Nodes used")).toBeVisible();
+  await expect(start).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Upgrade monthly" }),
+  ).toBeVisible();
+  for (const value of ["active", "comp"] as const) {
+    status = value;
+    await page.reload();
+    await page.getByText("Current plan").waitFor();
+    await expect(
+      page.getByRole("button", { name: "Manage billing" }),
+    ).toHaveCount(value === "active" ? 1 : 0);
+    await expect(start).toHaveCount(0);
+  }
+});
+
 test("a checkout return waits for server confirmation and the thank-you stays dismissed after reload", async ({
   page,
 }) => {

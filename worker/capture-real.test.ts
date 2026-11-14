@@ -27,6 +27,11 @@ let directory: string;
 const outboundUrls: string[] = [];
 // Stripe transport is fixture-owned. No request in this suite reaches Stripe.
 const stripeSubscriptions = new Map<string, string>();
+const trialCheckouts = new Map<
+  string,
+  { id: string; url: string; params: URLSearchParams }
+>();
+let trialCheckoutPosts = 0;
 const webhookSecret = "whsec_disposable_membership_fixture";
 
 type Key = { key: string; entry: { id: string; suffix: string } };
@@ -195,6 +200,65 @@ beforeAll(async () => {
             async handler(request) {
               const url = new URL(request.url);
               if (url.hostname === "api.stripe.com") {
+                if (
+                  url.pathname === "/v1/subscriptions" ||
+                  url.pathname === "/v1/customers/search" ||
+                  url.pathname === "/v1/prices"
+                ) {
+                  return new FixtureResponse(
+                    JSON.stringify({
+                      object: "list",
+                      data:
+                        url.pathname === "/v1/prices"
+                          ? [
+                              {
+                                id: "price_trial_monthly",
+                                lookup_key: "dotflowy_unlimited_monthly",
+                                recurring: { interval: "month" },
+                                unit_amount: 500,
+                                currency: "usd",
+                              },
+                            ]
+                          : [],
+                    }),
+                    { headers: { "content-type": "application/json" } },
+                  );
+                }
+                if (
+                  url.pathname === "/v1/customers" &&
+                  request.method === "POST"
+                ) {
+                  const params = new URLSearchParams(await request.text());
+                  return new FixtureResponse(
+                    JSON.stringify({
+                      id: `cus_${params.get("metadata[userId]")}`,
+                    }),
+                    {
+                      headers: { "content-type": "application/json" },
+                    },
+                  );
+                }
+                if (
+                  url.pathname === "/v1/checkout/sessions" &&
+                  request.method === "POST"
+                ) {
+                  trialCheckoutPosts++;
+                  const key =
+                    request.headers.get("idempotency-key") ?? randomUUID();
+                  const params = new URLSearchParams(await request.text());
+                  let checkout = trialCheckouts.get(key);
+                  if (!checkout) {
+                    checkout = {
+                      id: `cs_${randomUUID()}`,
+                      url: "https://checkout.stripe.com/c/pay/fixture-trial",
+                      params,
+                    };
+                    trialCheckouts.set(key, checkout);
+                  } else expect([...params]).toEqual([...checkout.params]);
+                  return new FixtureResponse(JSON.stringify(checkout), {
+                    headers: { "content-type": "application/json" },
+                  });
+                }
                 const subscription = stripeSubscriptions.get(
                   url.pathname.split("/").pop() ?? "",
                 );
@@ -251,6 +315,7 @@ beforeAll(async () => {
     "0018_first_party_feedback.sql",
     "0019_feedback_triage.sql",
     "0020_feedback_replies.sql",
+    "0021_pro_trial_checkout.sql",
   ]) {
     const sql = await readFile(`migrations/${migration}`, "utf8");
     await db.exec(sql.replace(/--[^\n]*/g, "").replaceAll("\n", " "));
@@ -576,6 +641,368 @@ test("only a signed paid checkout queues a welcome, and webhook retries cannot r
       .bind(delayedId)
       .first<{ plan: string; seenAt: number | null }>(),
   ).toEqual({ plan: "unlimited", seenAt: null });
+});
+
+test("cardless trial setup is explicit, serialized, replayable and follows verified Stripe lifecycle without changing paid checkout", async () => {
+  const db = await mf.getD1Database("DB");
+  const userId = randomUUID();
+  const password = "trial-fixture-password";
+  await fixture("seed", { userId, password: await hashPassword(password) });
+  const login = await mf.dispatchFetch(
+    "http://fixture/api/auth/sign-in/email",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://fixture" },
+      body: JSON.stringify({ email: `${userId}@capture.test`, password }),
+    },
+  );
+  expect(login.status).toBe(200);
+  const cookie = login.headers
+    .getSetCookie()
+    .map((value) => value.split(";")[0])
+    .join("; ");
+  const localOrigin = (await mf.ready).origin;
+  const request = (
+    path: string,
+    body?: Record<string, string | boolean>,
+    origin = localOrigin,
+  ) =>
+    mf.dispatchFetch(`${localOrigin}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { cookie, origin, "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  // SAFETY: the real projection is asserted throughout this workflow.
+  const membership = async () =>
+    (await request("/api/membership")).json() as Promise<{
+      plan: string;
+      trialEligible: boolean;
+      welcome: unknown;
+      subs: { status: string; trialEnd: string }[];
+    }>;
+  const path = "/api/membership/trial";
+  expect(await membership()).toMatchObject({
+    plan: "free",
+    trialEligible: true,
+  });
+  await db
+    .prepare("UPDATE user SET emailVerified = 0 WHERE id = ?")
+    .bind(userId)
+    .run();
+  expect((await request(path, { consent: true })).status).toBe(409);
+  await db
+    .prepare("UPDATE user SET emailVerified = 1 WHERE id = ?")
+    .bind(userId)
+    .run();
+  for (const [status, stripeId, trialEnd, eligible] of [
+    ["active", null, null, false], // Comped users already have Pro.
+    ["active", "sub_paid", null, false],
+    ["past_due", "sub_unresolved", null, false],
+    ["paused", "sub_paused", null, false],
+    ["canceled", "sub_past_trial", Date.now() - 1000, false],
+    ["canceled", "sub_ended_paid", null, true],
+  ] as const) {
+    await db
+      .prepare(
+        "INSERT INTO subscription (id, plan, referenceId, status, stripeSubscriptionId, trialEnd) VALUES ('eligibility_fixture', 'unlimited', ?, ?, ?, ?)",
+      )
+      .bind(userId, status, stripeId, trialEnd)
+      .run();
+    expect(await membership()).toHaveProperty("trialEligible", eligible);
+    if (!eligible)
+      expect((await request(path, { consent: true })).status).toBe(409);
+    await db
+      .prepare("DELETE FROM subscription WHERE id = 'eligibility_fixture'")
+      .run();
+  }
+  // A normal paid purchase remains a paid purchase, never an implicit trial.
+  const paid = await request(
+    "/api/auth/subscription/upgrade",
+    {
+      plan: "unlimited",
+      annual: false,
+      disableRedirect: true,
+      successUrl: "/settings?checkout=success",
+      cancelUrl: "/settings?checkout=canceled",
+    },
+    "http://fixture",
+  );
+  expect(paid.status, await paid.clone().text()).toBe(200);
+  const paidCheckout = [...trialCheckouts.values()].find(
+    (entry) => entry.params.get("client_reference_id") === userId,
+  );
+  expect(paidCheckout).toBeDefined();
+  expect(
+    paidCheckout?.params.get("subscription_data[trial_period_days]"),
+  ).toBeNull();
+  expect(paidCheckout?.params.get("payment_method_collection")).toBeNull();
+  expect((await request(path, { consent: false })).status).toBe(400);
+  expect(
+    (await request(path, { consent: true }, "https://evil.test")).status,
+  ).toBe(403);
+  expect(
+    (
+      await mf.dispatchFetch(`http://fixture${path}`, {
+        method: "POST",
+        body: JSON.stringify({ consent: true }),
+      })
+    ).status,
+  ).toBe(401);
+  const before = trialCheckouts.size;
+  const concurrent = await Promise.all([
+    request(path, { consent: true }),
+    request(path, { consent: true }),
+  ]);
+  expect(concurrent.some((response) => response.status === 200)).toBe(true);
+  expect(
+    concurrent.every(
+      (response) => response.status === 200 || response.status === 409,
+    ),
+  ).toBe(true);
+  expect(trialCheckouts.size).toBe(before + 1);
+  const replay = await request(path, { consent: true });
+  expect(replay.status, await replay.clone().text()).toBe(200);
+  expect(await replay.json()).toMatchObject({
+    url: "https://checkout.stripe.com/c/pay/fixture-trial",
+  });
+  const claim = await db
+    .prepare(
+      "SELECT attemptId, expiresAt FROM pro_trial_checkout WHERE userId = ?",
+    )
+    .bind(userId)
+    .first<{ attemptId: string; expiresAt: number }>();
+  const checkout = [...trialCheckouts.values()].find(
+    (entry) =>
+      entry.params.get("client_reference_id") === userId &&
+      entry.params.has("subscription_data[trial_period_days]"),
+  )!;
+  expect(checkout.params.get("payment_method_collection")).toBe("if_required");
+  expect(checkout.params.get("subscription_data[trial_period_days]")).toBe(
+    "14",
+  );
+  expect(
+    checkout.params.get(
+      "subscription_data[trial_settings][end_behavior][missing_payment_method]",
+    ),
+  ).toBe("cancel");
+  expect(checkout.params.get("expires_at")).toBe(
+    String(Math.floor(claim!.expiresAt / 1000)),
+  );
+  expect(await membership()).toMatchObject({ plan: "free", welcome: null });
+  // Simulate interruption after Stripe accepted setup but before URL persistence.
+  await db
+    .prepare(
+      "UPDATE pro_trial_checkout SET url = NULL, leaseUntil = 0 WHERE userId = ?",
+    )
+    .bind(userId)
+    .run();
+  const posts = trialCheckoutPosts;
+  expect((await request(path, { consent: true })).status).toBe(200);
+  expect(trialCheckoutPosts).toBe(posts + 1);
+  expect(trialCheckouts.size).toBe(before + 1);
+  // An uncertain late setup must not mint an overlapping session or send an
+  // expires_at below Stripe's 30-minute minimum. A known URL remains reusable.
+  await db
+    .prepare(
+      "UPDATE pro_trial_checkout SET expiresAt = ?, url = NULL WHERE userId = ?",
+    )
+    .bind(Date.now() + 30 * 60_000, userId)
+    .run();
+  expect((await request(path, { consent: true })).status).toBe(409);
+  expect(trialCheckoutPosts).toBe(posts + 1);
+  await db
+    .prepare("UPDATE pro_trial_checkout SET url = ? WHERE userId = ?")
+    .bind(checkout.url, userId)
+    .run();
+  expect((await request(path, { consent: true })).status).toBe(200);
+  await db
+    .prepare("UPDATE pro_trial_checkout SET expiresAt = ? WHERE userId = ?")
+    .bind(claim!.expiresAt, userId)
+    .run();
+
+  const now = Math.floor(Date.now() / 1000);
+  const trialEnd = now + 14 * 86400;
+  const stripeId = `sub_${randomUUID()}`;
+  const rowId = checkout.params.get("metadata[subscriptionId]");
+  const stripeSub = {
+    id: stripeId,
+    object: "subscription",
+    customer: `cus_${userId}`,
+    status: "trialing",
+    trial_start: now,
+    trial_end: trialEnd,
+    cancel_at_period_end: false,
+    metadata: {
+      subscriptionId: rowId,
+      referenceId: userId,
+      userId,
+      dotflowyTrial: claim!.attemptId,
+    },
+    items: {
+      data: [
+        {
+          id: "si_trial",
+          quantity: 1,
+          current_period_start: now,
+          current_period_end: trialEnd,
+          price: {
+            id: "price_trial_monthly",
+            lookup_key: "dotflowy_unlimited_monthly",
+            recurring: { interval: "month" },
+          },
+        },
+      ],
+    },
+  };
+  stripeSubscriptions.set(stripeId, JSON.stringify(stripeSub));
+  const send = (
+    type: string,
+    object:
+      | typeof stripeSub
+      | typeof invoice
+      | {
+          id: string;
+          object: string;
+          mode: string;
+          subscription: string;
+          client_reference_id: string;
+          payment_status: string;
+          metadata: typeof stripeSub.metadata;
+        },
+  ) => {
+    const body = JSON.stringify({
+      id: `evt_${randomUUID()}`,
+      object: "event",
+      type,
+      created: now,
+      data: { object },
+    });
+    return mf.dispatchFetch("http://fixture/api/auth/stripe/webhook", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": `t=${now},v1=${createHmac("sha256", webhookSecret).update(`${now}.${body}`).digest("hex")}`,
+      },
+      body,
+    });
+  };
+  const completed = await send("checkout.session.completed", {
+    id: checkout.id,
+    object: "checkout.session",
+    mode: "subscription",
+    subscription: stripeId,
+    client_reference_id: userId,
+    payment_status: "no_payment_required",
+    metadata: stripeSub.metadata,
+  });
+  expect(completed.status, await completed.text()).toBe(200);
+  expect((await send("customer.subscription.updated", stripeSub)).status).toBe(
+    200,
+  );
+  expect(await membership()).toMatchObject({
+    plan: "unlimited",
+    trialEligible: false,
+    welcome: null,
+    subs: [
+      { status: "trialing", trialEnd: new Date(trialEnd * 1000).toISOString() },
+    ],
+  });
+  const key = await fixture<Key>("key", { userId, permission: "read" });
+  const mcp = () =>
+    mf.dispatchFetch("http://fixture/mcp", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${key.key}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "get_outline", arguments: {} },
+      }),
+    });
+  expect(await (await mcp()).json()).toHaveProperty("result");
+  expect((await request(path, { consent: true })).status).toBe(409);
+  // Trial expiry removes access but retains outline ownership and history.
+  expect(
+    (
+      await send("customer.subscription.deleted", {
+        ...stripeSub,
+        status: "canceled",
+      })
+    ).status,
+  ).toBe(200);
+  expect(await membership()).toMatchObject({
+    plan: "free",
+    trialEligible: false,
+  });
+  expect(await (await mcp()).json()).toHaveProperty("error.code", -32001);
+  // The used marker survives canceled-subscription row cleanup.
+  await db
+    .prepare(
+      "UPDATE subscription SET trialStart = NULL, trialEnd = NULL WHERE stripeSubscriptionId = ?",
+    )
+    .bind(stripeId)
+    .run();
+  expect((await request(path, { consent: true })).status).toBe(409);
+  await db
+    .prepare(
+      "UPDATE subscription SET trialEnd = ? WHERE stripeSubscriptionId = ?",
+    )
+    .bind(trialEnd * 1000, stripeId)
+    .run();
+  // An actual paid conversion invoice, not a zero invoice or renewal, queues welcome.
+  const invoice = {
+    id: "in_trial",
+    amount_paid: 0,
+    billing_reason: "subscription_cycle",
+    parent: {
+      subscription_details: {
+        subscription: stripeId,
+        metadata: stripeSub.metadata,
+      },
+    },
+    lines: { data: [{ period: { start: trialEnd } }] },
+  };
+  expect((await send("invoice.paid", invoice)).status).toBe(200);
+  expect(
+    await db
+      .prepare("SELECT id FROM membership_welcome WHERE id = ?")
+      .bind(stripeId)
+      .first(),
+  ).toBeNull();
+  expect(
+    (
+      await send("invoice.paid", {
+        ...invoice,
+        amount_paid: 500,
+        lines: { data: [{ period: { start: trialEnd + 31 * 86400 } }] },
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    await db
+      .prepare("SELECT id FROM membership_welcome WHERE id = ?")
+      .bind(stripeId)
+      .first(),
+  ).toBeNull();
+  expect(
+    (
+      await send("customer.subscription.updated", {
+        ...stripeSub,
+        status: "active",
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    (await send("invoice.paid", { ...invoice, amount_paid: 500 })).status,
+  ).toBe(200);
+  expect(await membership()).toMatchObject({
+    plan: "unlimited",
+    welcome: { id: stripeId },
+  });
+  expect((await request(path, { consent: true })).status).toBe(409);
 });
 
 test("retained shards stay inert until authenticated account erasure, without affecting a neighbor", async () => {
@@ -1761,7 +2188,7 @@ test("API keys enforce MCP permissions, plan gates, capture scope, and live revo
     .run();
   const discovery = await rpc(reader.key, "tools/list", {}, "/api/mcp");
   expect(discovery.body.result?.tools?.map((tool) => tool.name).sort()).toEqual(
-    ["export_opml", "get_outline", "search_nodes"],
+    ["export_opml", "get_outline", "get_pro_trial", "search_nodes"],
   );
   const captured = await api("/api/capture", captureKey, {
     attemptId: randomUUID(),

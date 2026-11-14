@@ -41,6 +41,7 @@ import { DeleteAccountDialog } from "../components/delete-account-dialog";
 import { McpConnectDialog } from "../components/mcp-connect-dialog";
 import { openMembership } from "../components/membership-opener";
 import { openOpmlImport } from "../components/opml-import-opener";
+import { ProTrialOffer } from "../components/pro-trial-offer";
 import {
   SettingsOptionRow,
   SettingsSwitchTarget,
@@ -231,6 +232,8 @@ interface SubRow {
   status: string;
   cancelAtPeriodEnd?: boolean;
   periodEnd?: string | Date;
+  stripeSubscriptionId?: string | null;
+  trialEnd?: string | null;
 }
 
 function activeSub(subs: readonly SubRow[]): SubRow | null {
@@ -375,7 +378,10 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
     if (busy) return;
     setBusy(true);
     try {
-      const { error } = await subscription.cancel({ returnUrl: "/settings" });
+      const { error } = await subscription.cancel({
+        returnUrl: "/settings",
+        subscriptionId: activeSub(subs)?.stripeSubscriptionId ?? undefined,
+      });
       if (error) {
         toast.error("Couldn't start cancellation. Please try again.");
         setBusy(false);
@@ -411,6 +417,7 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
   if (plan === null) return null;
   const paid = plan !== "free";
   const sub = activeSub(subs);
+  const trialing = sub?.status === "trialing";
 
   return (
     <div className="flex flex-col gap-4">
@@ -428,7 +435,7 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
               {paid && (
                 <Badge variant="secondary">
                   <CheckIcon data-icon="inline-start" />
-                  Active
+                  {trialing ? "Pro trial" : "Active"}
                 </Badge>
               )}
             </div>
@@ -437,13 +444,20 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
                 3-year founding term
               </span>
             )}
+            {trialing && sub.trialEnd && (
+              <p className="text-sm text-muted-foreground">
+                Trial ends {new Date(sub.trialEnd).toLocaleString()}. Without a
+                payment method, you return to Free. Add a payment method to
+                continue Pro at $5/month.
+              </p>
+            )}
             {paid && sub?.cancelAtPeriodEnd && (
               <span className="text-sm text-amber-600 dark:text-amber-500">
                 Cancels at the end of the current period
               </span>
             )}
           </div>
-          {paid && (
+          {paid && sub?.stripeSubscriptionId && (
             <Button
               variant="outline"
               size="sm"
@@ -451,14 +465,14 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
               disabled={busy}
             >
               {busy && <LoaderIcon className="animate-spin" />}
-              Manage billing
+              {trialing ? "Continue Pro" : "Manage billing"}
             </Button>
           )}
         </div>
 
         {plan === "free" && <UsageMeter />}
 
-        {paid && (
+        {paid && sub?.stripeSubscriptionId && (
           <button
             type="button"
             onClick={() => void cancel()}
@@ -469,6 +483,8 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
           </button>
         )}
       </div>
+
+      {plan === "free" && <ProTrialOffer />}
 
       {/* Upgrade options — free tier only */}
       {plan === "free" && (

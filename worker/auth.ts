@@ -37,6 +37,7 @@ import {
 import { isRedeemableInvite, redeemInvite } from "./invites";
 import { recordWelcome } from "./membership";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
+import { trialCheckoutParams } from "./pro-trial";
 
 /** Any undecoded JSON request-body field as the auth hooks see it (Better Auth
  *  parses the body only after this gate runs). */
@@ -485,6 +486,67 @@ export function createAuth(
         // Stripe to retry. Delayed methods have their own paid completion event.
         onEvent: async (event) => {
           if (
+            event.type === "customer.subscription.created" ||
+            event.type === "customer.subscription.updated"
+          ) {
+            const sub = event.data.object;
+            if (
+              sub.trial_start &&
+              sub.trial_end &&
+              sub.metadata.dotflowyTrial
+            ) {
+              const stored = await env.DB.prepare(
+                "SELECT referenceId FROM subscription WHERE stripeSubscriptionId = ? AND trialEnd IS NOT NULL",
+              )
+                .bind(sub.id)
+                .first<{ referenceId: string }>();
+              if (!stored) throw new Error("Trial subscription is not ready");
+              await env.DB.prepare(
+                "UPDATE pro_trial_checkout SET usedAt = COALESCE(usedAt, ?) WHERE userId = ?",
+              )
+                .bind(Date.now(), stored.referenceId)
+                .run();
+            }
+            return;
+          }
+          if (event.type === "invoice.paid") {
+            const invoice = event.data.object;
+            const stripeSubscriptionId =
+              invoice.parent?.subscription_details?.subscription;
+            if (
+              !stripeSubscriptionId ||
+              !invoice.parent?.subscription_details?.metadata?.dotflowyTrial ||
+              invoice.amount_paid <= 0 ||
+              invoice.billing_reason !== "subscription_cycle"
+            )
+              return;
+            const id = Schema.is(Schema.String)(stripeSubscriptionId)
+              ? stripeSubscriptionId
+              : stripeSubscriptionId.id;
+            const sub = await env.DB.prepare(
+              "SELECT referenceId, plan, trialEnd FROM subscription WHERE stripeSubscriptionId = ?",
+            )
+              .bind(id)
+              .first<{
+                referenceId: string;
+                plan: string;
+                trialEnd: string | number | null;
+              }>();
+            if (!sub) throw new Error("Paid subscription is not ready");
+            // A paid first post-trial period is payment evidence; a trial's
+            // zero invoice and later renewal periods are not a new welcome.
+            const trialEnd =
+              sub.trialEnd === null
+                ? null
+                : Math.floor(new Date(sub.trialEnd).getTime() / 1000);
+            if (
+              trialEnd !== null &&
+              invoice.lines.data.some((line) => line.period.start === trialEnd)
+            )
+              await recordWelcome(env.DB, sub.referenceId, id, sub.plan);
+            return;
+          }
+          if (
             event.type !== "checkout.session.completed" &&
             event.type !== "checkout.session.async_payment_succeeded"
           )
@@ -539,7 +601,21 @@ export function createAuth(
           // /subscription/upgrade, never on the request path. At the boundary
           // a race can oversell by a seat — that's a refund-one-customer
           // problem, per #162.
-          getCheckoutSessionParams: async ({ plan }) => {
+          getCheckoutSessionParams: async ({ plan, user }, _request, ctx) => {
+            const metadata = Schema.decodeUnknownOption(
+              Schema.Struct({ dotflowyTrial: Schema.String }),
+            )(ctx.body?.metadata);
+            if (metadata._tag === "Some") {
+              if (plan.name !== "unlimited" || ctx.body?.annual)
+                throw new APIError("FORBIDDEN", {
+                  message: "Trial setup uses monthly Pro.",
+                });
+              return trialCheckoutParams(
+                env.DB,
+                user.id,
+                metadata.value.dotflowyTrial,
+              );
+            }
             if (
               plan.name === "founding" &&
               (await countFoundingSeats(env.DB)) >= FOUNDING_SEAT_LIMIT

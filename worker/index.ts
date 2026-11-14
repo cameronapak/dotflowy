@@ -80,6 +80,7 @@ import { acknowledgeWelcome, canSaveTheme, readMembership } from "./membership";
 import { legacyNumberedNode } from "./numbered-compat";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
+import { trialCheckout } from "./pro-trial";
 import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, rateLimitedTitleE, unfurlTitleE } from "./unfurl";
@@ -1262,6 +1263,10 @@ function handleApiRequest(
         return json({ error: "invalid origin" }, 403);
       }
       return yield* handleFeedbackRequest(request, env, session, executionCtx);
+    }
+
+    if (url.pathname === "/api/membership/trial") {
+      return yield* trialCheckout(request, env.DB, session.user.id, auth);
     }
 
     if (url.pathname === "/api/membership") {
