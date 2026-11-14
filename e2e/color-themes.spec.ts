@@ -42,6 +42,12 @@ const CUSTOM_SEEDS = [
   return { ...seed, second: { h: (h + 150) % 360, c: MAX_CHROMA } };
 });
 
+/** Pick a theme from the Theme menu in Settings (ADR 0082). */
+async function pickTheme(page: Page, name: string | RegExp) {
+  await page.getByRole("button", { name: /^Theme, / }).click();
+  await page.getByRole("menuitemradio", { name, exact: true }).click();
+}
+
 declare global {
   interface Window {
     /** What the head script painted before <body> existed. */
@@ -107,12 +113,11 @@ test("Free previews never save, and leaving Settings restores the saved theme", 
   });
   await page.goto("/settings");
   await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
-  const leaf = page.getByRole("radio", { name: /Leaf, preview/ });
-  await expect(leaf).toBeEnabled();
+  await expect(page.getByRole("button", { name: /^Theme, / })).toBeEnabled();
   const cache = await page.evaluate(() =>
     localStorage.getItem("dotflowy:color-theme"),
   );
-  await leaf.click();
+  await pickTheme(page, /Leaf, preview/);
   await expect(page.locator("html")).toHaveClass(/\btheme-leaf\b/);
   await expect(
     page.getByText("Previewing Leaf", { exact: true }),
@@ -131,7 +136,7 @@ test("Free previews never save, and leaving Settings restores the saved theme", 
   await expect(upgrade).toBeHidden();
   await page.getByRole("button", { name: "End preview" }).click();
   await expect(page.locator("html")).not.toHaveClass(/\btheme-leaf\b/);
-  await leaf.click();
+  await pickTheme(page, /Leaf, preview/);
   await page.getByRole("button", { name: "Back to outline" }).click();
   await expect(page.locator("html")).not.toHaveClass(/\btheme-leaf\b/);
   await page.keyboard.press("ControlOrMeta+k");
@@ -435,19 +440,15 @@ test("the color theme is the account's and survives cleared storage", async ({
     }),
   );
   await page.goto("/settings");
-  const leaf = page.getByRole("radio", { name: "Leaf" });
-  await leaf.click();
-  await expect(leaf).toHaveAttribute("aria-checked", "true");
+  await pickTheme(page, "Leaf");
+  await expect(page.getByRole("button", { name: "Theme, Leaf" })).toBeVisible();
   await expect(page.locator("html")).toHaveClass(/\btheme-leaf\b/);
 
   // Lose this device's mirror: the account row brings the theme back.
   await page.evaluate(() => localStorage.clear());
   await page.reload();
   await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
-  await expect(page.getByRole("radio", { name: "Leaf" })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
+  await expect(page.getByRole("button", { name: "Theme, Leaf" })).toBeVisible();
   await expect(page.locator("html")).toHaveClass(
     /\bthemed\b.*\btheme-leaf\b|\btheme-leaf\b.*\bthemed\b/,
   );
@@ -468,6 +469,24 @@ test("the color theme is the account's and survives cleared storage", async ({
   ).toHaveCount(0);
 });
 
+test("a phone picks a theme from the Theme sheet", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await seedOutline(page, TREE);
+  await page.route("**/api/membership", (route) =>
+    route.fulfill({
+      json: { plan: "unlimited", legacyLeaf: false, subs: [], welcome: null },
+    }),
+  );
+  await page.goto("/settings");
+  await pickTheme(page, "Leaf");
+  await expect(page.locator("html")).toHaveClass(/\btheme-leaf\b/);
+  await expect(page.locator("dialog[open].lg-sheet-dialog")).toHaveCount(0);
+  await page.getByRole("button", { name: "Theme, Leaf" }).click();
+  await expect(
+    page.getByRole("menuitemradio", { name: "Leaf", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+});
+
 test("a saved custom theme paints before the app mounts and follows the account", async ({
   page,
 }) => {
@@ -478,9 +497,10 @@ test("a saved custom theme paints before the app mounts and follows the account"
     }),
   );
   await page.goto("/settings");
-  const custom = page.getByRole("radio", { name: "Custom", exact: true });
-  await custom.click();
-  await expect(custom).toHaveAttribute("aria-checked", "true");
+  await pickTheme(page, /^Custom, /);
+  await expect(
+    page.getByRole("button", { name: "Theme, Cobalt" }),
+  ).toBeVisible();
   await expect(page.locator("html")).toHaveClass(/\btheme-custom\b/);
   const saved = await page.evaluate(() =>
     localStorage.getItem("dotflowy:color-theme"),
@@ -518,8 +538,8 @@ test("a saved custom theme paints before the app mounts and follows the account"
   // Booting the app under vite dev can take most of the 5s assertion budget.
   await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(
-    page.getByRole("radio", { name: "Custom", exact: true }),
-  ).toHaveAttribute("aria-checked", "true");
+    page.getByRole("button", { name: "Theme, Cobalt" }),
+  ).toBeVisible();
   await expect(page.locator("#dotflowy-custom-theme")).toHaveCount(1);
   expect(
     await page.evaluate(() => localStorage.getItem("dotflowy:color-theme")),
@@ -544,16 +564,15 @@ for (const failure of ["account load", "save"] as const)
       }),
     );
     await page.goto("/settings");
-    await page.getByRole("radio", { name: "Leaf" }).click();
+    await pickTheme(page, "Leaf");
     await expect(
       page.getByText(
         "Couldn't save your theme. Your previous theme was restored.",
       ),
     ).toBeVisible();
-    await expect(page.getByRole("radio", { name: "Dotflowy" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    await expect(
+      page.getByRole("button", { name: "Theme, Dotflowy" }),
+    ).toBeVisible();
     await expect(page.locator("html")).not.toHaveClass(/\btheme-leaf\b/);
     expect(
       await page.evaluate(() => localStorage.getItem("dotflowy:color-theme")),
