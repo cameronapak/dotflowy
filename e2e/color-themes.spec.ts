@@ -455,6 +455,8 @@ test("a saved custom theme paints before the app mounts and follows the account"
   // A device without the cache shows the account's custom theme once it loads.
   await page.evaluate(() => localStorage.clear());
   await page.reload();
+  // Booting the app under vite dev can take most of the 5s assertion budget.
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(
     page.getByRole("radio", { name: "Custom", exact: true }),
   ).toHaveAttribute("aria-checked", "true");
