@@ -933,6 +933,19 @@ const renderImportReceipt = (args: {
 
 export const tools: ReadonlyArray<ToolDef> = [
   {
+    name: "get_pro_trial",
+    title: "Get Pro trial setup link",
+    description:
+      "Get the browser setup link for a 14-day Pro trial with no card required. This only provides information; the user must sign in and explicitly complete Stripe Checkout. It never starts a trial or authorizes payment. Available without Pro.",
+    input: Schema.Struct({}),
+    readOnly: true,
+    destructive: false,
+    handle: () =>
+      Effect.succeed(
+        "To opt in, open https://app.dotflowy.com/settings#billing and choose Start 14-day Pro trial. No card is required. Eligibility is checked in the app. Complete browser Checkout to activate; this tool has not started anything. Without a usable payment method the trial cancels after 14 days. A saved or added payment method can enable the disclosed paid renewal.",
+      ),
+  },
+  {
     name: "get_outline",
     title: "Get outline",
     description:

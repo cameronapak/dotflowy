@@ -215,11 +215,33 @@ also registers the `app.dotflowy.com` webhook endpoint and prints the `whsec_…
 signing secret once (feed it to `wrangler secret put STRIPE_WEBHOOK_SECRET`).
 
 The managed webhook must also subscribe to
-`checkout.session.async_payment_succeeded` so delayed-payment success can queue
-the personal membership thank-you. Existing endpoints are not modified by the
-setup script: it reports event mismatches. With explicit approval, add that
-one event to the existing endpoint without changing its URL, signing secret,
+`checkout.session.async_payment_succeeded` and `invoice.paid` so delayed-payment
+success and the first paid trial conversion can queue the personal membership
+thank-you. Existing endpoints are not modified by the setup script: it reports
+event mismatches. With explicit approval, add missing events to the existing
+endpoint without changing its URL, signing secret,
 existing events, Prices, or subscriptions.
+
+Stripe also needs an active default Billing Portal configuration. Enable
+payment-method updates, invoice history and subscription cancellation at period
+end. The trial's **Continue Pro** action uses this portal to add a payment method;
+Better Auth does not create its configuration. Inspect the existing default
+before changing anything, and keep plan/price switching disabled unless separately
+approved. Provision the configuration in test mode as well as live mode.
+
+The opt-in 14-day Pro trial uses hosted Checkout with no card required. Only
+`POST /api/membership/trial` reserves trial setup; ordinary monthly/yearly
+purchases do not silently receive trial days. Apply migration 0021 locally for
+the account-scoped retry/eligibility claim. Checkout sets
+`payment_method_collection: if_required` and cancels at trial end without a
+payment method. A saved or added payment method can enable the disclosed
+$5/month renewal. Do not set plan-wide `freeTrial` or create a separate trial
+Price. See [ADR 0087](./docs/adr/0087-membership-experience.md#cardless-pro-trial).
+`worker/capture-real.test.ts` intercepts all Stripe requests and exercises the
+real Better Auth endpoints plus signed fixture webhooks without Stripe access.
+Before release, separately verify cardless completion, expiry, billing-portal
+conversion and first paid invoice in Stripe test mode. These fixtures do not
+authorize test-mode or live Stripe writes, production migration or deployment.
 
 Entitlement reads never call Stripe. `getPlan(userId, env)` is one D1 query on
 `referenceId = user.id`, `status IN ('active','trialing')`. Free tier is no

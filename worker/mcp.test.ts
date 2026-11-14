@@ -435,6 +435,7 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
   expect(tool("add_node").inputSchema.type).toBe("object");
   expect(tool("add_node").inputSchema.required).toEqual(["sourceApp", "text"]);
   const expectedHints = {
+    get_pro_trial: [true, false],
     get_outline: [true, false],
     search_nodes: [true, false],
     export_opml: [true, false],
@@ -538,6 +539,15 @@ test("a free plan (no agent access) refuses tools/call but keeps discovery open 
     arguments: { text: "nope" },
   });
   expect(write.error.code).toBe(-32001);
+  expect(batches.length).toBe(0);
+  const trial = await free("tools/call", {
+    name: "get_pro_trial",
+    arguments: {},
+  });
+  expect(trial.error).toBeUndefined();
+  expect(trial.result.content[0].text).toContain(
+    "https://app.dotflowy.com/settings#billing",
+  );
   expect(batches.length).toBe(0);
 
   // initialize / ping / tools/list stay open, so a free connection can still

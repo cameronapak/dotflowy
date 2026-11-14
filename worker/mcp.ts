@@ -79,7 +79,7 @@ const INTERNAL_ERROR = -32603;
 // can still initialize + discover but no tool call ever touches the outline.
 const UPGRADE_REQUIRED = -32001;
 const UPGRADE_MESSAGE =
-  "Agent access requires Pro or Founding. Upgrade at https://app.dotflowy.com/settings#billing to connect an agent.";
+  "Agent access requires Pro or Founding. Open https://app.dotflowy.com/settings#billing to opt into a 14-day Pro trial with no card required, if eligible, or subscribe. Browser Checkout must be completed; connecting an agent does not start a trial.";
 
 // --- Wire schemas (the /api/mcp trust boundary) --------------------------------
 
@@ -335,9 +335,10 @@ function dispatch(
       );
     case "tools/call":
       // The entitlement gate: initialize/ping/tools/list stay open so a free
-      // connection can handshake and see WHY, but every tool call — read AND
-      // write — is refused until the plan includes agent access (#170).
-      return agentAccess
+      // connection can handshake and see WHY. Only the read-only trial setup
+      // information is exempt; all outline tools still require Pro (#170).
+      const trialInfo = decodeOrNull(CallToolParamsSchema, message.params);
+      return agentAccess || trialInfo?.name === "get_pro_trial"
         ? handleToolCall(id, message.params, store, afterTextWrite, permission)
         : Effect.succeed(rpcError(id, UPGRADE_REQUIRED, UPGRADE_MESSAGE));
     default:

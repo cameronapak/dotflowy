@@ -85,6 +85,16 @@ export function MembershipProvider({ children }: { children: ReactNode }) {
     window.addEventListener("focus", reload);
     return () => window.removeEventListener("focus", reload);
   }, [reload]);
+  useEffect(() => {
+    const end = membership.subs.find(
+      (sub) => sub.status === "trialing",
+    )?.trialEnd;
+    if (!end) return;
+    const remaining = new Date(end).getTime() - Date.now();
+    if (remaining <= 0) return;
+    const timer = setTimeout(reload, Math.min(remaining + 1000, 2_147_483_647));
+    return () => clearTimeout(timer);
+  }, [membership.subs, reload]);
   return (
     <Context.Provider value={{ ...membership, reload }}>
       {children}

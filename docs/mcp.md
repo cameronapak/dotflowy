@@ -19,8 +19,15 @@ See [ADR 0081](./adr/0081-source-app-attribution.md).
 
 For terminal access, use the [Dotflowy CLI](../cli/README.md). Settings →
 Connections has setup actions for MCP apps and the CLI, plus unified API key
-management. Both MCP and CLI require Unlimited or Founding and preserve spoiler
-redaction. Clients that support a manually configured bearer can use a personal
+management. Outline tools through MCP and CLI require Pro or Founding and preserve
+spoiler redaction. Authenticated Free accounts can call the read-only
+`get_pro_trial` tool for a browser setup link. It never starts a trial or
+authorizes payment: sign in and choose **Start 14-day Pro trial** in Settings,
+then complete Stripe Checkout. No card is required. Without a payment method
+the trial cancels after 14 days; a saved or added payment method can enable the
+disclosed $5/month renewal. Eligibility is once per account, excluding current
+paid/comped accounts and accounts with prior trials or unresolved billing.
+Clients that support a manually configured bearer can use a personal
 API key instead of OAuth. Create it in **Dotflowy Settings → Connections → API
 keys**: Read-only permits outline reads, search, and export; Read and write
 permits all tools. The server filters tool discovery and rejects direct write

@@ -16,6 +16,74 @@ client state and checkout return URLs never grant access. Trialing and active
 subscriptions retain the existing entitlement rule; canceled-at-period-end
 subscriptions keep access while active.
 
+## Cardless Pro trial
+
+Offer a deliberate 14-day **monthly Pro** trial through hosted Stripe Checkout,
+not an app-owned entitlement or a trial automatically attached to signup or
+ordinary purchases. Monthly is the default conversion path; yearly and Founding
+remain explicit paid purchases. Settings and feature offers disclose that no
+card is required, no payment method means cancellation after 14 days, and using
+a saved or added payment method enables $5/month renewal unless canceled.
+Stripe's `payment_method_collection: if_required` permits cardless setup; it
+does not promise no automatic charge when a usable payment method exists.
+
+`POST /api/membership/trial` requires a verified browser session, same-origin
+JSON and `consent: true`. Connecting MCP, opening a link, loading Settings, or
+creating a Checkout does not start the trial. The authenticated, read-only MCP
+`get_pro_trial` tool only returns the Settings link and disclosure; it is the
+only tool exempt from the Free plan gate and never touches the outline.
+
+Eligibility is once per account: no previous trial, active paid/comp entitlement,
+or unresolved Stripe subscription (incomplete, past due, unpaid or paused).
+Former paid subscribers whose subscriptions ended, with no prior trial, are
+eligible. Verified email and the existing signup gates limit casual abuse; this
+is not one-per-person enforcement. We do not retain identity fingerprints after
+account deletion or promise to prevent fresh-account abuse.
+
+Migration 0021 adds one account-scoped setup claim, not another entitlement
+source. A claim serializes tabs with a one-minute lease, reuses the hosted URL,
+and gives Stripe a stable idempotency key and fixed one-hour Checkout expiry.
+Failures retain the lease to bound retries. If no URL was saved and fewer than
+31 minutes remain, wait for expiry rather than create an overlapping session or
+violate Stripe's minimum expiry. After expiry an abandoned attempt can be
+replaced. Verified managed-trial webhooks mark the account's claim used;
+subscription trial history independently blocks repeated enrollment.
+
+Only the reserved enrollment marker adds `trial_period_days: 14` through Better
+Auth's `getCheckoutSessionParams`. Do not set plan-wide `freeTrial`, which would
+silently change normal upgrade behavior. Stripe owns the clock and uses
+`missing_payment_method: cancel`, not `pause`. Better Auth persists its lifecycle
+to the existing subscription rows, so app and MCP still share active/trialing
+entitlements without Stripe calls on reads. Checkout return URLs never grant
+access. Expiry is webhook-driven, including normal webhook-delivery latency;
+the browser refreshes membership at trial end and on focus.
+
+During the trial, show its end date and Continue Pro (the existing billing
+portal for adding a payment method). After cardless cancellation, show Free and
+normal paid upgrades, not another trial. Preserve all outline data: existing
+Free limits disallow net growth over the cap but do not block edits/deletes.
+Paid and comped users do not see the trial offer; comped users have no Stripe
+billing controls. A zero-value trial invoice never queues a paid thank-you.
+For this managed trial only, a positive `invoice.paid` for the first period
+starting at its trial end queues the same idempotent welcome as paid Checkout;
+renewals do not queue a new welcome.
+
+This choice reuses Better Auth's Checkout ownership and lifecycle handling
+instead of introducing manual subscription creation/mapping. An app-owned
+trial avoids Stripe setup entirely but adds a second entitlement clock and
+conversion path. Direct API-created Stripe trials avoid the browser visit but
+require extra subscription-to-Better-Auth synchronization. Neither advantage
+outweighs the extra ownership now that browser Checkout is acceptable.
+
+Deployment requires migration 0021 and the existing Stripe endpoint receiving
+`invoice.paid` in addition to its current events. No new Product, Price or
+Dashboard trial configuration is needed. Local fixtures are not external
+Checkout verification: before release, separately approve and exercise a Stripe
+test-mode cardless completion, missing-payment-method cancellation and paid
+conversion. Live configuration, migrations and deployment need separate approval.
+
+## Welcome and feedback
+
 The Stripe plugin's verified `onEvent` callback queues one welcome per Stripe
 subscription in D1 after a paid checkout completion, including delayed-payment
 success. Unlike its `onSubscriptionComplete` hook, `onEvent` propagates failures
@@ -113,7 +181,7 @@ name should be renamed in place to Dotflowy Pro with separate approval; do not
 replace its Prices or run the setup script to rename it. That script only
 creates missing objects and does not rename existing ones.
 
-Apply migrations 0017 through 0020 before deploying this code. This change does not
+Apply migrations 0017 through 0021 before deploying this code. This change does not
 itself authorize a production migration, deployment, or modifying saved themes.
 Local verification can seed subscription/receipt fixtures; that is not a real
 Stripe payment. A Stripe test-mode checkout and signed webhook remain the

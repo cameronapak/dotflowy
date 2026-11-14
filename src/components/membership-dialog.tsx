@@ -8,6 +8,7 @@ import {
   setMembershipOpener,
   type MembershipReason,
 } from "./membership-opener";
+import { ProTrialOffer } from "./pro-trial-offer";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -84,6 +85,7 @@ export function MembershipDialog() {
             </li>
           ))}
         </ul>
+        <ProTrialOffer />
         <FieldGroup>
           <Field>
             <FieldLabel htmlFor="membership-plan">Choose your plan</FieldLabel>

@@ -78,7 +78,7 @@ test("Free previews never save, and leaving Settings restores the saved theme", 
 /** Every check below its minimum for the theme and Mode now on <html>. */
 async function contrastFailures(
   page: Page,
-  surface: "outline" | "settings" = "outline",
+  surface: "outline" | "settings" | "trial" = "outline",
 ) {
   const hovered = [];
   const hoverTargets = [
@@ -140,15 +140,40 @@ async function contrastFailures(
       const value = ratio(paint([...bg, fg]), paint(bg));
       if (value < min) failures.push(`${label} ${value.toFixed(2)} < ${min}`);
     };
-    if (surface === "settings") {
+    if (surface === "settings" || surface === "trial") {
       // Composite actual ancestor backgrounds, including the card and badge
       // tint. Token pairs alone miss primary used as ink and translucent tracks.
-      const backgrounds = (el: Element) => {
+      const backgrounds = (el: Element, banner?: Element) => {
         const layers = ["white"];
         for (let p: Element | null = el; p; p = p.parentElement)
-          layers.splice(1, 0, getComputedStyle(p).backgroundColor);
+          layers.splice(
+            1,
+            0,
+            getComputedStyle(p).backgroundColor,
+            // Conservatively check the strongest point of the decorative tint,
+            // even though most text sits on a weaker part of the gradient.
+            ...(p === banner
+              ? ["color-mix(in oklab, var(--primary) 10%, transparent)"]
+              : []),
+          );
         return layers;
       };
+      if (surface === "trial") {
+        const banner = document
+          .querySelector("#billing h3")!
+          .closest('[data-slot="card"]')!;
+        for (const el of banner.querySelectorAll(
+          'h3, p, button, [data-slot="badge"], [data-slot="card-description"], [data-slot="card-content"] > span',
+        ))
+          check(
+            el.textContent!.trim(),
+            getComputedStyle(el).color,
+            backgrounds(el, banner),
+            4.5,
+          );
+        probe.remove();
+        return failures;
+      }
       const active = Array.from(
         document.querySelectorAll("#billing span"),
       ).find((el) => el.textContent?.trim() === "Active")!;
@@ -245,9 +270,16 @@ test("settings badges and on/off switches stay readable in every theme and Mode"
   page,
 }) => {
   await seedOutline(page, TREE);
+  let trial = false;
   await page.route("**/api/membership", (route) =>
     route.fulfill({
-      json: { plan: "unlimited", legacyLeaf: false, subs: [], welcome: null },
+      json: {
+        plan: trial ? "free" : "unlimited",
+        trialEligible: trial,
+        legacyLeaf: false,
+        subs: [],
+        welcome: null,
+      },
     }),
   );
   await page.goto("/settings");
@@ -261,23 +293,50 @@ test("settings badges and on/off switches stay readable in every theme and Mode"
   await expect(embeds).not.toBeChecked();
   await page.addStyleTag({ content: "* { transition: none !important; }" });
   const failures: string[] = [];
-  for (const theme of THEMES)
-    for (const dark of [false, true]) {
-      await page.evaluate(
-        ([theme, dark]) => {
-          const root = document.documentElement;
-          root.classList.remove(
-            ...Array.from(root.classList).filter((c) => c.startsWith("theme-")),
-          );
-          root.classList.toggle("themed", theme !== "default");
-          if (theme !== "default") root.classList.add(`theme-${theme}`);
-          root.classList.toggle("dark", dark);
-        },
-        [theme, dark] as const,
+  for (const surface of ["settings", "trial"] as const) {
+    if (surface === "trial") {
+      trial = true;
+      await page.reload();
+      await page
+        .getByRole("button", { name: "Start 14-day Pro trial" })
+        .waitFor();
+      await page.route("**/api/membership/trial", (route) =>
+        route.fulfill({ status: 503, json: { error: "Please try again." } }),
       );
-      for (const f of await contrastFailures(page, "settings"))
-        failures.push(`${theme} ${dark ? "dark" : "light"}: ${f}`);
+      await page
+        .getByRole("button", { name: "Start 14-day Pro trial" })
+        .click();
+      await expect(page.getByRole("alert")).toBeVisible();
+      await page.addStyleTag({ content: "* { transition: none !important; }" });
     }
+    for (const theme of THEMES)
+      for (const dark of [false, true]) {
+        await page.evaluate(
+          ([theme, dark]) => {
+            const root = document.documentElement;
+            root.classList.remove(
+              ...Array.from(root.classList).filter((c) =>
+                c.startsWith("theme-"),
+              ),
+            );
+            root.classList.toggle("themed", theme !== "default");
+            if (theme !== "default") root.classList.add(`theme-${theme}`);
+            root.classList.toggle("dark", dark);
+          },
+          [theme, dark] as const,
+        );
+        if (surface === "trial") await page.locator("#billing h3").hover();
+        for (const f of await contrastFailures(page, surface))
+          failures.push(`${theme} ${dark ? "dark" : "light"}: ${f}`);
+        if (surface === "trial") {
+          await page
+            .getByRole("button", { name: "Start 14-day Pro trial" })
+            .hover();
+          for (const f of await contrastFailures(page, surface))
+            failures.push(`${theme} ${dark ? "dark" : "light"} hover: ${f}`);
+        }
+      }
+  }
   expect(failures).toEqual([]);
 });
 
