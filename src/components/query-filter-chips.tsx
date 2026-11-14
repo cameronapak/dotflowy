@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 
 import { ChevronDownIcon } from "@/lib/icons";
+import { cn } from "@/lib/utils";
 
 import { tokenizeQuery } from "../data/filter-query";
 import { Button } from "./ui/button";
@@ -51,20 +52,26 @@ const shortcuts = [
   },
 ];
 
-/** Both Find and Filter expose the same text-producing include/exclude menus. */
+/** Find's text-producing include/exclude menus: a chip row on phones, and a
+ *  vertical list in the desktop rail's Narrow section. */
 export function QueryFilterChips({
   query,
   onChange,
+  vertical = false,
 }: {
   query: string;
   onChange: (query: string) => void;
+  vertical?: boolean;
 }) {
   return (
     <div
       role="group"
       aria-label="Query shortcuts"
       data-query-shortcuts
-      className="flex gap-1 overflow-x-auto px-1 py-2"
+      className={cn(
+        "flex gap-1",
+        vertical ? "flex-col" : "overflow-x-auto px-1 py-2",
+      )}
     >
       {shortcuts.map((shortcut) => (
         <QueryShortcut
@@ -72,6 +79,7 @@ export function QueryFilterChips({
           shortcut={shortcut}
           query={query}
           onChange={onChange}
+          vertical={vertical}
         />
       ))}
     </div>
@@ -82,10 +90,12 @@ function QueryShortcut({
   shortcut,
   query,
   onChange,
+  vertical,
 }: {
   shortcut: (typeof shortcuts)[number];
   query: string;
   onChange: (query: string) => void;
+  vertical: boolean;
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const edited = useRef(false);
@@ -152,9 +162,16 @@ function QueryShortcut({
         render={
           <Button
             type="button"
-            variant={active.length ? "secondary" : "outline"}
+            variant={
+              active.length ? "secondary" : vertical ? "ghost" : "outline"
+            }
             size="xs"
-            className="[@media(pointer:coarse)]:min-h-11"
+            className={cn(
+              "[@media(pointer:coarse)]:min-h-11",
+              vertical &&
+                "w-full justify-between font-normal text-muted-foreground aria-expanded:text-foreground data-[state=open]:text-foreground",
+              vertical && active.length && "text-foreground",
+            )}
           />
         }
       >

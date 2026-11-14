@@ -50,7 +50,9 @@ async function stored(page: Page): Promise<ApiNode[]> {
 async function picker(page: Page, id = "draft") {
   await placeCaret(text(page, id), "end");
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder(/Search nodes and actions/).fill("Focus session");
+  await page
+    .getByPlaceholder(/Search nodes and commands/)
+    .fill("Focus session");
   await page.getByRole("option", { name: /Focus session…/ }).click();
   await expect(
     page.getByRole("dialog", { name: "Focus session" }),
@@ -177,7 +179,7 @@ test("pause, replacement, Let go, mirror reflection, external completion and del
     .click();
   await placeCaret(text(page, "other"), "end");
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder(/Search nodes and actions/).fill("Delete");
+  await page.getByPlaceholder(/Search nodes and commands/).fill("Delete");
   await page.getByRole("option", { name: /^Delete/ }).click();
   await expect(band(page)).toHaveCount(0);
   await expect(
@@ -431,7 +433,7 @@ test("turning Focus sessions off lets a running session go and hides its command
   await expect(band(page)).toContainText("Finish the draft");
   const action = async (label: string) => {
     await page.keyboard.press("ControlOrMeta+k");
-    await page.getByPlaceholder(/Search nodes and actions/).fill(label);
+    await page.getByPlaceholder(/Search nodes and commands/).fill(label);
     await page.getByRole("option", { name: label }).click();
   };
   await action("Turn off Focus sessions");
@@ -441,7 +443,9 @@ test("turning Focus sessions off lets a running session go and hides its command
   ).toHaveCount(0);
   await placeCaret(text(page, "draft"), "end");
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder(/Search nodes and actions/).fill("Focus session");
+  await page
+    .getByPlaceholder(/Search nodes and commands/)
+    .fill("Focus session");
   await expect(
     page.getByRole("option", { name: /Focus session…/ }),
   ).toHaveCount(0);
@@ -451,7 +455,9 @@ test("turning Focus sessions off lets a running session go and hides its command
   await page.getByRole("option", { name: "Turn on Focus sessions" }).click();
   await placeCaret(text(page, "draft"), "end");
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder(/Search nodes and actions/).fill("Focus session");
+  await page
+    .getByPlaceholder(/Search nodes and commands/)
+    .fill("Focus session");
   await expect(
     page.getByRole("option", { name: /Focus session…/ }),
   ).toBeVisible();
@@ -553,7 +559,7 @@ test("a rejected Focus sessions off-save keeps the running session", async ({
   );
   await page.keyboard.press("ControlOrMeta+k");
   await page
-    .getByPlaceholder(/Search nodes and actions/)
+    .getByPlaceholder(/Search nodes and commands/)
     .fill("Turn off Focus sessions");
   await page.getByRole("option", { name: "Turn off Focus sessions" }).click();
   await saveSeen;

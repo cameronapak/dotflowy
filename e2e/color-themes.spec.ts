@@ -135,7 +135,9 @@ test("Free previews never save, and leaving Settings restores the saved theme", 
   await page.getByRole("button", { name: "Back to outline" }).click();
   await expect(page.locator("html")).not.toHaveClass(/\btheme-leaf\b/);
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("Catppuccin");
+  await page
+    .getByPlaceholder("Search nodes and commands...")
+    .fill("Catppuccin");
   await page.getByRole("option", { name: /Theme: Catppuccin/ }).click();
   await expect(page).toHaveURL(/settings#appearance$/);
   await expect(

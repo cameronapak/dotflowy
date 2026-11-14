@@ -1080,7 +1080,7 @@ test("writing in an Empty day creates its note and keeps every keystroke", async
   await openDay(page);
   await expect(section(page, NEXT, "placeholder")).toBeAttached();
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder(/Search nodes and actions/).fill("scribble");
+  await page.getByPlaceholder(/Search nodes and commands/).fill("scribble");
   await page.getByRole("option", { name: /Turn on Scribble mode/ }).click();
   const claim = await holdClaim(page, NEXT);
 

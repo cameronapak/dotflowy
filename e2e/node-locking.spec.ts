@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, text, type SeedNode } from "./fixtures";
+import {
+  applyFilter,
+  placeCaret,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 const TREE: SeedNode[] = [
   { id: "root", parentId: null, prevSiblingId: null, text: "Lock root" },
@@ -63,11 +69,10 @@ test("locking a node makes its subtree read-only while view state stays mutable"
   await expect(disclosure(false)).toBeAttached();
 
   // Filtering opens matching descendants without changing saved collapse state.
-  await page.keyboard.press("ControlOrMeta+f");
-  await page.getByRole("combobox", { name: "Filter query" }).fill("Child");
+  await applyFilter(page, "Child");
   await expect(text(page, "child")).toBeVisible();
   await expect(disclosure(true)).toBeAttached();
-  await page.getByRole("combobox", { name: "Filter query" }).fill("");
+  await applyFilter(page, "");
   await expect(text(page, "child")).toBeHidden();
   await disclosure(false).click();
   await expect(text(page, "child")).toBeVisible();

@@ -70,13 +70,21 @@ test("mobile destinations, search, capture, and filter use existing app behavior
   await expect(
     page.getByRole("menuitem", { name: "Sign out", exact: true }),
   ).toBeAttached();
+  // Search this view opens Find on this node; Show in outline filters it.
   await page
-    .getByRole("menuitem", { name: "Filter this view", exact: true })
+    .getByRole("menuitem", { name: "Search this view", exact: true })
     .tap();
-  const filter = page.getByRole("combobox", { name: "Filter query" });
-  await expect(filter).toBeFocused();
-  await filter.fill("Captured");
+  const find = page.getByRole("combobox", { name: "Find nodes and actions" });
+  await expect(find).toBeFocused();
+  await expect(
+    page.getByRole("button", { name: /^This node/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await find.fill("Captured");
+  await page.getByRole("button", { name: /^Show in outline/ }).tap();
   await expect(page).toHaveURL(/q=Captured/);
+  await expect(page.locator("[data-filter-pill]")).toHaveText(
+    "Capturedin this node",
+  );
 });
 
 test("Find menus and overlay handoffs work inside the native phone sheet", async ({

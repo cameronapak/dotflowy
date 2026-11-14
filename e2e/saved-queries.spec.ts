@@ -1,11 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
+import {
+  applyFilter,
+  filterPill,
+  findInput,
+  openSeededOutline,
+  seedOutline,
+  type SeedNode,
+} from "./fixtures";
 
-// Saved filter queries (ADR 0048): a Pin toggle inside the filter input saves
-// the current `?q=` string to a synced side-collection, surfaced in the filter
-// popover's "Saved" section and the Cmd+K empty state. Rename/delete live on the
-// popover rows; Cmd+K only lists and runs.
+// Saved filter queries (ADR 0048, moved into Find by ADR 0089): the applied
+// filter's pill pins the current `?q=` string to a synced side-collection.
+// Find lists saved filters (the desktop rail's Saved section, the phone list),
+// where a row fills Find, the pencil renames inline, and the X deletes.
 
 const TREE: SeedNode[] = [
   {
@@ -21,89 +28,67 @@ const TREE: SeedNode[] = [
 
 const row = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"]`);
-const input = (page: Page) =>
-  page.getByRole("combobox", { name: "Filter query" });
-const popover = (page: Page) => page.locator("[data-filter-popover]");
+const saved = (page: Page) =>
+  page.getByRole("dialog", { name: "Find" }).getByRole("region", {
+    name: "Saved",
+  });
 
 async function load(page: Page) {
   await seedOutline(page, TREE);
   await openSeededOutline(page, { anchorId: "milk" });
 }
 
-async function summon(page: Page) {
-  await page.keyboard.press("ControlOrMeta+f");
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toBeFocused();
-}
-
-/** Summon, type a query, and pin it. Leaves the input focused with the query. */
+/** Apply `#work`, pin it, then clear the filter so nothing is active. */
 async function saveWork(page: Page) {
-  await summon(page);
-  await input(page).fill("#work");
+  await applyFilter(page, "#work");
   await page.getByRole("button", { name: "Save filter" }).click();
   await expect(
     page.getByRole("button", { name: "Unsave filter" }),
   ).toHaveAttribute("aria-pressed", "true");
+  await applyFilter(page, "");
 }
 
-/** Clear the input text (keeping focus) so the empty-focus cheat sheet -- and the
- *  Saved section above it -- shows. */
-async function showSavedSection(page: Page) {
-  await page.getByRole("button", { name: "Clear filter" }).click();
-  await expect(input(page)).toHaveValue("");
-  await expect(popover(page).getByText("Saved", { exact: true })).toBeVisible();
-}
-
-test("the pin saves and unpins the query, reflecting both pressed states", async ({
-  page,
-}) => {
+test("the pin saves and unpins the applied query", async ({ page }) => {
   await load(page);
-  await summon(page);
-
-  await input(page).fill("#work");
-  // Before saving: the pin offers to save (not pressed).
+  await applyFilter(page, "#work");
   const save = page.getByRole("button", { name: "Save filter" });
-  await expect(save).toBeVisible();
   await expect(save).toHaveAttribute("aria-pressed", "false");
 
   await save.click();
-  // After saving: the pin is pressed and now offers to unsave.
   const unsave = page.getByRole("button", { name: "Unsave filter" });
-  await expect(unsave).toBeVisible();
   await expect(unsave).toHaveAttribute("aria-pressed", "true");
 
-  // Toggle it back off.
-  await page.getByRole("button", { name: "Unsave filter" }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(
+    saved(page).getByRole("button", { name: "#work", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await unsave.click();
   await expect(
     page.getByRole("button", { name: "Save filter" }),
   ).toHaveAttribute("aria-pressed", "false");
-
-  // Clear the text to reveal the empty-focus cheat sheet: with nothing saved,
-  // the "Saved" section renders nothing.
-  await page.getByRole("button", { name: "Clear filter" }).click();
-  await expect(input(page)).toHaveValue("");
-  await expect(popover(page)).toBeVisible();
-  await expect(popover(page).getByText("Saved", { exact: true })).toHaveCount(
-    0,
-  );
+  // With nothing saved, Find has no Saved section.
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(findInput(page)).toBeFocused();
+  await expect(saved(page)).toHaveCount(0);
 });
 
-test("the Saved section lists the query and clicking it applies the filter", async ({
-  page,
-}) => {
+test("a Saved row fills Find, and Shift+Enter applies it", async ({ page }) => {
   await load(page);
   await saveWork(page);
-  // Clearing wipes ?q= too, so no filter is active before we click.
-  await showSavedSection(page);
   await expect(page).not.toHaveURL(/q=/);
 
-  await popover(page)
-    .getByRole("button", { name: "#work", exact: true })
-    .click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await saved(page).getByRole("button", { name: "#work", exact: true }).click();
 
-  // Applied: only the two #work rows survive, and ?q= is set.
+  // Find fills the query without changing the outline.
+  await expect(findInput(page)).toHaveValue("#work");
+  await expect(findInput(page)).toBeFocused();
+  await expect(page).not.toHaveURL(/q=/);
+  await findInput(page).press("Shift+Enter");
   await expect(page).toHaveURL(/q=%23work/);
-  await expect(input(page)).toHaveValue("#work");
+  await expect(filterPill(page)).toContainText("#work");
   await expect(row(page, "milk").first()).toBeVisible();
   await expect(row(page, "ship").first()).toBeVisible();
   await expect(row(page, "mom")).toHaveCount(0);
@@ -114,49 +99,45 @@ test("a saved query can be renamed inline and deleted by its new name", async ({
 }) => {
   await load(page);
   await saveWork(page);
-  await showSavedSection(page);
+  await page.keyboard.press("ControlOrMeta+k");
 
-  await popover(page).getByRole("button", { name: "Rename #work" }).click();
-  const rename = popover(page).getByRole("textbox", {
+  // Escape cancels a rename without closing Find.
+  await saved(page).getByRole("button", { name: "Rename #work" }).click();
+  const rename = saved(page).getByRole("textbox", {
     name: "Rename saved filter",
   });
   await expect(rename).toBeFocused();
+  await rename.fill("Discarded");
+  await rename.press("Escape");
+  await expect(findInput(page)).toBeFocused();
+  await expect(
+    saved(page).getByRole("button", { name: "#work", exact: true }),
+  ).toBeVisible();
+
+  // Enter commits without running the highlighted Find row.
+  await saved(page).getByRole("button", { name: "Rename #work" }).click();
   await rename.fill("My work");
   await rename.press("Enter");
+  await expect(findInput(page)).toBeFocused();
+  await expect(page.getByRole("dialog", { name: "Find" })).toBeVisible();
+  const renamed = saved(page).getByRole("button", {
+    name: "My work",
+    exact: true,
+  });
+  await expect(renamed).toHaveAttribute("title", "#work");
 
-  // The row now shows the custom name plus the query subtitle.
-  await expect(popover(page).getByText("My work")).toBeVisible();
-  await expect(
-    popover(page).getByRole("button", { name: "Rename My work" }),
-  ).toBeVisible();
-  await popover(page).getByRole("button", { name: "Delete My work" }).click();
-
-  // The section empties, so the "Saved" heading is gone.
-  await expect(popover(page).getByText("Saved", { exact: true })).toHaveCount(
-    0,
+  // Typing the new name finds it in the list too, where Enter runs it.
+  await findInput(page).fill("My work");
+  await expect(page.getByRole("option", { name: /My work/ })).toHaveAttribute(
+    "data-selected",
+    "true",
   );
-});
+  await findInput(page).press("Enter");
+  await expect(findInput(page)).toHaveValue("#work");
 
-test("Cmd+K lists and runs a saved query", async ({ page }) => {
-  await load(page);
-  await saveWork(page);
-  await page.getByRole("button", { name: "Clear filter" }).click();
-  await expect(page).not.toHaveURL(/q=/);
-
-  // Open the command center; the saved filter appears in the empty state.
-  await page.keyboard.press("ControlOrMeta+k");
-  await expect(page.getByPlaceholder(/Search nodes and actions/)).toBeVisible();
-
-  await page.getByRole("option", { name: "#work", exact: true }).click();
-
-  // Find fills the query without changing the outline. Shift+Enter filters here.
-  await expect(page.getByPlaceholder(/Search nodes and actions/)).toHaveValue(
-    "#work",
-  );
-  await expect(page).not.toHaveURL(/q=/);
-  await page.keyboard.press("Shift+Enter");
-  await expect(page.getByRole("dialog", { name: "Find" })).toHaveCount(0);
-  await expect(page).toHaveURL(/q=%23work/);
-  await expect(row(page, "milk").first()).toBeVisible();
-  await expect(row(page, "mom")).toHaveCount(0);
+  // Enter on a focused Delete deletes, rather than running the highlighted row.
+  await saved(page).getByRole("button", { name: "Delete My work" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(saved(page)).toHaveCount(0);
+  await expect(findInput(page)).toBeFocused();
 });

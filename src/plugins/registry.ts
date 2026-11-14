@@ -280,12 +280,12 @@ const allFilterOperators = [
 ];
 export const filterOperatorMap = buildFilterOperatorMap(allFilterOperators);
 
-/** The registry-driven cheat sheet for the filter input's autocomplete (ADR
+/** The registry-driven operator metadata for Find's query suggestions (ADR
  *  0047 §7): one row per distinct operator key, folding shared-key operators
  *  (`is:todo|bullet|paragraph|mirror` + `is:complete` + `is:agent`) into one
  *  entry with the union of their values. Built once at load beside the operator
  *  map, from the SAME list -- so a new plugin operator shows up in suggestions
- *  for free, never hand-maintained. Consumed by `query-filter.tsx`. */
+ *  for free, never hand-maintained. Consumed by `node-switcher.tsx`. */
 export const filterOperatorInfos = collectOperatorKeyInfos(allFilterOperators);
 
 export function buildViewFilter(

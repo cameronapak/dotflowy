@@ -25,7 +25,7 @@ test("Cmd+K plugin settings stay reachable when disabled and share Settings pref
   ).toBeVisible({ timeout: 15000 });
   const action = async (query: string, label: string) => {
     await page.keyboard.press("ControlOrMeta+k");
-    await page.getByPlaceholder(/Search nodes and actions/).fill(query);
+    await page.getByPlaceholder(/Search nodes and commands/).fill(query);
     await page.getByRole("option", { name: label, exact: false }).click();
   };
   await action("Bible references", "Turn off Bible references");
@@ -149,7 +149,7 @@ for (const enabled of [undefined, true, false]) {
     await expect(stream).toBeDisabled();
     await expect(stream).not.toBeChecked();
     await page.keyboard.press("ControlOrMeta+k");
-    await page.getByPlaceholder(/Search nodes and actions/).fill("Day stream");
+    await page.getByPlaceholder(/Search nodes and commands/).fill("Day stream");
     await expect(
       page.getByRole("option", { name: /Turn (on|off) Day stream/ }),
     ).toHaveCount(0);
@@ -267,7 +267,7 @@ test("Week start remains available while Daily is off and activates after migrat
 
   await page.keyboard.press("ControlOrMeta+k");
   await page
-    .getByPlaceholder(/Search nodes and actions/)
+    .getByPlaceholder(/Search nodes and commands/)
     .fill("Week starts on");
   await page.getByRole("option", { name: /Week starts on: Sunday/ }).click();
   await seen;
@@ -276,7 +276,7 @@ test("Week start remains available while Daily is off and activates after migrat
   await expect(sunday).toBeDisabled();
   await page.keyboard.press("ControlOrMeta+k");
   await page
-    .getByPlaceholder(/Search nodes and actions/)
+    .getByPlaceholder(/Search nodes and commands/)
     .fill("Week starts on");
   await expect(
     page.getByRole("option", { name: /Week starts on: Sunday/ }),

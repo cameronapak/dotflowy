@@ -149,7 +149,7 @@ for (const platform of ["MacIntel", "Linux x86_64"]) {
       },
     ]);
     const popover = page.locator("[data-link-edit-popover]");
-    const commands = page.getByPlaceholder(/Search nodes and actions/);
+    const commands = page.getByPlaceholder(/Search nodes and commands/);
 
     for (const surface of ["row", "title", "quick-add"]) {
       if (surface === "title") await page.goto("/n");

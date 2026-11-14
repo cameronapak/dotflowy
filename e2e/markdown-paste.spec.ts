@@ -218,7 +218,7 @@ test("sliced paste batches notifications, restores exact rows, and rolls back a 
   ).toBeGreaterThanOrEqual(500);
   await waitForHistoryIdle();
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await page.getByRole("option", { name: /^Redo/ }).click();
   await expect.poll(async () => authoring(await saved())).toEqual(pasted);
   await expect(page.getByTestId("history-restore-dialog")).toHaveCount(0);
@@ -237,7 +237,7 @@ test("sliced paste batches notifications, restores exact rows, and rolls back a 
   await expect.poll(async () => authoring(await saved())).toEqual(original);
   // The failed asynchronous paste must restore the redo timeline it held.
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await page.getByRole("option", { name: /^Redo paste/ }).click();
   await expect.poll(async () => authoring(await saved())).toEqual(pasted);
   await waitForHistoryIdle();

@@ -40,7 +40,7 @@ items, then an Account and help section with the App menu's. This amends the
 two-menu split in [ADR 0072](./0072-split-header-view-and-app-menus.md) on
 narrow screens only. The accepted cost is a long sheet that scrolls to Sign out.
 The unread-release dot moves to the More trigger, and its name gains
-"(new releases available)". Filter this view stays first in the View section.
+"(new releases available)". Search this view stays first in the View section.
 Plugin header slots without a dock tab, such as Scribble's off-switch, join
 Search and More in their glass group; the Spotlight indicator stays outside it.
 
@@ -48,8 +48,9 @@ Search and More in their glass group; the Spotlight indicator stays outside it.
 
 Find + filter ([ADR 0083](./0083-find-and-filter.md)) keeps Search opening the
 shared Find palette. Below 768px it uses the native sheet's large detent so the
-input, query chips, and results remain usable above a docked keyboard. Filter
-this view remains first in More; no toolbar icon is added.
+input, query chips, and results remain usable above a docked keyboard. Search
+this view, which opens Find on the current node ([ADR 0089](./0089-one-search-box.md)),
+remains first in More; no toolbar icon is added.
 
 Home uses `/`. Today shares the existing header action, including seed-entry,
 focus-last, and in-stream scrolling; `/today` remains its normal link destination

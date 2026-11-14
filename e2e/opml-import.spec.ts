@@ -38,7 +38,7 @@ async function pickFile(
   files: Parameters<FileChooser["setFiles"]>[0],
 ) {
   await page.keyboard.press("ControlOrMeta+k");
-  const input = page.getByPlaceholder(/Search nodes and actions/);
+  const input = page.getByPlaceholder(/Search nodes and commands/);
   await expect(input).toBeVisible();
   await input.fill("import opml");
   const chooserPromise = page.waitForEvent("filechooser");

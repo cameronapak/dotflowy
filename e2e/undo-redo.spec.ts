@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  applyFilter,
   holdDailyClaims,
   mockKeyboardViewport,
   placeCaret,
@@ -49,7 +50,7 @@ test("the first node after emptying the outline can be undone and redone", async
   await page.keyboard.press("ControlOrMeta+z");
   await expect(page.locator("li[data-node-id]")).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await expect(
     page.getByRole("option", { name: /^Redo create/ }),
   ).toBeEnabled();
@@ -70,13 +71,12 @@ test("hidden undo preserves the filter and offers View node", async ({
   await expect(bravo).toBeVisible({ timeout: 60_000 });
   await placeCaret(bravo, "end");
   await page.keyboard.type(" hidden");
-  await page.keyboard.press("ControlOrMeta+f");
-  const filter = page.getByRole("combobox", { name: "Filter query" });
-  await filter.fill("Alpha");
+  await applyFilter(page, "Alpha");
+  const filter = page.locator("[data-filter-pill]");
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("undo");
   await page.getByRole("option", { name: /^Undo typing/ }).click();
-  await expect(filter).toHaveValue("Alpha");
+  await expect(filter).toContainText("Alpha");
   const view = page.getByRole("button", { name: "View node", exact: true });
   await expect(page.getByText("Undid typing", { exact: true })).toBeVisible();
   await expect(view).toBeInViewport();
@@ -85,7 +85,7 @@ test("hidden undo preserves the filter and offers View node", async ({
   await expect(page.locator('[data-history-key="bravo"].node-text')).toHaveText(
     "Bravo",
   );
-  await expect(filter).toHaveValue("Alpha");
+  await expect(filter).toContainText("Alpha");
 });
 
 test("snapshots preserve unchanged authoring history but clear it for external edits", async ({
@@ -119,7 +119,7 @@ test("snapshots preserve unchanged authoring history but clear it for external e
   await expect.poll(savedText).toBe("Alpha");
   server.sendSnapshot();
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   const redo = page.getByRole("option", { name: /^Redo typing/ });
   await expect(redo).toBeEnabled();
   await redo.click();
@@ -138,12 +138,12 @@ test("snapshots preserve unchanged authoring history but clear it for external e
     page.getByText("History cleared", { exact: true }),
   ).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("undo");
   await expect(page.getByRole("option", { name: /^Undo / })).toHaveAttribute(
     "aria-disabled",
     "true",
   );
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await expect(page.getByRole("option", { name: /^Redo / })).toHaveAttribute(
     "aria-disabled",
     "true",
@@ -248,12 +248,12 @@ test("Cmd+K exposes disabled history, then typing can be undone and redone", asy
   );
   await expect(alpha).toBeVisible({ timeout: 60_000 });
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("undo");
   await expect(page.getByRole("option", { name: /^Undo / })).toHaveAttribute(
     "aria-disabled",
     "true",
   );
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await expect(page.getByRole("option", { name: /^Redo / })).toHaveAttribute(
     "aria-disabled",
     "true",
@@ -262,11 +262,11 @@ test("Cmd+K exposes disabled history, then typing can be undone and redone", asy
   await placeCaret(alpha, "end");
   await page.keyboard.type(" updated");
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("undo");
   await page.getByRole("option", { name: /^Undo typing/ }).click();
   await expect(alpha).toHaveText("Alpha");
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await page.getByRole("option", { name: /^Redo typing/ }).click();
   await expect(alpha).toHaveText("Alpha updated");
 
@@ -332,7 +332,7 @@ test("title undo returns to the editing root and Cmd+K can redo it", async ({
     .poll(() => page.evaluate(() => window.getSelection()?.anchorOffset))
     .toBe(5);
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await page.getByRole("option", { name: /Redo typing/ }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(row).toHaveText("Alpha title");
@@ -366,12 +366,12 @@ test("external edits clear both history directions, but our own echoes do not", 
     page.getByText("History cleared", { exact: false }),
   ).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("undo");
   await expect(page.getByRole("option", { name: /^Undo / })).toHaveAttribute(
     "aria-disabled",
     "true",
   );
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await expect(page.getByRole("option", { name: /^Redo / })).toHaveAttribute(
     "aria-disabled",
     "true",
@@ -397,12 +397,12 @@ test("failed undo rolls back and keeps the action available to retry", async ({
   ).toBeVisible();
   await expect(alpha).toHaveText("Alpha revised");
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await expect(page.getByRole("option", { name: /^Redo / })).toHaveAttribute(
     "aria-disabled",
     "true",
   );
-  await page.getByPlaceholder("Search nodes and actions...").fill("undo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("undo");
   await page.getByRole("option", { name: /^Undo typing/ }).click();
   await expect(alpha).toHaveText("Alpha");
 });
@@ -461,7 +461,7 @@ test("quick-add undo stays in the current thought and closing makes capture one 
   gate.release();
   await expect(page.getByText("Undid capture", { exact: true })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await expect(
     page.getByRole("option", { name: /^Redo capture/ }),
   ).toBeEnabled();
@@ -797,7 +797,7 @@ test("one quick-add typing run includes the first character and can be redone", 
   ).toHaveCount(1);
 });
 
-test("undo and redo in a filter input stay separate from outline authoring", async ({
+test("undo and redo in Find's input stay separate from outline authoring", async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -810,7 +810,7 @@ test("undo and redo in a filter input stay separate from outline authoring", asy
   await placeCaret(alpha, "end");
   await page.keyboard.type(" kept");
   await page.keyboard.press("ControlOrMeta+f");
-  const filter = page.getByRole("combobox", { name: "Filter query" });
+  const filter = page.getByRole("combobox", { name: "Find nodes and actions" });
   await expect(filter).toBeFocused();
   // Native typing groups vary by browser; one edit tests history isolation
   // without prescribing that grouping (ADR 0064).

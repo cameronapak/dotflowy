@@ -1,7 +1,7 @@
 // Tags plugin (ADR 0001). `#tag` as a plugin. Seam A: the chip render. Seam B:
 // the delegated chip click -> filter and right-click -> color picker. Seam H:
 // `#` autocomplete. The `?q=` filter itself is CORE now (the query grammar +
-// the summoned resident input, ADR 0047 §6) -- this plugin only contributes
+// Find and the applied-filter pill, ADR 0047 §6 and 0089) -- this plugin only contributes
 // `#tag` terms to it (chip click, `addTermToFilter`) and the `#`-token
 // predicate; the pure tag layer (parse/normalize/collect) stays in
 // src/data/tags.ts and the color side-collection in src/data/tag-colors.ts
@@ -114,7 +114,7 @@ export default definePlugin({
 
   // The `?q=` filter is CORE (ADR 0047): the query grammar parses `#tag` terms,
   // the tag PREDICATE (exact `#tag` equality) is a native parser term, and the
-  // summoned filter input + pill bar are core subheader chrome (`query-filter`).
+  // applied-filter pill is core subheader chrome (`query-filter`).
   // This plugin no longer owns a Seam-G `buildFilter` or the subheader slot; it
   // only contributes the `#tag` term on chip click (Seam B, `addTermToFilter`).
 

@@ -10,7 +10,6 @@ import {
   ExpandIcon,
   ExternalLinkIcon,
   FileUploadIcon,
-  FilterIcon,
   FocusIcon,
   LogoutIcon,
   MessageWarningIcon,
@@ -52,7 +51,6 @@ import {
 import { restoreHistory, useHistoryState } from "./history-restore";
 import { openMembership } from "./membership-opener";
 import { openOpmlImport } from "./opml-import-opener";
-import { openFilterInput } from "./query-filter-nav";
 import { openQuickAdd } from "./quick-add-opener";
 import { openSettings } from "./settings-nav";
 import { useShowCompleted } from "./show-completed-provider";
@@ -200,16 +198,6 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["spotlight", "focus", "dim", "zen"],
         run: () => setSpotlightEnabled(!spotlight),
-      },
-      {
-        id: "g:filter",
-        label: "Filter this view",
-        description: "Filter by #tag, is:todo, has:link, text, and more",
-        icon: FilterIcon,
-        scope: "global",
-        keywords: ["filter", "search", "query", "find", "tag", "todo"],
-        // The opener defers focus so it wins the modal restoration race.
-        run: () => openFilterInput(),
       },
     ];
 

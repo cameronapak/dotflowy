@@ -170,7 +170,7 @@ test("same-spot mouse drops preserve order and the redo timeline", async ({
       .toEqual(flatList().map((n) => n.id));
   }
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await page.getByRole("option", { name: /^Redo typing/ }).click();
   await expect(text).toHaveText("edited");
 });

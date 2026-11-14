@@ -4,6 +4,15 @@ status: accepted
 
 # Find goes somewhere, Filter stays put
 
+**One search box amendment ([ADR 0089](./0089-one-search-box.md)).** Find is
+now the only search box. Every query lists matches in this node and everywhere
+else together, under visible headings. Cmd+F opens Find on this node, and Show
+in outline (or Shift+Enter) applies the query, behind a subheader pill. The
+desktop funnel, the resident filter input, and its popover are removed, which
+supersedes decisions 5, 6, and 8's filter-surface details, decision 3's
+Filter in place button (now Show in outline), and the "here" label in decision 2. Decision 9 still holds: scope shortens the list but never
+changes its layout.
+
 Cam chose Find + filter after reviewing three interactive directions, then
 approved the proposed details. The magnifier and Cmd+K open the same Find
 palette. Cmd+F, the desktop funnel, and mobile's Filter this view keep the

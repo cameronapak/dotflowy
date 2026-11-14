@@ -111,7 +111,7 @@ async function capturedDownload(page: Page): Promise<CapturedDownload> {
 // that reads `getViewRootId()` — so the zoomed-subtree cases still exercise it.
 async function runMenuExport(page: Page) {
   await page.keyboard.press("ControlOrMeta+k");
-  const input = page.getByPlaceholder(/Search nodes and actions/);
+  const input = page.getByPlaceholder(/Search nodes and commands/);
   await expect(input).toBeVisible();
   await input.fill("export opml");
   await page.getByRole("option", { name: /Export OPML/ }).click();

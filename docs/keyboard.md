@@ -13,8 +13,9 @@
 | `Arrow ↑` / `↓` at line edges                | Move between bullets (preserves the caret column)                                                               |
 | `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z`            | Undo / redo                                                                                                     |
 | `Shift+↑` / `↓`                              | Select whole nodes (then `Tab` indents the run, `Backspace` deletes it, …)                                      |
-| `Cmd/Ctrl+K`                                 | Open Find (nodes everywhere, DQL, and commands)                                                                 |
-| `Cmd/Ctrl+F`                                 | Filter the current view (`?q=` — tags, operators, free text)                                                    |
+| `Cmd/Ctrl+K`                                 | Open Find (this node and everywhere at once, DQL, and commands)                                                 |
+| `Cmd/Ctrl+F`                                 | Open Find on this node; inside Find, switch to This node                                                        |
+| `Shift+Enter` in Find                        | Show the query's matches in the outline (`?q=` filter, kept in a pill until cleared)                            |
 | `q`                                          | Quick-add capture (files to Today without leaving where you are)                                                |
 
 The `/` menu on any bullet lists every command (to-do, paragraph, move,
