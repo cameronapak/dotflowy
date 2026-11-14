@@ -30,6 +30,7 @@ export default {
     const url = new URL(request.url);
     if (
       url.pathname.startsWith("/api/") ||
+      url.pathname.startsWith("/.well-known/") ||
       url.pathname === "/mcp" ||
       url.pathname === "/share"
     ) {

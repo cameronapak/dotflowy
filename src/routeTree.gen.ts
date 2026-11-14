@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NodeIdRouteImport } from './routes/$nodeId'
 import { Route as DemoRouteImport } from './routes/demo'
+import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -35,6 +36,11 @@ const NodeIdRoute = NodeIdRouteImport.update({
 const DemoRoute = DemoRouteImport.update({
   id: '/demo',
   path: '/demo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpConsentRoute = McpConsentRouteImport.update({
+  id: '/mcp-consent',
+  path: '/mcp-consent',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PrivacyRoute = PrivacyRouteImport.update({
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
   '/demo': typeof DemoRoute
+  '/mcp-consent': typeof McpConsentRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
   '/demo': typeof DemoRoute
+  '/mcp-consent': typeof McpConsentRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
   '/demo': typeof DemoRoute
+  '/mcp-consent': typeof McpConsentRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
@@ -132,6 +141,7 @@ export interface FileRouteTypes {
     | '/'
     | '/$nodeId'
     | '/demo'
+    | '/mcp-consent'
     | '/privacy'
     | '/reset-password'
     | '/settings'
@@ -146,6 +156,7 @@ export interface FileRouteTypes {
     | '/'
     | '/$nodeId'
     | '/demo'
+    | '/mcp-consent'
     | '/privacy'
     | '/reset-password'
     | '/settings'
@@ -160,6 +171,7 @@ export interface FileRouteTypes {
     | '/'
     | '/$nodeId'
     | '/demo'
+    | '/mcp-consent'
     | '/privacy'
     | '/reset-password'
     | '/settings'
@@ -175,6 +187,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   NodeIdRoute: typeof NodeIdRoute
   DemoRoute: typeof DemoRoute
+  McpConsentRoute: typeof McpConsentRoute
   PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
@@ -207,6 +220,13 @@ declare module '@tanstack/react-router' {
       path: '/demo'
       fullPath: '/demo'
       preLoaderRoute: typeof DemoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp-consent': {
+      id: '/mcp-consent'
+      path: '/mcp-consent'
+      fullPath: '/mcp-consent'
+      preLoaderRoute: typeof McpConsentRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/privacy': {
@@ -279,6 +299,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   NodeIdRoute: NodeIdRoute,
   DemoRoute: DemoRoute,
+  McpConsentRoute: McpConsentRoute,
   PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,

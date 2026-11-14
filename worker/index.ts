@@ -26,10 +26,7 @@
  */
 
 import * as Sentry from "@sentry/cloudflare";
-import {
-  oAuthDiscoveryMetadata,
-  oAuthProtectedResourceMetadata,
-} from "better-auth/plugins";
+import { oAuthDiscoveryMetadata } from "better-auth/plugins";
 import { Data, Effect, Schema } from "effect";
 
 import type { KvClaim, WeekStartMigrationResult } from "./outline-do";
@@ -75,6 +72,7 @@ import {
   type InviteBatchResult,
 } from "./invites";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
+import { handleMcpConnections, readMcpConsent } from "./mcp-oauth";
 import { acknowledgeWelcome, canSaveTheme, readMembership } from "./membership";
 import { legacyNumberedNode } from "./numbered-compat";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
@@ -1163,7 +1161,7 @@ function handleApiRequest(
           status: 401,
           headers: {
             "content-type": "application/json",
-            "www-authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+            "www-authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource${url.pathname}"`,
             "access-control-allow-origin": "*",
             "access-control-expose-headers": "WWW-Authenticate",
           },
@@ -1245,6 +1243,38 @@ function handleApiRequest(
       );
     }
     if (!session) return json({ error: "unauthorized" }, 401);
+
+    if (url.pathname === "/api/mcp-connections") {
+      return yield* handleMcpConnections(request, env.DB, session.user.id);
+    }
+    if (url.pathname === "/api/mcp-consent" && request.method === "GET") {
+      const consent = yield* Effect.promise(() =>
+        readMcpConsent(
+          env.DB,
+          session.user.id,
+          url.searchParams.get("code") ?? "",
+        ),
+      );
+      return consent
+        ? json(
+            {
+              name: consent.name,
+              redirectHost: new URL(consent.redirectURI).host,
+              scopes: consent.scope,
+              email: session.user.email,
+            },
+            200,
+            { "cache-control": "private, no-store" },
+          )
+        : json(
+            {
+              error:
+                "Invalid or expired connection request. Reconnect from your app.",
+            },
+            400,
+            { "cache-control": "private, no-store" },
+          );
+    }
 
     const userId = resolveUserId(session.user.id, env);
     if (url.pathname === "/api/feedback") {
@@ -1470,16 +1500,34 @@ const handler = {
     // the site root — clients resolve them from the resource origin, not from
     // Better Auth's /api/auth base path — and they're public by spec. The
     // helpers proxy to the mcp plugin's metadata endpoints.
-    // Prefix-match, not exact: RFC 9728 clients probe a PATH-AWARE variant
-    // (`/.well-known/oauth-protected-resource/mcp`) before the root one. The
-    // metadata is path-independent (resource = origin), so answer either shape;
-    // an exact match 404s the suffixed probe and the SDK chokes parsing it.
+    // Keep the root discovery URL for existing connectors, plus path-aware
+    // documents whose resource exactly matches the canonical endpoint or alias.
     if (url.pathname.startsWith("/.well-known/oauth-authorization-server")) {
       return oAuthDiscoveryMetadata(createAuth(env, url.origin))(request);
     }
     if (url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
-      return oAuthProtectedResourceMetadata(createAuth(env, url.origin))(
-        request,
+      const suffix = url.pathname.slice(
+        "/.well-known/oauth-protected-resource".length,
+      );
+      if (!["", "/mcp", "/api/mcp"].includes(suffix))
+        return new Response(null, { status: 404 });
+      const metadata = await createAuth(
+        env,
+        url.origin,
+      ).api.getMCPProtectedResource({ request, asResponse: false });
+      return Response.json(
+        {
+          ...metadata,
+          resource: `${new URL(env.BETTER_AUTH_URL ?? url.origin).origin}${suffix || "/mcp"}`,
+        },
+        {
+          headers: {
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "POST, OPTIONS",
+            "access-control-allow-headers": "Content-Type, Authorization",
+            "access-control-max-age": "86400",
+          },
+        },
       );
     }
 

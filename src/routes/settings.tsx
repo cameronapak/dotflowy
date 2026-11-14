@@ -34,6 +34,7 @@ import {
 } from "../components/color-theme";
 import { DeleteAccountDialog } from "../components/delete-account-dialog";
 import { McpConnectDialog } from "../components/mcp-connect-dialog";
+import { McpConnections } from "../components/mcp-connections";
 import { openMembership } from "../components/membership-opener";
 import { openOpmlImport } from "../components/opml-import-opener";
 import { ProTrialOffer } from "../components/pro-trial-offer";
@@ -605,6 +606,7 @@ function ConnectionsSection({ plan }: { plan: PlanName | null }) {
       title="Connections"
       description="Use your outline from other apps, your terminal, or scripts."
     >
+      <McpConnections />
       <RowGroup>
         <SettingRow
           icon={<PlugIcon />}

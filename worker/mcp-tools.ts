@@ -135,8 +135,10 @@ export interface ToolDef {
   output?: Schema.Top & { readonly DecodingServices: never };
   /** MCP `readOnlyHint` — true for tools that never write. */
   readOnly: boolean;
-  /** True when the tool can delete or overwrite existing node content. */
+  /** True for non-additive changes to existing content or structure. */
   destructive: boolean;
+  /** Text writes may fetch public link titles; other tools stay in the outline. */
+  openWorld?: boolean;
   handle: (
     input: any,
     store: OutlineStore,
@@ -1017,6 +1019,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: AddNodeInput,
     readOnly: false,
     destructive: false,
+    openWorld: true,
     handle: (input: typeof AddNodeInput.Type, store, afterTextWrite) =>
       Effect.gen(function* () {
         const origin = originOf(input.sourceApp);
@@ -1053,6 +1056,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: AddSubtreeInput,
     readOnly: false,
     destructive: false,
+    openWorld: true,
     handle: (input: typeof AddSubtreeInput.Type, store, afterTextWrite) =>
       Effect.gen(function* () {
         const origin = originOf(input.sourceApp);
@@ -1139,6 +1143,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: UpdateNodeInput,
     readOnly: false,
     destructive: true,
+    openWorld: true,
     handle: (input: typeof UpdateNodeInput.Type, store, afterTextWrite) =>
       Effect.gen(function* () {
         // Built field by field: only present fields are edited (absent =
@@ -1212,7 +1217,7 @@ export const tools: ReadonlyArray<ToolDef> = [
       "Move existing nodes (each with its subtree) under a new parent, or to the top level. Preserves node ids, mirrors, and all state — it reorganizes, it never recreates. The order you pass nodeIds is kept.",
     input: MoveNodesInput,
     readOnly: false,
-    destructive: false,
+    destructive: true,
     handle: (input: typeof MoveNodesInput.Type, store) =>
       Effect.gen(function* () {
         const index = yield* loadIndex(store);
@@ -1253,6 +1258,7 @@ export const tools: ReadonlyArray<ToolDef> = [
     input: AddToTodayInput,
     readOnly: false,
     destructive: false,
+    openWorld: true,
     handle: (input: typeof AddToTodayInput.Type, store, afterTextWrite) =>
       Effect.gen(function* () {
         const origin = originOf(input.sourceApp);

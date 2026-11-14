@@ -14,7 +14,12 @@
 
 import { stripe } from "@better-auth/stripe";
 import { betterAuth } from "better-auth";
-import { APIError, createAuthMiddleware } from "better-auth/api";
+import {
+  APIError,
+  createAuthMiddleware,
+  getSessionFromCtx,
+} from "better-auth/api";
+import { generateRandomString } from "better-auth/crypto";
 import { captcha, mcp } from "better-auth/plugins";
 import { Schema } from "effect";
 import Stripe from "stripe";
@@ -35,6 +40,7 @@ import {
   normalizeEmail,
 } from "./identity";
 import { isRedeemableInvite, redeemInvite } from "./invites";
+import { readMcpConsent } from "./mcp-oauth";
 import { recordWelcome } from "./membership";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
 import { trialCheckoutParams } from "./pro-trial";
@@ -167,6 +173,7 @@ export function createAuth(
       "BETTER_AUTH_SECRET is required (unset or empty). Set it via `wrangler secret put BETTER_AUTH_SECRET` in prod, or run `bun run setup` locally.",
     );
   }
+  const baseURL = env.BETTER_AUTH_URL ?? requestOrigin;
   return betterAuth({
     // Better Auth accepts a D1 binding directly (kysely under the hood).
     database: env.DB,
@@ -175,7 +182,7 @@ export function createAuth(
     // plugin's OAuth discovery metadata REQUIRES an explicit one (it's the
     // OAuth `issuer`). Prod pins it via BETTER_AUTH_URL; otherwise fall back
     // to the calling request's origin (correct on any deployment + local dev).
-    baseURL: env.BETTER_AUTH_URL ?? requestOrigin,
+    baseURL,
     emailAndPassword: {
       enabled: true,
       // ON now that signup can open up (#293). With open signup an unverified
@@ -376,6 +383,149 @@ export function createAuth(
     // email-bound code, so this is belt-and-braces.
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/mcp/authorize" || ctx.path === "/mcp/token") {
+          const resource =
+            ctx.path === "/mcp/authorize"
+              ? ctx.query?.resource
+              : ctx.body?.resource;
+          // Both URLs address the same outline service. Keep omitted and old
+          // origin-only indicators working, but reject unrelated audiences.
+          if (
+            resource !== undefined &&
+            baseURL &&
+            ![
+              new URL(baseURL).origin,
+              `${new URL(baseURL).origin}/mcp`,
+              `${new URL(baseURL).origin}/api/mcp`,
+            ].includes(resource)
+          ) {
+            throw new APIError("BAD_REQUEST", {
+              error: "invalid_target",
+              error_description: "Unknown MCP resource",
+            });
+          }
+        }
+        if (
+          ctx.path === "/mcp/token" &&
+          ctx.body?.grant_type === "refresh_token" &&
+          !isString(ctx.body.refresh_token)
+        )
+          throw new APIError("BAD_REQUEST", {
+            error: "invalid_request",
+            error_description: "Refresh token must be a string",
+          });
+        if (
+          ctx.path === "/mcp/token" &&
+          ctx.body?.grant_type === "authorization_code"
+        ) {
+          if (!isString(ctx.body.code))
+            throw new APIError("BAD_REQUEST", {
+              error: "invalid_request",
+              error_description: "Authorization code must be a string",
+            });
+          const verification =
+            await ctx.context.internalAdapter.findVerificationValue(
+              ctx.body.code,
+            );
+          if (verification) {
+            const value = Schema.decodeUnknownResult(
+              Schema.fromJsonString(
+                Schema.Struct({ requireConsent: Schema.Boolean }),
+              ),
+            )(verification.value);
+            if (value._tag === "Success" && value.success.requireConsent) {
+              throw new APIError("UNAUTHORIZED", {
+                error: "invalid_grant",
+                error_description: "User consent is required",
+              });
+            }
+          }
+        }
+        if (ctx.path === "/mcp/authorize") {
+          // Consent is our policy, not an optional client prompt. This also
+          // persists into the provider's signed login-resume cookie.
+          return { context: { query: { ...ctx.query, prompt: "consent" } } };
+        }
+        if (ctx.path === "/oauth2/consent") {
+          if (!Schema.is(Schema.Boolean)(ctx.body?.accept))
+            throw new APIError("BAD_REQUEST", {
+              message: "Consent decision must be a boolean",
+            });
+          const session = await getSessionFromCtx(ctx);
+          const code =
+            ctx.body?.consent_code ||
+            (await ctx.getSignedCookie(
+              "oidc_consent_prompt",
+              ctx.context.secret,
+            ));
+          const consent =
+            session && isString(code)
+              ? await readMcpConsent(env.DB, session.user.id, code)
+              : null;
+          if (!session || !consent)
+            throw new APIError("FORBIDDEN", {
+              message:
+                "Invalid or expired consent request. Reconnect from your app.",
+            });
+          ctx.setCookie("oidc_consent_prompt", "", { path: "/", maxAge: 0 });
+          if (!ctx.body.accept) {
+            await ctx.context.internalAdapter.deleteVerificationByIdentifier(
+              code,
+            );
+            const redirectURI = new URL(consent.redirectURI);
+            redirectURI.searchParams.set("error", "access_denied");
+            if (consent.state)
+              redirectURI.searchParams.set("state", consent.state);
+            return ctx.json({ redirectURI: redirectURI.toString() });
+          }
+          const authorizationCode = generateRandomString(
+            32,
+            "a-z",
+            "A-Z",
+            "0-9",
+          );
+          const now = new Date().toISOString();
+          // The provider's separate update/create ignores deleted pending state.
+          // Keep approval conditional and atomic with respect to revocation.
+          const [, savedConsent] = await env.DB.batch([
+            env.DB.prepare(`UPDATE verification SET identifier = ?,
+              value = json_set(value, '$.requireConsent', json('false')),
+              expiresAt = ?, updatedAt = ?
+              WHERE identifier = ? AND expiresAt > ? AND json_valid(value)
+              AND json_extract(value, '$.requireConsent') = 1
+              AND json_extract(value, '$.userId') = ?
+              AND json_extract(value, '$.clientId') = ?`).bind(
+              authorizationCode,
+              new Date(Date.now() + 600_000).toISOString(),
+              now,
+              code,
+              now,
+              session.user.id,
+              consent.clientId,
+            ),
+            env.DB.prepare(`INSERT INTO oauthConsent
+              (id, clientId, userId, scopes, consentGiven, createdAt, updatedAt)
+              SELECT ?, ?, ?, ?, 1, ?, ? FROM verification WHERE identifier = ?`).bind(
+              crypto.randomUUID(),
+              consent.clientId,
+              session.user.id,
+              consent.scope.join(" "),
+              now,
+              now,
+              authorizationCode,
+            ),
+          ]);
+          if (savedConsent.meta.changes !== 1)
+            throw new APIError("FORBIDDEN", {
+              message:
+                "Connection request was revoked. Reconnect from your app.",
+            });
+          const redirectURI = new URL(consent.redirectURI);
+          redirectURI.searchParams.set("code", authorizationCode);
+          if (consent.state)
+            redirectURI.searchParams.set("state", consent.state);
+          return ctx.json({ redirectURI: redirectURI.toString() });
+        }
         if (ctx.path !== "/sign-up/email") return;
         // Open signup: no invite required (Turnstile already gated this request
         // in the captcha plugin's onRequest). Accept and let the after-hook
@@ -404,6 +554,65 @@ export function createAuth(
         });
       }),
       after: createAuthMiddleware(async (ctx) => {
+        if (
+          ctx.path === "/mcp/token" &&
+          ctx.body?.grant_type === "authorization_code" &&
+          !(ctx.context.returned instanceof APIError)
+        ) {
+          const returned = Schema.decodeUnknownResult(
+            Schema.Struct({ access_token: Schema.String }),
+          )(ctx.context.returned);
+          if (returned._tag === "Success") {
+            // A revocation may run after the provider consumes the code but
+            // before it saves the token. Do not let that exchange restore access.
+            const revoked = await env.DB.prepare(
+              `DELETE FROM oauthAccessToken WHERE accessToken = ? AND NOT EXISTS (
+                SELECT 1 FROM oauthConsent c WHERE c.clientId = oauthAccessToken.clientId
+                AND c.userId = oauthAccessToken.userId AND c.consentGiven = 1
+              )`,
+            )
+              .bind(returned.success.access_token)
+              .run();
+            if (revoked.meta.changes !== 0)
+              throw new APIError("UNAUTHORIZED", {
+                error: "invalid_grant",
+                error_description:
+                  "App access was revoked. Reconnect to allow access again.",
+              });
+          }
+          return;
+        }
+        if (
+          ctx.path === "/mcp/token" &&
+          ctx.body?.grant_type === "refresh_token" &&
+          !(ctx.context.returned instanceof APIError)
+        ) {
+          const returned = Schema.decodeUnknownResult(
+            Schema.Struct({ access_token: Schema.String }),
+          )(ctx.context.returned);
+          // Better Auth 1.6 issues a new pair but retains the old refresh grant.
+          // Delete it atomically; only one concurrent refresh can win. If it
+          // was revoked or already consumed, remove this candidate pair too.
+          if (returned._tag === "Success") {
+            const consumed = await env.DB.prepare(
+              "DELETE FROM oauthAccessToken WHERE refreshToken = ?",
+            )
+              .bind(ctx.body.refresh_token)
+              .run();
+            if (consumed.meta.changes !== 1) {
+              await env.DB.prepare(
+                "DELETE FROM oauthAccessToken WHERE accessToken = ?",
+              )
+                .bind(returned.success.access_token)
+                .run();
+              throw new APIError("UNAUTHORIZED", {
+                error: "invalid_grant",
+                error_description: "Refresh token was revoked or already used",
+              });
+            }
+          }
+          return;
+        }
         if (
           ctx.path === "/change-password" &&
           !(ctx.context.returned instanceof APIError)
@@ -471,7 +680,15 @@ export function createAuth(
             }),
           ]
         : []),
-      mcp({ loginPage: "/" }),
+      mcp({
+        loginPage: "/",
+        resource: baseURL ? `${new URL(baseURL).origin}/mcp` : undefined,
+        oidcConfig: {
+          loginPage: "/",
+          consentPage: "/mcp-consent",
+          requirePKCE: true,
+        },
+      }),
       stripe({
         stripeClient: new Stripe(
           env.STRIPE_SECRET_KEY ?? "sk_test_placeholder",
