@@ -44,6 +44,7 @@ const WEBHOOK_URL = "https://app.dotflowy.com/api/auth/stripe/webhook";
 const WEBHOOK_EVENTS = [
   "checkout.session.completed",
   "checkout.session.async_payment_succeeded",
+  "invoice.paid",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",

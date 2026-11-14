@@ -14,7 +14,8 @@ import {
 } from "./ui/dialog";
 
 export function MembershipWelcome() {
-  const { welcome, state, reload } = useMembership();
+  const { welcome, state, reload, subs } = useMembership();
+  const trialing = subs.some((sub) => sub.status === "trialing");
   const { data: session } = useSession();
   const location = useLocation();
   const navigate = useNavigate();
@@ -25,7 +26,8 @@ export function MembershipWelcome() {
   const [error, setError] = useState(false);
   const backButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (checkout !== "success" || welcome) return;
+    if ((checkout !== "success" && checkout !== "trial") || welcome || trialing)
+      return;
     reload();
     let checks = 0;
     const interval = setInterval(() => {
@@ -36,7 +38,7 @@ export function MembershipWelcome() {
       reload();
     }, 2000);
     return () => clearInterval(interval);
-  }, [checkout, welcome, reload]);
+  }, [checkout, welcome, reload, trialing]);
 
   async function close(chooseTheme = false) {
     if (!welcome || busy) return;
@@ -71,13 +73,15 @@ export function MembershipWelcome() {
           <p>
             {checkout === "canceled"
               ? "Checkout canceled. Your plan hasn't changed."
-              : state === "error"
-                ? "We couldn't confirm your membership yet. You can keep writing."
-                : timedOut
-                  ? "Confirmation is taking longer than usual. You can keep writing, and check your plan again."
-                  : "Confirming your membership. You can keep writing while we wait."}
+              : checkout === "trial" && trialing
+                ? "Your 14-day Pro trial is active. No payment was required."
+                : state === "error"
+                  ? "We couldn't confirm your membership yet. You can keep writing."
+                  : timedOut
+                    ? "Confirmation is taking longer than usual. You can keep writing, and check your plan again."
+                    : "Confirming your membership. You can keep writing while we wait."}
           </p>
-          {checkout === "success" && (
+          {(checkout === "success" || checkout === "trial") && !trialing && (
             <Button variant="outline" size="sm" onClick={reload}>
               Check again
             </Button>

@@ -2,6 +2,7 @@
 import type { Membership } from "../src/data/membership-schema";
 
 import { resolvePlan, type Plan } from "./plan";
+import { isTrialEligible } from "./pro-trial";
 
 // Themes shipped free for a few hours on 2026-11-13. A read-only production
 // check found exactly one non-owner account with Leaf saved. Cam chose to let
@@ -20,10 +21,16 @@ export async function readMembership(
 ): Promise<Membership> {
   const { results } = await db
     .prepare(
-      "SELECT plan, status, cancelAtPeriodEnd FROM subscription WHERE referenceId = ?",
+      "SELECT plan, status, cancelAtPeriodEnd, stripeSubscriptionId, trialEnd FROM subscription WHERE referenceId = ?",
     )
     .bind(userId)
-    .all<{ plan: string; status: string; cancelAtPeriodEnd: number | null }>();
+    .all<{
+      plan: string;
+      status: string;
+      cancelAtPeriodEnd: number | null;
+      stripeSubscriptionId: string | null;
+      trialEnd: number | string | null;
+    }>();
   const plan = resolvePlan(
     results.filter(
       (row) => row.status === "active" || row.status === "trialing",
@@ -40,9 +47,12 @@ export async function readMembership(
     .first<{ id: string; plan: "unlimited" | "founding" }>();
   return {
     plan,
+    trialEligible: await isTrialEligible(db, userId),
     legacyLeaf: hasLegacyLeaf(userId),
     subs: results.map((row) => ({
       ...row,
+      trialEnd:
+        row.trialEnd === null ? null : new Date(row.trialEnd).toISOString(),
       cancelAtPeriodEnd: !!row.cancelAtPeriodEnd,
     })),
     welcome,
