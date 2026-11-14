@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.10.3
+
+### Patch Changes
+
+- db85c04: The theme picker in Settings is now one compact row. Choose a theme from its menu, or from a sheet on phones.
+
 ## 3.10.2
 
 ### Patch Changes
