@@ -35,7 +35,7 @@ const CUSTOM_SEEDS = [
 ].map((h, i): CustomThemeSeed => {
   const seed = {
     h,
-    c: [MIN_CHROMA, 0.12, MAX_CHROMA][i % 3],
+    c: i % 3 === 0 ? MIN_CHROMA : i % 3 === 1 ? 0.12 : MAX_CHROMA,
     tint: i % 2 ? 1 : 0,
   };
   if (i % 4 < 2) return seed;
