@@ -10,8 +10,9 @@ import { scrubSentryEvent } from "../src/data/sentry-scrub";
  * to exception capture only.
  *
  * The DSN is public-by-design (it also ships in the client bundle), so it lives
- * as a `wrangler.jsonc` var, not a secret. When unset — local `wrangler dev`,
- * unit tests, a trimmed config — Sentry stays dormant and nothing phones home.
+ * as a `wrangler.jsonc` var, not a secret. When unset — unit tests, a trimmed
+ * config — Sentry stays dormant and nothing phones home. Plain `wrangler dev`
+ * loads the committed var, so `bun run dev` and `cf:dev` pass an empty one.
  */
 
 /** The slice of the Worker env this seam needs. */

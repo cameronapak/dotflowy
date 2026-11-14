@@ -18,7 +18,12 @@ export async function startBackend() {
         process.env[key] === undefined ? [] : [[key, process.env[key]!]],
     ),
   );
-  execFileSync("bun", ["run", "build:cf"], { env: buildEnv, stdio: "inherit" });
+  // An empty VITE_SENTRY_DSN outranks .env.production, so test browsers never
+  // report to the production Sentry project.
+  execFileSync("bun", ["run", "build:cf"], {
+    env: { ...buildEnv, VITE_SENTRY_DSN: "" },
+    stdio: "inherit",
+  });
   const directory = await mkdtemp(join(tmpdir(), "dotflowy-worker-browser-"));
   const scriptPath = join(directory, "worker.mjs");
   const key = randomUUID();
