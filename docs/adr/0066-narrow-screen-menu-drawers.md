@@ -4,8 +4,8 @@ status: accepted
 
 # Narrow-screen sheets and typing suggestions
 
-Below 768px, the View and App menus ([ADR 0072](./0072-split-header-view-and-app-menus.md)), breadcrumb overflow, the calendar month picker, and
-Quick-add destinations use Liquidglass Sheet. The narrow-screen link form uses
+Below 768px, the View and App menus ([ADR 0072](./0072-split-header-view-and-app-menus.md)), breadcrumb overflow, the calendar month picker,
+Quick-add destinations, and the Settings theme menu use Liquidglass Sheet. The narrow-screen link form uses
 the same owner. Typing suggestions (`/`, `#`, and
 `[[`) use a compact results panel above the keyboard instead. At 768px and above,
 the existing anchored menus and popovers remain unchanged.
@@ -63,7 +63,8 @@ and missing backdrop-filter use the package's opaque surface rather than an
 invented palette. These are integration corrections, not unmodified upstream
 defaults.
 
-Header toggles stay open. One-shot actions and navigation close the sheet.
+Header toggles stay open. One-shot actions, radio choices, and navigation close
+the sheet.
 Header and breadcrumb menus share open state across the width breakpoint and
 focus their first enabled item for keyboard opening. Arrow keys skip disabled items.
 Calendar month navigation stays open; selecting a day closes it.

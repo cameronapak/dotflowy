@@ -1298,11 +1298,11 @@ function AppearanceSection() {
                       theme (ADR 0088). */}
                     <ResponsiveMenuRadioItem
                       value={customTheme}
-                      aria-label={
+                      aria-label={`Custom, ${colorThemeLabel(customTheme)}${
                         locked(customTheme)
-                          ? "Custom, preview with Pro or Founding"
-                          : "Custom"
-                      }
+                          ? ", preview with Pro or Founding"
+                          : ""
+                      }`}
                     >
                       <ThemeSwatch id={customTheme} />
                       Custom

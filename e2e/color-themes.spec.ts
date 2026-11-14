@@ -481,7 +481,10 @@ test("a phone picks a theme from the Theme sheet", async ({ page }) => {
   await pickTheme(page, "Leaf");
   await expect(page.locator("html")).toHaveClass(/\btheme-leaf\b/);
   await expect(page.locator("dialog[open].lg-sheet-dialog")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Theme, Leaf" })).toBeVisible();
+  await page.getByRole("button", { name: "Theme, Leaf" }).click();
+  await expect(
+    page.getByRole("menuitemradio", { name: "Leaf", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
 });
 
 test("a saved custom theme paints before the app mounts and follows the account", async ({
@@ -494,7 +497,7 @@ test("a saved custom theme paints before the app mounts and follows the account"
     }),
   );
   await page.goto("/settings");
-  await pickTheme(page, "Custom");
+  await pickTheme(page, /^Custom, /);
   await expect(
     page.getByRole("button", { name: "Theme, Cobalt" }),
   ).toBeVisible();
