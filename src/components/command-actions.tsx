@@ -42,7 +42,13 @@ import { getViewRootId } from "../data/view-state";
 import { signOutAndReload } from "../lib/auth-client";
 import { usePluginChrome } from "../plugins/registry";
 import { openChangelog } from "./changelog-opener";
-import { COLOR_THEMES, setColorTheme, useColorTheme } from "./color-theme";
+import {
+  COLOR_THEMES,
+  customThemeToReopen,
+  isCustomTheme,
+  setColorTheme,
+  useColorTheme,
+} from "./color-theme";
 import { restoreHistory, useHistoryState } from "./history-restore";
 import { openMembership } from "./membership-opener";
 import { openOpmlImport } from "./opml-import-opener";
@@ -262,6 +268,24 @@ export function useGlobalActions(opts: {
         },
       });
     }
+    // Custom (ADR 0088) opens its picker in Settings with the last one painted.
+    a.push({
+      id: "g:color-theme-custom",
+      label: "Theme: Custom",
+      description: isCustomTheme(colorTheme)
+        ? "Current theme"
+        : plan === "free"
+          ? "Preview. Keep it with Pro or Founding."
+          : "Pick your own colors",
+      disabled: membershipState !== "ready",
+      icon: PaletteIcon,
+      scope: "global",
+      keywords: ["theme", "color", "appearance", "palette", "custom"],
+      run: () => {
+        openSettings("appearance");
+        setColorTheme(customThemeToReopen());
+      },
+    });
     for (const t of themes) {
       a.push({
         id: `g:theme-${t.value}`,

@@ -3,6 +3,9 @@ export const SHOW_COMPLETED_KEY = "dotflowy:show-completed";
 export const TEXT_SIZE_KEY = "dotflowy:text-size";
 /** Local mirror of the account's color theme (ADR 0082), for first paint. */
 export const COLOR_THEME_KEY = "dotflowy:color-theme";
+/** This device's custom theme (ADR 0088): its value and derived colors, so
+ *  the no-flash script paints it, and so Custom reopens the last one. */
+export const CUSTOM_THEME_KEY = "dotflowy:custom-theme";
 export const SPOTLIGHT_KEY = "dotflowy:spotlight";
 export const SCRIBBLE_KEY = "dotflowy:scribble";
 

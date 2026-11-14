@@ -333,7 +333,13 @@
 :root.themed.themed {
   --popover: color-mix(in oklab, var(--background), white 55%);
   --popover-foreground: var(--foreground);
-  --accent: color-mix(in oklab, var(--primary) 10%, var(--popover));
+  /* A two-color custom theme (ADR 0088) sets accent-source to its second
+     color; every other theme keeps primary. */
+  --accent: color-mix(
+    in oklab,
+    var(--accent-source, var(--primary)) 10%,
+    var(--popover)
+  );
   --accent-foreground: var(--foreground);
   /* Secondary is a quiet chip and pulse surface in Dotflowy (Bible-ref chips,
      date chips, the breadcrumb "…", the moved-node flash). Registry themes
@@ -391,6 +397,50 @@
   --muted-l-max: 1;
   --destructive-l-min: 0.76;
   --destructive-l-max: 1;
+}
+
+/* A custom theme (ADR 0088). color-theme.ts injects its colors, light and
+   dark, as `:root.theme-custom` rules; its primary already reads with its own
+   text, so the clamp is open, and links follow it unless a second color
+   sets link-source. */
+:root.theme-custom {
+  --primary-l-min: 0;
+  --primary-l-max: 1;
+  --link-source: var(--primary-raw);
+}
+
+/* The custom theme's Page slider (ADR 0088): a quiet track filled with
+   primary up to --fill, and a thumb drawn like the switch thumbs. */
+.custom-theme-range {
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--primary) var(--fill),
+    color-mix(in oklab, var(--foreground) 12%, transparent) var(--fill)
+  );
+  cursor: pointer;
+  outline: none;
+}
+.custom-theme-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--background);
+  border: 1px solid var(--control-border);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+}
+.custom-theme-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--background);
+  border: 1px solid var(--control-border);
+}
+.custom-theme-range:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
 }
 
 .themed,

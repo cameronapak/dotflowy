@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { CheckIcon, LoaderIcon } from "@/lib/icons";
 
 import { startCheckout } from "../data/membership";
-import { COLOR_THEMES, useColorThemePreview } from "./color-theme";
+import { colorThemeLabel, useColorThemePreview } from "./color-theme";
 import {
   setMembershipOpener,
   type MembershipReason,
@@ -62,7 +62,7 @@ export function MembershipDialog() {
         <DialogHeader>
           <DialogTitle>
             {reason === "themes"
-              ? `Make ${COLOR_THEMES.find((t) => t.id === preview)?.label ?? "Dotflowy"} yours`
+              ? `Make ${preview ? colorThemeLabel(preview) : "Dotflowy"} yours`
               : reason === "connections"
                 ? "Connect your AI apps to Dotflowy"
                 : "Become a Dotflowy member"}

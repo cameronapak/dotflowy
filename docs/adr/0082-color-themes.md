@@ -8,6 +8,8 @@ Dotflowy offers color themes beside the light/dark Mode: Dotflowy (the
 default), Claude-ish, Catppuccin, Twitter-ish, Modern Minimal, and Leaf. A
 theme recolors the shadcn tokens only. Fonts, radius, and shadows stay
 Dotflowy's.
+Members can also make a Custom theme from one or two colors
+([ADR 0088](./0088-custom-themes.md)).
 
 ## Blended accents
 

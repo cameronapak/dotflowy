@@ -42,6 +42,7 @@ import { hardReset, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
 import {
   COLOR_THEME_KEY,
+  CUSTOM_THEME_KEY,
   LEGACY_THEME_KEY,
   THEME_KEY,
   TEXT_SIZE_KEY,
@@ -77,7 +78,34 @@ const noFlashThemeScript = `
     var id = localStorage.getItem('${COLOR_THEME_KEY}');
     var c = id && Object.prototype.hasOwnProperty.call(colors, id) ? colors[id] : null;
     if (c) document.documentElement.classList.add('themed', 'theme-' + id);
-    var bg = c ? c.background[dark ? 1 : 0] : dark ? '#171717' : '#f9f9f9';
+    // A custom theme (ADR 0088) paints from this device's cache of its colors,
+    // when the cache is for the saved value. Only #rrggbb values pass, the
+    // same rule as customThemeCssFromTokens in custom-theme.ts.
+    var custom = null;
+    if (id && id.indexOf('custom:') === 0) {
+      try {
+        var cache = JSON.parse(localStorage.getItem('${CUSTOM_THEME_KEY}') || 'null');
+        if (cache && cache.id === id && cache.light && cache.dark) custom = cache;
+      } catch (e) {}
+    }
+    var hex = /^#[0-9a-f]{6}$/i;
+    if (custom) {
+      var block = function (t) {
+        var out = '';
+        for (var k in t)
+          if (/^[a-z-]+$/.test(k) && hex.test(t[k])) out += '--' + k + ':' + t[k] + ';';
+        return out;
+      };
+      var style = document.createElement('style');
+      style.id = 'dotflowy-custom-theme';
+      style.textContent = ':root.theme-custom.theme-custom{' + block(custom.light) +
+        '}:root.theme-custom.theme-custom.dark{' + block(custom.dark) + '}';
+      document.head.appendChild(style);
+      document.documentElement.classList.add('themed', 'theme-custom');
+    }
+    var customBg = custom && custom[dark ? 'dark' : 'light'].background;
+    var bg = custom && hex.test(customBg) ? customBg
+      : c ? c.background[dark ? 1 : 0] : dark ? '#171717' : '#f9f9f9';
     var metas = document.querySelectorAll('meta[name="theme-color"]');
     for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', bg);
   } catch (e) {}

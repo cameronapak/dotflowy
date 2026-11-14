@@ -27,11 +27,16 @@ import { ApiKeysDialog } from "../components/capture-keys-dialog";
 import { CliSetupDialog } from "../components/cli-setup-dialog";
 import {
   COLOR_THEMES,
+  colorThemeLabel,
+  isCustomTheme,
+  customThemeToReopen,
   setColorTheme,
   useColorTheme,
   endColorThemePreview,
   useColorThemePreview,
+  type ColorThemeId,
 } from "../components/color-theme";
+import { CustomThemePicker } from "../components/custom-theme-picker";
 import { DeleteAccountDialog } from "../components/delete-account-dialog";
 import { McpConnectDialog } from "../components/mcp-connect-dialog";
 import { openMembership } from "../components/membership-opener";
@@ -51,6 +56,7 @@ import {
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
+import { parseCustomTheme, seedColor } from "../data/custom-theme";
 import {
   retryEditorFeatures,
   setAiAppIcons,
@@ -1089,6 +1095,53 @@ function PluginsSection() {
   );
 }
 
+/** The Custom tile (ADR 0088): one slot that reopens this device's last
+ *  custom theme, painted with that theme's first and second colors. */
+function CustomThemeTile({
+  active,
+  current,
+  locked,
+  disabled,
+}: {
+  active: boolean;
+  current: ColorThemeId;
+  locked: boolean;
+  disabled: boolean;
+}) {
+  const id = active ? current : customThemeToReopen();
+  const seed = parseCustomTheme(id);
+  const dark = document.documentElement.classList.contains("dark");
+  const first = seed ? seedColor(seed.h, seed.c, dark) : "transparent";
+  const second = seed?.second
+    ? seedColor(seed.second.h, seed.second.c, dark)
+    : first;
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      aria-label={locked ? "Custom, preview with Pro or Founding" : "Custom"}
+      disabled={disabled}
+      onClick={() => setColorTheme(id)}
+      className={cn(
+        "inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[0.8rem] font-medium transition outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        active
+          ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/10"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className="size-3 shrink-0 rounded-full ring-1 ring-foreground/15"
+        style={{
+          background: `linear-gradient(135deg, ${second} 50%, ${first} 50%)`,
+        }}
+      />
+      <span className="truncate">Custom</span>
+    </button>
+  );
+}
+
 function AppearanceSection() {
   const { theme, setTheme } = useTheme();
   const colorTheme = useColorTheme();
@@ -1169,14 +1222,26 @@ function AppearanceSection() {
                   </button>
                 );
               })}
+              <CustomThemeTile
+                active={isCustomTheme(colorTheme)}
+                current={colorTheme}
+                locked={membership.plan === "free"}
+                disabled={membership.state !== "ready"}
+              />
             </div>
+            {isCustomTheme(colorTheme) && (
+              <CustomThemePicker
+                value={colorTheme}
+                disabled={membership.state !== "ready"}
+              />
+            )}
             {preview ? (
               <div
                 className="flex flex-col gap-3 rounded-lg bg-muted p-3"
                 role="status"
               >
                 <p className="text-sm font-medium">
-                  Previewing {COLOR_THEMES.find((t) => t.id === preview)?.label}
+                  Previewing {colorThemeLabel(preview)}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   Try it here. Unlock themes to keep your choice on every

@@ -1,5 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import {
+  customThemeCssFromTokens,
+  customThemeTokens,
+  formatCustomTheme,
+  MAX_CHROMA,
+  MIN_CHROMA,
+  type CustomThemeSeed,
+} from "../src/data/custom-theme";
 import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
 
 // Color themes (ADR 0082). Every themed surface keeps WCAG contrast in every
@@ -18,6 +26,70 @@ const THEMES = [
   "modern-minimal",
   "leaf",
 ];
+
+// Custom themes (ADR 0088) are derived, so sample the dot field: every hue
+// band, both chroma extremes, both tint extremes, with and without a second
+// color whose hue sits far from the first.
+const CUSTOM_SEEDS = [
+  0, 45, 90, 110, 140, 180, 220, 255, 285, 320, 345, 60,
+].map((h, i): CustomThemeSeed => {
+  const seed = {
+    h,
+    c: [MIN_CHROMA, 0.12, MAX_CHROMA][i % 3],
+    tint: i % 2 ? 1 : 0,
+  };
+  if (i % 4 < 2) return seed;
+  return { ...seed, second: { h: (h + 150) % 360, c: MAX_CHROMA } };
+});
+
+declare global {
+  interface Window {
+    /** What the head script painted before <body> existed. */
+    firstPaint?: { classes: string; css?: string | null; bar?: string | null };
+  }
+}
+
+/** Every preset, then each sampled custom theme as `[label, css]`. */
+const THEME_CASES: [string, string | null][] = [
+  ...THEMES.map((t): [string, null] => [t, null]),
+  ...CUSTOM_SEEDS.map((seed): [string, string] => [
+    formatCustomTheme(seed),
+    customThemeCssFromTokens(
+      customThemeTokens(seed, "light"),
+      customThemeTokens(seed, "dark"),
+    ),
+  ]),
+];
+
+/** Paint a preset, or a custom theme's stylesheet, in one Mode. */
+async function paintTheme(
+  page: Page,
+  [theme, css]: [string, string | null],
+  dark: boolean,
+) {
+  await page.evaluate(
+    ([theme, css, dark]) => {
+      const root = document.documentElement;
+      root.classList.remove(
+        ...Array.from(root.classList).filter((c) => c.startsWith("theme-")),
+      );
+      let style = document.getElementById("dotflowy-custom-theme");
+      if (css) {
+        if (!style) {
+          style = document.createElement("style");
+          style.id = "dotflowy-custom-theme";
+          document.head.append(style);
+        }
+        style.textContent = css;
+      } else style?.remove();
+      root.classList.toggle("themed", theme !== "default");
+      if (css) root.classList.add("theme-custom");
+      else if (theme !== "default") root.classList.add(`theme-${theme}`);
+      root.classList.toggle("dark", dark);
+    },
+    [theme, css, dark] as const,
+  );
+}
 
 test("Free previews never save, and leaving Settings restores the saved theme", async ({
   page,
@@ -261,22 +333,11 @@ test("settings badges and on/off switches stay readable in every theme and Mode"
   await expect(embeds).not.toBeChecked();
   await page.addStyleTag({ content: "* { transition: none !important; }" });
   const failures: string[] = [];
-  for (const theme of THEMES)
+  for (const theme of THEME_CASES)
     for (const dark of [false, true]) {
-      await page.evaluate(
-        ([theme, dark]) => {
-          const root = document.documentElement;
-          root.classList.remove(
-            ...Array.from(root.classList).filter((c) => c.startsWith("theme-")),
-          );
-          root.classList.toggle("themed", theme !== "default");
-          if (theme !== "default") root.classList.add(`theme-${theme}`);
-          root.classList.toggle("dark", dark);
-        },
-        [theme, dark] as const,
-      );
+      await paintTheme(page, theme, dark);
       for (const f of await contrastFailures(page, "settings"))
-        failures.push(`${theme} ${dark ? "dark" : "light"}: ${f}`);
+        failures.push(`${theme[0]} ${dark ? "dark" : "light"}: ${f}`);
     }
   expect(failures).toEqual([]);
 });
@@ -296,22 +357,11 @@ test("every theme and Mode keeps themed surfaces readable", async ({
   // Measure settled hover colors, not a frame midway through a transition.
   await page.addStyleTag({ content: "* { transition: none !important; }" });
   const failures: string[] = [];
-  for (const theme of THEMES)
+  for (const theme of THEME_CASES)
     for (const dark of [false, true]) {
-      await page.evaluate(
-        ([theme, dark]) => {
-          const root = document.documentElement;
-          root.classList.remove(
-            ...Array.from(root.classList).filter((c) => c.startsWith("theme-")),
-          );
-          root.classList.toggle("themed", theme !== "default");
-          if (theme !== "default") root.classList.add(`theme-${theme}`);
-          root.classList.toggle("dark", dark);
-        },
-        [theme, dark] as const,
-      );
+      await paintTheme(page, theme, dark);
       for (const f of await contrastFailures(page))
-        failures.push(`${theme} ${dark ? "dark" : "light"}: ${f}`);
+        failures.push(`${theme[0]} ${dark ? "dark" : "light"}: ${f}`);
     }
   expect(failures).toEqual([]);
 });
@@ -356,6 +406,62 @@ test("the color theme is the account's and survives cleared storage", async ({
       'meta[name="theme-color"]:not([content="rgb(247, 251, 252)"])',
     ),
   ).toHaveCount(0);
+});
+
+test("a saved custom theme paints before the app mounts and follows the account", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  await page.route("**/api/membership", (route) =>
+    route.fulfill({
+      json: { plan: "unlimited", legacyLeaf: false, subs: [], welcome: null },
+    }),
+  );
+  await page.goto("/settings");
+  const custom = page.getByRole("radio", { name: "Custom", exact: true });
+  await custom.click();
+  await expect(custom).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("html")).toHaveClass(/\btheme-custom\b/);
+  const saved = await page.evaluate(() =>
+    localStorage.getItem("dotflowy:color-theme"),
+  );
+  expect(saved).toMatch(/^custom:1:/);
+
+  // The head script paints it from this device's cache before <body> exists.
+  await page.addInitScript(() => {
+    new MutationObserver((_, observer) => {
+      if (!document.body) return;
+      observer.disconnect();
+      window.firstPaint = {
+        classes: document.documentElement.className,
+        css: document.getElementById("dotflowy-custom-theme")?.textContent,
+        bar: document
+          .querySelector('meta[name="theme-color"]')
+          ?.getAttribute("content"),
+      };
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await page.reload();
+  const light = customThemeTokens(
+    { h: 255, c: 0.17, tint: 0.3 },
+    "light",
+  ).background;
+  expect(await page.evaluate(() => window.firstPaint)).toEqual({
+    classes: expect.stringMatching(/\bthemed\b.*\btheme-custom\b/),
+    css: expect.stringContaining(`--background:${light};`),
+    bar: light,
+  });
+
+  // A device without the cache shows the account's custom theme once it loads.
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await expect(
+    page.getByRole("radio", { name: "Custom", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("#dotflowy-custom-theme")).toHaveCount(1);
+  expect(
+    await page.evaluate(() => localStorage.getItem("dotflowy:color-theme")),
+  ).toBe(saved);
 });
 
 for (const failure of ["account load", "save"] as const)

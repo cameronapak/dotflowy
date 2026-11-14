@@ -4,9 +4,20 @@ import { useLocation } from "@tanstack/react-router";
 // `appearance:color-theme` row is the source of truth, so the choice follows
 // the user across devices; localStorage mirrors it so the no-flash script in
 // __root.tsx paints the right theme before React or the account load.
+import { Option, Schema } from "effect";
 import { useEffect, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
+import {
+  customThemeCssFromTokens,
+  customThemeName,
+  customThemeTokens,
+  CustomThemeId,
+  formatCustomTheme,
+  isCustomThemeId,
+  parseCustomTheme,
+  type CustomThemeSeed,
+} from "../data/custom-theme";
 import {
   peekEditorFeatures,
   setColorThemePreference,
@@ -14,11 +25,12 @@ import {
 } from "../data/editor-features";
 import { peekMembership, useMembership } from "../data/membership";
 import { hasWindow } from "../env";
-import { COLOR_THEME_KEY } from "../lib/storage-keys";
+import { COLOR_THEME_KEY, CUSTOM_THEME_KEY } from "../lib/storage-keys";
 import { THEME_COLORS } from "../themes.generated";
 
 type ThemedId = keyof typeof THEME_COLORS;
-export type ColorThemeId = "default" | ThemedId;
+/** A preset, or a custom theme's value `custom:1:…` (ADR 0088). */
+export type ColorThemeId = "default" | ThemedId | `custom:${string}`;
 
 /** Settings and Cmd+K order. `swatch` is the light background and primary. */
 export const COLOR_THEMES: readonly {
@@ -45,11 +57,26 @@ export const COLOR_THEMES: readonly {
 
 /** An unknown id (from a newer client, or edited storage) is the default. */
 function toColorThemeId(value: string | null): ColorThemeId {
-  return COLOR_THEMES.find((t) => t.id === value)?.id ?? "default";
+  const preset = COLOR_THEMES.find((t) => t.id === value)?.id;
+  if (preset) return preset;
+  return value && isCustomThemeId(value) ? value : "default";
+}
+
+export const isCustomTheme = (id: ColorThemeId | null) =>
+  id?.startsWith("custom:") ?? false;
+
+/** What Settings, Cmd+K, and the membership dialog call a theme. */
+export function colorThemeLabel(id: ColorThemeId): string {
+  const seed = parseCustomTheme(id);
+  if (seed) return customThemeName(seed);
+  return COLOR_THEMES.find((t) => t.id === id)?.label ?? "Dotflowy";
 }
 
 const listeners = new Set<() => void>();
 let preview: ColorThemeId | null = null;
+// A custom theme mid-drag: painted for everyone, saved by no one until the
+// picker commits it with setColorTheme.
+let draft: ColorThemeId | null = null;
 
 function savedTheme(): ColorThemeId {
   return toColorThemeId(
@@ -69,27 +96,83 @@ function effectiveSavedTheme(): ColorThemeId {
 }
 
 function read(): ColorThemeId {
-  return preview ?? effectiveSavedTheme();
+  return draft ?? preview ?? effectiveSavedTheme();
 }
 
-/** Paint a preview without writing either the account or the no-flash cache. */
+const CUSTOM_STYLE_ID = "dotflowy-custom-theme";
+
+/** The device cache's id; its colors are only read by the no-flash script. */
+const decodeCustomCache = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ id: CustomThemeId })),
+);
+
+/** A custom theme's colors for both Modes, as the device cache stores them. */
+function customCache(id: ColorThemeId, seed: CustomThemeSeed) {
+  return {
+    id,
+    light: customThemeTokens(seed, "light"),
+    dark: customThemeTokens(seed, "dark"),
+  };
+}
+
+/** Paint a theme without writing either the account or the no-flash cache.
+ *  The no-flash script in __root.tsx creates the same style element. */
 function paint(id: ColorThemeId) {
   const root = document.documentElement;
   root.classList.remove(
     ...Array.from(root.classList).filter((c) => c.startsWith("theme-")),
   );
   root.classList.toggle("themed", id !== "default");
-  if (id !== "default") root.classList.add(`theme-${id}`);
+  const seed = parseCustomTheme(id);
+  if (seed) {
+    const { light, dark } = customCache(id, seed);
+    let style = document.getElementById(CUSTOM_STYLE_ID);
+    if (!style) {
+      style = document.createElement("style");
+      style.id = CUSTOM_STYLE_ID;
+      document.head.append(style);
+    }
+    style.textContent = customThemeCssFromTokens(light, dark);
+    root.classList.add("theme-custom");
+  } else if (id !== "default") root.classList.add(`theme-${id}`);
   for (const l of listeners) l();
 }
 
 function applyLocal(id: ColorThemeId) {
   localStorage.setItem(COLOR_THEME_KEY, id);
-  paint(preview ?? effectiveSavedTheme());
+  const seed = parseCustomTheme(id);
+  if (seed)
+    localStorage.setItem(
+      CUSTOM_THEME_KEY,
+      JSON.stringify(customCache(id, seed)),
+    );
+  paint(draft ?? preview ?? effectiveSavedTheme());
+}
+
+/** This device's last custom theme, so Custom reopens it (one slot). */
+export function lastCustomTheme(): ColorThemeId | null {
+  const cached = decodeCustomCache(localStorage.getItem(CUSTOM_THEME_KEY));
+  return Option.isSome(cached) && isCustomThemeId(cached.value.id)
+    ? cached.value.id
+    : null;
+}
+
+/** Cobalt on a soft page: where Custom starts on a device that never had one. */
+const FIRST_CUSTOM_THEME = formatCustomTheme({ h: 255, c: 0.17, tint: 0.3 });
+
+/** The custom theme that Settings and Cmd+K open when Custom is chosen. */
+export const customThemeToReopen = (): ColorThemeId =>
+  lastCustomTheme() ?? FIRST_CUSTOM_THEME;
+
+/** Paint a custom theme while it is being dragged; null ends the draft. */
+export function paintColorThemeDraft(id: ColorThemeId | null) {
+  draft = id;
+  paint(read());
 }
 
 export function endColorThemePreview() {
   preview = null;
+  draft = null;
   paint(effectiveSavedTheme());
 }
 
@@ -122,9 +205,12 @@ function adoptAccountTheme() {
 export function setColorTheme(id: ColorThemeId) {
   const membership = peekMembership();
   if (membership.state !== "ready") {
+    draft = null;
+    paint(read());
     toast.error("Your plan isn't available yet. Try again in a moment.");
     return;
   }
+  draft = null;
   if (
     membership.plan === "free" &&
     id !== "default" &&
@@ -168,7 +254,7 @@ export function ColorThemeSync() {
   const pathname = useLocation({ select: (location) => location.pathname });
   // Reset on leaving the route, not on component cleanup during navigation.
   useEffect(() => {
-    if (pathname !== "/settings" && preview) endColorThemePreview();
+    if (pathname !== "/settings" && (preview || draft)) endColorThemePreview();
   }, [pathname]);
   useEffect(adoptAccountTheme, [ready, colorTheme]);
   useEffect(() => {

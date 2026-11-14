@@ -36,6 +36,7 @@ import type { KvClaim, WeekStartMigrationResult } from "./outline-do";
 import type { Node } from "./wire";
 
 import { AmpFeedbackConfig } from "../src/data/amp-feedback";
+import { CustomThemeId } from "../src/data/custom-theme";
 import {
   pendingAnnounceEmails,
   sendAnnouncements,
@@ -553,6 +554,16 @@ function handleNodes(
   });
 }
 
+/** A theme write (ADR 0082): a preset id, or a well-formed custom theme
+ *  (ADR 0088). A malformed `custom:` value never reaches storage. */
+const ThemePreferenceRow = Schema.Struct({
+  key: Schema.Literal("appearance:color-theme"),
+  theme: Schema.Union([
+    CustomThemeId,
+    Schema.String.check(Schema.isPattern(/^(?!custom:)[a-z0-9-]{1,40}$/)),
+  ]),
+});
+
 function handleKv(
   request: Request,
   stub: DurableObjectStub<UserOutlineDO>,
@@ -609,10 +620,7 @@ function handleKv(
               if (row.key !== "appearance:color-theme")
                 return json({ error: "invalid theme key" }, 400);
               const value = yield* Schema.decodeUnknownEffect(
-                Schema.Struct({
-                  key: Schema.Literal("appearance:color-theme"),
-                  theme: Schema.String,
-                }),
+                ThemePreferenceRow,
               )(row.value).pipe(
                 Effect.mapError(
                   () => new BadRequest({ reason: "invalid theme preference" }),
