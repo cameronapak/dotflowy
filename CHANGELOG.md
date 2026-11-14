@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.9.0
+
+### Minor Changes
+
+- 52ba737: Pro and Founding members can make a Custom theme: drag a dot to pick a color, add an optional second color, and choose how much the page takes it. Dotflowy derives the rest in light and dark Mode and keeps it readable. Free members can preview it in Settings.
+
 ## 3.8.1
 
 ### Patch Changes
