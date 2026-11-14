@@ -94,6 +94,13 @@ test("agent task continuation lines wrap underneath the checkbox and source mark
   }
 });
 
+// A full load of /settings boots the app before the switch exists. Wait for the
+// route within the test budget so assertions keep their 5s budget (as in
+// settings.spec.ts); a cold dev server can take most of 5s to mount React.
+async function settingsReady(page: Page) {
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
+}
+
 async function load(page: Page) {
   await seedOutline(page, TREE);
   await openSeededOutline(page, { anchorId: "mine" });
@@ -127,6 +134,7 @@ test("AI app icons default on, switch to a shared sparkle, and keep attribution 
   );
 
   await page.goto("/settings#appearance");
+  await settingsReady(page);
   const toggle = page.getByRole("switch", { name: "Show AI app icons" });
   await expect(toggle).toBeEnabled();
   await expect(toggle).toBeChecked();
@@ -134,6 +142,7 @@ test("AI app icons default on, switch to a shared sparkle, and keep attribution 
   await expect(toggle).toBeEnabled();
   await expect(toggle).not.toBeChecked();
   await page.reload();
+  await settingsReady(page);
   await expect(toggle).toBeEnabled();
   await expect(toggle).not.toBeChecked();
   await page.getByRole("button", { name: "Back to outline" }).click();
@@ -157,6 +166,7 @@ test("AI app icons default on, switch to a shared sparkle, and keep attribution 
 
   // A failed change rolls back instead of silently restoring the logos.
   await page.goto("/settings#appearance");
+  await settingsReady(page);
   await expect(toggle).toBeEnabled();
   await page.route("**/api/kv?collection=account-prefs", (route) => {
     if (route.request().method() === "POST")
@@ -172,6 +182,7 @@ test("AI app icons default on, switch to a shared sparkle, and keep attribution 
   await expect(toggle).toBeEnabled();
   await expect(toggle).toBeChecked();
   await page.reload();
+  await settingsReady(page);
   await expect(toggle).toBeChecked();
   await page.getByRole("button", { name: "Back to outline" }).click();
   await expect(mark(page, "ai").locator("svg path").first()).toHaveAttribute(
