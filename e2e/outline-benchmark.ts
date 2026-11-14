@@ -194,11 +194,16 @@ try {
                 ),
             ),
         );
+        // Find is the one search box (ADR 0089): open it on this view, then
+        // measure applying its query to the outline.
         await page.keyboard.press("Control+f");
-        const filter = page.getByRole("combobox", { name: "Filter query" });
+        const find = page.getByRole("combobox", {
+          name: "Find nodes and actions",
+        });
+        await find.fill("Entry 2");
         await measure(
           "filter",
-          () => filter.fill("Entry 2"),
+          () => find.press("Shift+Enter"),
           () => page.waitForURL(/q=/),
         );
         await placeCaret(text(page, "n2"), "end");
@@ -210,9 +215,8 @@ try {
               "Entry 2abcdefghijklmnopqrstxyz",
             ),
         );
-        await filter.fill("");
+        await page.getByRole("button", { name: "Clear filter" }).click();
         await page.waitForURL(url + "/");
-        await page.keyboard.press("Escape");
         await placeCaret(text(page, "n2"), "end");
         const beforePaste = await saved();
         await measure(
@@ -255,7 +259,9 @@ try {
         );
         expect(authoring(await saved())).toEqual(authoring(beforePaste));
         await page.keyboard.press("ControlOrMeta+k");
-        await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+        await page
+          .getByPlaceholder("Search nodes and commands...")
+          .fill("redo");
         await measure(
           "redo-paste",
           () => page.getByRole("option", { name: /^Redo/ }).click(),

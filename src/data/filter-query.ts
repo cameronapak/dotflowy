@@ -647,12 +647,12 @@ export interface QueryFilter {
 
 // --- Autocomplete (ADR 0047 §7) ---------------------------------------------
 //
-// The registry-driven suggestions for the filter input. Pure: it consumes the
+// The registry-driven query suggestions in Find (ADR 0089). Pure: it consumes the
 // operator metadata (folded into {@link OperatorKeyInfo}) plus the tag corpus
 // and returns typed rows; the component only maps rows to JSX. "Nothing
 // hand-maintained -- a new plugin operator appears in autocomplete for free."
-// Scope guard (ADR 0047 §7): suggestions ONLY produce text to insert into a
-// plain input -- no inline pill editing, no caret-menu engine, no cmdk.
+// Scope guard (ADR 0047 §7): suggestions ONLY produce text to insert into
+// Find's input -- no inline pill editing, no caret-menu engine.
 
 /** One cheat-sheet KEY, folding every operator that shares that key into one
  *  row: the union of their static values, the description of the first-

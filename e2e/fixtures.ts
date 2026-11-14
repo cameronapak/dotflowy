@@ -1,5 +1,10 @@
-import type { Locator, Page, Route, WebSocketRoute } from "@playwright/test";
-
+import {
+  expect,
+  type Locator,
+  type Page,
+  type Route,
+  type WebSocketRoute,
+} from "@playwright/test";
 import { Schema } from "effect";
 
 import type {
@@ -20,6 +25,33 @@ import {
 /** A node's editable text in the outline list (not the zoomed page title). */
 export const text = (page: Page, id: string): Locator =>
   page.locator(`li[data-node-id="${id}"] > .outline-row .node-text`);
+
+/** Find's search input (ADR 0083, 0089): the one search box. */
+export const findInput = (page: Page): Locator =>
+  page.getByRole("combobox", { name: "Find nodes and actions" });
+
+/** The applied-filter pill in the subheader (ADR 0089). */
+export const filterPill = (page: Page): Locator =>
+  page.locator("[data-filter-pill]");
+
+/** Filter the current view the way a person does (ADR 0089): Cmd+F opens Find
+ *  on this node, type the query, Shift+Enter shows the matches in the outline.
+ *  An empty query clears the filter through the pill's X. */
+export async function applyFilter(page: Page, query: string): Promise<void> {
+  if (!query.trim()) {
+    await page.getByRole("button", { name: "Clear filter" }).click();
+    await expect(page).not.toHaveURL(/[?&]q=/);
+    return;
+  }
+  await page.keyboard.press("ControlOrMeta+f");
+  await expect(findInput(page)).toBeFocused();
+  await findInput(page).fill(query);
+  await findInput(page).press("Shift+Enter");
+  await expect(findInput(page)).toHaveCount(0);
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("q"))
+    .toBe(query.trim());
+}
 
 /** Desktop browser engines cannot open a software keyboard. Model its viewport
  * reduction explicitly for toolbar journeys; this is not native-device proof. */

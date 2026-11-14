@@ -50,10 +50,11 @@ test("writing hides chrome without moving content; pointer and keyboard restore 
   await expect(chrome).toHaveCSS("opacity", "1");
   await expect(addNode).toHaveCSS("opacity", "1");
 
+  // Typing in Find, outside the outline, never hides the chrome.
+  await page.keyboard.press("ControlOrMeta+f");
   await page
-    .getByRole("button", { name: "Filter this view", exact: true })
-    .click();
-  await page.getByRole("combobox", { name: "Filter query" }).fill("Alpha");
+    .getByRole("combobox", { name: "Find nodes and actions" })
+    .fill("Alpha");
   await expect(chrome).toHaveCSS("opacity", "1");
   await page.keyboard.press("Escape");
 });

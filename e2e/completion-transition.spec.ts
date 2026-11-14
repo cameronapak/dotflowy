@@ -380,7 +380,9 @@ test("changing the query does not animate removed matches", async ({
   await load(page);
   await page.keyboard.press("ControlOrMeta+f");
   await page.clock.runFor(32);
-  await page.getByRole("combobox", { name: "Filter query" }).fill("Plan");
+  const find = page.getByRole("combobox", { name: "Find nodes and actions" });
+  await find.fill("Plan");
+  await find.press("Shift+Enter");
   await page.clock.runFor(500);
   await expect(page).toHaveURL(/q=Plan/);
   await expect(row(page, "task")).toHaveCount(0);

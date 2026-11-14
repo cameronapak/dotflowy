@@ -838,9 +838,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           listRef.current?.parentElement?.querySelector<HTMLButtonElement>(
             "[data-outline-add]",
           );
-        const input = document.querySelector<HTMLInputElement>(
-          'input[aria-label="Filter query"]',
-        );
+        const input =
+          document.querySelector<HTMLButtonElement>("[data-filter-pill]");
         (add ?? input)?.focus({ preventScroll: true });
       }
     },

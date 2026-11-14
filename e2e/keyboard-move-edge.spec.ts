@@ -127,7 +127,7 @@ test("a move publishes one complete chain, undoes, and survives rollback and rel
     )
     .toBe(false);
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder("Search nodes and actions...").fill("redo");
+  await page.getByPlaceholder("Search nodes and commands...").fill("redo");
   await page.getByRole("option", { name: /^Redo move/ }).click();
   await expect.poll(async () => authoring(await saved())).toEqual(moved);
   await expect

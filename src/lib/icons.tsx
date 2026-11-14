@@ -36,6 +36,7 @@ import {
   FilterIcon as Filter,
   FocusIcon as Focus,
   GitForkIcon as GitFork,
+  GlobeIcon as Globe,
   HighlighterIcon as Highlighter,
   Home01Icon,
   InformationCircleIcon,
@@ -161,6 +162,7 @@ export const FilterIcon = createIcon(Filter);
 export const FocusIcon = createIcon(Focus);
 export const GitForkIcon = createIcon(GitFork);
 export const HighlighterIcon = createIcon(Highlighter);
+export const GlobeIcon = createIcon(Globe);
 export const HomeIcon = createIcon(Home01Icon);
 export const IndentIcon = createIcon(ListIndentIncreaseIcon);
 export const InfoIcon = createIcon(InformationCircleIcon);

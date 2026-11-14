@@ -1,5 +1,10 @@
 # Header toggle buttons: solid means the view is altered, muted means engaged
 
+**One search box amendment ([ADR 0089](./0089-one-search-box.md)).** The filter
+no longer has a header toggle. A subheader pill shows an applied `?q=` filter
+beside the content it affects, so the Filter magnifier rows below are retired.
+The rule still governs Spotlight and any future header toggle.
+
 The header's right cluster holds icon toggles (spotlight and the filter magnifier). They were drifting toward inconsistent "on" treatments, so we fixed the meaning rather than the pixels: **solid `--primary` = the view you're looking at is altered right now; muted `bg-muted` = a toggle is engaged but the view is still normal.** One rule decides every header toggle's active look.
 
 ## The rule

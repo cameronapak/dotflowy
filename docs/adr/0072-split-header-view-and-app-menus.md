@@ -40,6 +40,6 @@ eligibility remain unchanged; the name update on linking is accepted.
 Below 768px, the View and App menus share one **More** menu in a glass toolbar,
 View items first, then an Account and help section. The unread dot moves to the
 More trigger. Search opens the command center, Quick-add is the trailing
-prominent action, and Filter this view is the View section's first row. Home
+prominent action, and Search this view (Filter this view before [ADR 0089](./0089-one-search-box.md)) is the View section's first row. Home
 and Today are labelled dock destinations. Desktop keeps the two menus and the
 controls described above.

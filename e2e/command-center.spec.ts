@@ -40,7 +40,9 @@ async function load(page: Page) {
 
 async function openPalette(page: Page) {
   await page.keyboard.press("ControlOrMeta+k");
-  await expect(page.getByPlaceholder(/Search nodes and actions/)).toBeVisible();
+  await expect(
+    page.getByPlaceholder(/Search nodes and commands/),
+  ).toBeVisible();
 }
 
 test("Spotlight commands preserve the zoomed child's source caret", async ({
@@ -62,7 +64,7 @@ test("Spotlight commands preserve the zoomed child's source caret", async ({
   await placeCaret(child, 12);
   for (const enabled of [true, false]) {
     await openPalette(page);
-    await page.getByPlaceholder(/Search nodes and actions/).fill("spotlight");
+    await page.getByPlaceholder(/Search nodes and commands/).fill("spotlight");
     await page
       .getByRole("option", {
         name: enabled ? /^Spotlight mode/ : /^Turn off spotlight mode/,
@@ -92,7 +94,7 @@ test("Spotlight commands preserve title carets and retain no-editor fallbacks", 
   });
   const toggle = async () => {
     await openPalette(page);
-    await page.getByPlaceholder(/Search nodes and actions/).fill("spotlight");
+    await page.getByPlaceholder(/Search nodes and commands/).fill("spotlight");
     await page.getByRole("option", { name: /spotlight mode/i }).click();
     await expect(page.getByRole("dialog", { name: "Find" })).toHaveCount(0);
   };
@@ -107,7 +109,7 @@ test("Spotlight commands preserve title carets and retain no-editor fallbacks", 
   }
   // Cancellation must not leave a queued toggle for the next palette close.
   await openPalette(page);
-  await page.getByPlaceholder(/Search nodes and actions/).fill("spotlight");
+  await page.getByPlaceholder(/Search nodes and commands/).fill("spotlight");
   await page.keyboard.press("Escape");
   await expect(indicator).toHaveCount(0);
   await expect(title).toBeFocused();
@@ -216,10 +218,11 @@ test.describe("mobile", () => {
     const bounds = await dialog.boundingBox();
     expect(bounds!.y).toBeGreaterThanOrEqual(103); // native modal follows visible top
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(380); // visible bottom
-    const input = page.getByPlaceholder(/Search nodes and actions/);
+    const input = page.getByPlaceholder(/Search nodes and commands/);
     await expect(input).toBeFocused();
     const inputTop = (await input.boundingBox())!.y;
-    const list = dialog.locator("[cmdk-list]");
+    // Phones scroll the scope tabs and shortcuts away with the results.
+    const list = dialog.locator("[data-find-scroll]");
     expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(
       true,
     );
@@ -262,7 +265,7 @@ test.describe("mobile", () => {
   });
 });
 
-test("Find searches everywhere, prioritizes here, returns to selection, and hands off to Filter", async ({
+test("Find searches here and everywhere at once, returns to selection, and shows matches in the outline", async ({
   page,
 }) => {
   const many: SeedNode[] = Array.from({ length: 55 }, (_, i) => ({
@@ -307,9 +310,8 @@ test("Find searches everywhere, prioritizes here, returns to selection, and hand
   await find.fill("Zephr"); // Typo tolerance remains available for plain words.
   await expect(results).toHaveCount(1);
   await expect(results.first()).toHaveAttribute("data-result-id", "zephyr");
-  await expect(
-    results.first().getByText("here", { exact: true }),
-  ).toBeVisible();
+  // Mirrored into this node, so it is nearby.
+  await expect(dialog.getByText("In this node · 1")).toBeVisible();
   await find.fill('"');
   await expect(results).toHaveCount(0);
   await find.fill('""');
@@ -317,9 +319,7 @@ test("Find searches everywhere, prioritizes here, returns to selection, and hand
   await find.fill('"Zephyr"');
   await expect(results).toHaveCount(1);
   await expect(results.first()).toHaveAttribute("data-result-id", "zephyr");
-  await expect(
-    results.first().getByText("here", { exact: true }),
-  ).toBeVisible();
+  await expect(dialog.getByText("In this node · 1")).toBeVisible();
   await find.fill('"Zephr"'); // Quotes switch to exact DQL, not fuzzy matching.
   await expect(results).toHaveCount(0);
   await find.fill("Releese"); // Typo-tolerant overflow must not hand off to literal filtering.
@@ -328,20 +328,22 @@ test("Find searches everywhere, prioritizes here, returns to selection, and hand
     dialog.getByRole("option", { name: /^Filter Home for/ }),
   ).toHaveCount(0);
   await expect(
-    dialog.getByRole("button", { name: /Filter in place/ }),
+    dialog.getByRole("button", { name: /^Show in outline/ }),
   ).toBeVisible();
   await find.fill("#launch is:todo -is:complete");
-  await expect(dialog.getByText("Everywhere", { exact: true })).toBeVisible();
+  // Every query shows both places; the rail stays on Everywhere.
+  await expect(
+    dialog.getByRole("button", { name: /^Everywhere/ }),
+  ).toHaveAttribute("aria-pressed", "true");
   await expect(
     dialog.getByText(/DQL|fuzzy matching|exact matching/),
   ).toHaveCount(0);
   await expect(results).toHaveCount(50);
   await expect(results.first()).toHaveAttribute("data-result-id", "near");
+  await expect(dialog.getByText("In this node · 1")).toBeVisible();
+  await expect(dialog.getByText("Everywhere else · 55")).toBeVisible();
   await expect(
-    results.first().getByText("here", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    dialog.getByRole("group", { name: "Actions", exact: true }),
+    dialog.getByRole("group", { name: "Commands", exact: true }),
   ).toHaveCount(0);
   await expect(dialog.getByText("Showing 50 of 56 matches")).toBeVisible();
   await results.nth(2).click();
@@ -361,9 +363,21 @@ test("Find searches everywhere, prioritizes here, returns to selection, and hand
   await expect(page).toHaveURL(/\/alpha$/);
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await find.fill("#launch is:todo -is:complete");
+  // Cmd+F inside Find narrows the list to this node; the query stays.
+  await find.press("ControlOrMeta+f");
+  await expect(
+    dialog.getByRole("button", { name: /^This node/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(find).toBeFocused();
+  await expect(results).toHaveCount(1);
+  await expect(results.first()).toHaveAttribute("data-result-id", "near");
+  await expect(dialog.getByText(/^Everywhere else/)).toHaveCount(0);
   await find.press("Shift+Enter");
   await expect(dialog).toHaveCount(0);
   await expect(page).toHaveURL(/\/alpha\?q=/);
+  await expect(page.locator("[data-filter-pill]")).toHaveText(
+    "#launch is:todo -is:completein this node",
+  );
   await expect(page.locator('li[data-node-id="near"]')).toBeVisible();
   await expect(page.locator('li[data-node-id="task-0"]')).toHaveCount(0);
   await page.getByRole("button", { name: "Search", exact: true }).click();
@@ -421,34 +435,52 @@ test("Find searches everywhere, prioritizes here, returns to selection, and hand
     .getByRole("menuitemradio", { name: "Completed", exact: true })
     .click();
   await expect(find).toHaveValue("#launch is:complete");
+  // Home has no narrower place, so Cmd+F inside Find stays on Everywhere.
   await find.press("ControlOrMeta+f");
-  await expect(dialog).toHaveCount(0);
-  const filter = page.getByRole("combobox", { name: "Filter query" });
-  await expect(filter).toHaveValue("#launch is:complete");
-  await expect(filter).toBeFocused();
-  await filter.fill("#launch");
-  await expect(filter).toHaveValue("#launch");
-  await page.getByRole("button", { name: "Completed", exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /^This node/ })).toHaveCount(
+    0,
+  );
+  await expect(
+    dialog.getByRole("button", { name: /^Everywhere/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(find).toHaveValue("#launch is:complete");
+  await expect(find).toBeFocused();
+  await expect(results).toHaveCount(1);
+  await expect(results.first()).toHaveAttribute("data-result-id", "done");
+  await find.fill("#launch");
+  await dialog.getByRole("button", { name: "Completed", exact: true }).click();
   await page
     .getByRole("menuitemradio", { name: "Completed", exact: true })
     .click();
-  await expect(filter).toHaveValue("#launch is:complete");
-  await page.getByRole("button", { name: "#launch", exact: true }).click();
+  await expect(find).toHaveValue("#launch is:complete");
+  await dialog.getByRole("button", { name: "#launch", exact: true }).click();
   await page
     .getByRole("menuitemradio", { name: "Exclude #launch", exact: true })
     .click();
-  await expect(filter).toHaveValue("-#launch is:complete");
-  await page.getByRole("button", { name: "Not #launch", exact: true }).click();
+  await expect(find).toHaveValue("-#launch is:complete");
+  await dialog
+    .getByRole("button", { name: "Not #launch", exact: true })
+    .click();
   await page
     .getByRole("menuitemradio", { name: "Remove filter", exact: true })
     .click();
-  await expect(filter).toHaveValue("is:complete");
-  await filter.fill("");
-  await page.getByRole("button", { name: "Has children", exact: true }).click();
+  await expect(find).toHaveValue("is:complete");
+  await find.fill("");
+  await dialog
+    .getByRole("button", { name: "Has children", exact: true })
+    .click();
   await page
     .getByRole("menuitemradio", { name: "Has children", exact: true })
     .click();
-  await expect(filter).toHaveValue("has:children");
+  await expect(find).toHaveValue("has:children");
+  // Shift+Enter shows this node's matches in the outline, behind a pill.
+  await find.press("Shift+Enter");
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL(/q=has%3Achildren/);
+  await expect(page.locator("[data-filter-pill]")).toHaveText(
+    "has:childrenin Home",
+  );
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await find.fill("");
   await dialog
@@ -462,6 +494,26 @@ test("Find searches everywhere, prioritizes here, returns to selection, and hand
   await expect(results.nth(0)).toHaveAttribute("data-result-id", "alpha");
   await expect(results.nth(1)).toHaveAttribute("data-result-id", "alpha-1");
   await expect(results.nth(2)).toHaveAttribute("data-result-id", "bravo");
+});
+
+test("Enter on a focused rail control works the control, not the highlighted row", async ({
+  page,
+}) => {
+  await load(page);
+  await text(page, "bravo").click();
+  await openPalette(page);
+  // The highlighted row is the ambient Indent, which would move Bravo.
+  await expect(page.getByText(/Acting on:\s*Bravo/)).toBeVisible();
+  const dialog = page.getByRole("dialog", { name: "Find" });
+  const commands = dialog.getByRole("button", { name: /^Commands/ });
+  await commands.focus();
+  await commands.press("Enter");
+  await expect(commands).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByText(/^Actions on:/)).toHaveCount(0);
+  await expect(page.locator('li[data-node-id="bravo"]')).not.toHaveAttribute(
+    "data-parent-id",
+    "alpha",
+  );
 });
 
 test("ambient target: a focused bullet's actions run against it", async ({
@@ -521,7 +573,7 @@ test("Scribble mode covers active text, tokens, titles, and Quick-add without ch
   const row = text(page, "alpha");
   await expect(row).toBeVisible({ timeout: 15000 });
   await openPalette(page);
-  await page.getByPlaceholder(/Search nodes and actions/).fill("scribble");
+  await page.getByPlaceholder(/Search nodes and commands/).fill("scribble");
   await page.getByRole("option", { name: /Turn on Scribble mode/ }).click();
   const off = page.getByRole("button", {
     name: "Turn off Scribble mode",
@@ -557,7 +609,7 @@ test("Scribble mode covers active text, tokens, titles, and Quick-add without ch
   await expect(text(page, "bravo")).toHaveText("Bravo writin!g");
   await openPalette(page);
   await page
-    .getByPlaceholder(/Search nodes and actions/)
+    .getByPlaceholder(/Search nodes and commands/)
     .fill("Spotlight mode");
   await page.getByRole("option", { name: /Spotlight mode/ }).click();
   await text(page, "bravo").click();
@@ -592,7 +644,7 @@ test("Scribble mode covers active text, tokens, titles, and Quick-add without ch
     '"Redacted Script"',
   );
   await openPalette(page);
-  await page.getByPlaceholder(/Search nodes and actions/).fill("quick add");
+  await page.getByPlaceholder(/Search nodes and commands/).fill("quick add");
   await page.getByRole("option", { name: /Quick add/ }).click();
   const capture = page.getByRole("textbox", { name: "Quick add", exact: true });
   await expect(capture).toBeFocused();
@@ -610,7 +662,7 @@ test("Scribble mode covers active text, tokens, titles, and Quick-add without ch
   await expect(off).toBeVisible();
   await page.keyboard.press("Escape");
   await openPalette(page);
-  await page.getByPlaceholder(/Search nodes and actions/).fill("scribble");
+  await page.getByPlaceholder(/Search nodes and commands/).fill("scribble");
   await page.getByRole("option", { name: /Turn off Scribble mode/ }).click();
   await expect(title).not.toHaveCSS("font-family", '"Redacted Script"');
 });

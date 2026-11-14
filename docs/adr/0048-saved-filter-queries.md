@@ -1,5 +1,10 @@
 # Saved filter queries, pinned in the search popover and Cmd+K
 
+**One search box amendment ([ADR 0089](./0089-one-search-box.md)).** The pin
+moves to the applied filter's pill. The filter popover is gone, so its Saved
+section, with inline rename and delete, moves into Find: the desktop rail and
+the phone list. A row fills Find; Show in outline applies it.
+
 **Find amendment ([ADR 0083](./0083-find-and-filter.md)).** Selecting a saved
 query in Find (Cmd+K) now fills the palette with its text instead of applying a
 local filter and closing. Shift+Enter filters the current view. The filter

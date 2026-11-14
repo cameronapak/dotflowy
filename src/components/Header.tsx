@@ -6,7 +6,6 @@ import { useIsMobile } from "../hooks/use-mobile";
 import { usePluginChrome } from "../plugins/registry";
 import { HeaderAppMenu, HeaderViewMenu } from "./header-more-menu";
 import { FindButton } from "./node-switcher";
-import { FilterButton } from "./query-filter";
 import { SpotlightIndicator } from "./spotlight-indicator";
 
 const MobileNavigation = lazy(() => import("./MobileNavigation"));
@@ -64,7 +63,6 @@ export function Header({
                   <Fragment key={s.id}>{s.render(getCtx)}</Fragment>
                 ))}
               <FindButton />
-              <FilterButton />
               <HeaderViewMenu />
               <HeaderAppMenu />
             </div>

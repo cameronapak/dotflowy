@@ -17,9 +17,9 @@ import {
 
 /**
  * Saved filter queries (ADR 0048). A filter worth typing twice is worth saving:
- * a Pin toggle in the filter input stores the `?q=` string here, and it's
- * surfaced in exactly two places -- the filter popover's "Saved" section and the
- * Cmd+K empty state (the bookmark symmetry).
+ * the Pin on the applied filter's pill stores the `?q=` string here, and Find
+ * lists it -- the desktop rail's Saved section and the phone list, where rows
+ * rename and delete (ADR 0089; the bookmark symmetry).
  *
  * Storage is a kv side-collection (`saved-queries` via /api/kv, the tag-colors
  * pattern) -- it rides the per-user DO, syncs across devices, needs no `Node`
@@ -126,7 +126,7 @@ export function renameSavedQuery(id: string, name: string): void {
   savedQueriesCollection.update(id, (draft) => void (draft.name = n));
 }
 
-/** Delete a saved query by id (the popover row's X). */
+/** Delete a saved query by id (a Saved row's X in Find). */
 export function deleteSavedQuery(id: string): void {
   if (!liveRows().some((r) => r.id === id)) return;
   savedQueriesCollection.delete(id);
@@ -179,8 +179,8 @@ function getSorted(): SavedQueryRow[] {
   return sorted;
 }
 
-/** All saved queries, newest-first, reactive. Drives the popover Saved section
- *  and the Cmd+K "Saved filters" group. */
+/** All saved queries, newest-first, reactive. Drives Find's Saved rail section
+ *  and its "Saved filters" rows. */
 export function useSavedQueries(): SavedQueryRow[] {
   return useSyncExternalStore(subscribe, getSorted, () => EMPTY);
 }

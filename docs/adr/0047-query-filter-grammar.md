@@ -1,5 +1,13 @@
 # A query grammar for the view filter, with plugin-registered operators
 
+**One search box amendment ([ADR 0089](./0089-one-search-box.md)).** Decision
+6's resident input, its Escape ladder, and the header toggle are gone. Cmd+F
+opens Find on this node; Show in outline or Shift+Enter writes `?q=`, and a
+subheader pill shows the applied query until it is cleared. Find's list shows
+`key:` and `#` value suggestions (decision 7); decision 7's empty-focus
+operator cheat sheet and bare-word key suggestions are retired. The grammar
+and filter semantics are unchanged.
+
 **Find + filter amendment ([ADR 0083](./0083-find-and-filter.md)).** The
 magnifier and Cmd+K open Find; the desktop funnel and Cmd+F filter this view.
 This supersedes the magnifier and command-symbol arrangement in decision 6.

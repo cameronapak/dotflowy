@@ -100,7 +100,7 @@ async function clientNavigate(page: Page, path: string) {
 // Click the input to deterministically own focus, confirm it stuck, then type.
 async function openSwitcherAndType(page: Page, text: string) {
   await page.keyboard.press(`${modifier()}+k`);
-  const input = page.getByPlaceholder("Search nodes and actions...");
+  const input = page.getByPlaceholder("Search nodes and commands...");
   await expect(input).toBeVisible();
   await input.click();
   await expect(input).toBeFocused();

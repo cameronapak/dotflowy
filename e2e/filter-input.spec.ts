@@ -1,18 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  applyFilter,
+  filterPill,
+  findInput,
   openSeededOutline,
   placeCaret,
   seedOutline,
   type SeedNode,
 } from "./fixtures";
 
-// The `?q=` filter input (ADR 0047 §6, amended 2026-07-11): CORE subheader
-// chrome opened by Cmd+F / the header magnifier / the Cmd+K "Filter this view"
-// action. Live (debounced) filtering while composing; the raw query stays
-// RESIDENT in the input while `?q=` is active -- focused or not (the pill state
-// is dead). A trailing clear X, and a progressive Escape ladder (close the
-// popover -> clear the text -> collapse the row).
+// The `?q=` filter (ADR 0047 §6, ADR 0089): Find is the one search box. Cmd+F
+// opens it on the current node, Shift+Enter or Show in outline writes `?q=`,
+// and a subheader pill keeps the applied query visible while you edit the live
+// outline. The pill reopens Find prefilled; its X clears the filter.
 
 const TREE: SeedNode[] = [
   {
@@ -34,77 +35,67 @@ const TREE: SeedNode[] = [
 const row = (page: Page, id: string) =>
   page.locator(`li[data-node-id="${id}"]`);
 
-const input = (page: Page) =>
-  page.getByRole("combobox", { name: "Filter query" });
-
 async function load(page: Page) {
   await seedOutline(page, TREE);
   await openSeededOutline(page, { anchorId: "milk" });
 }
 
-async function summon(page: Page) {
-  await page.keyboard.press("ControlOrMeta+f");
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toBeFocused();
-}
-
-test("the funnel's three states track the stakes (ADR 0050)", async ({
+test("the pill shows the applied query and reopens Find on this node", async ({
   page,
 }) => {
-  await load(page);
-  const magnifier = page.getByRole("button", { name: "Filter this view" });
-  // Match the STANDALONE fill token, not the ghost variant's `hover:bg-muted`
-  // / `aria-expanded:bg-muted` utilities (a bare `/bg-muted/` would).
-  const muted = /(?:^|\s)bg-muted(?:\s|$)/;
-  const solid = /(?:^|\s)bg-primary(?:\s|$)/;
+  await seedOutline(page, [
+    ...TREE,
+    { id: "detail", parentId: "mom", prevSiblingId: null, text: "Call #work" },
+    { id: "plain", parentId: "mom", prevSiblingId: "detail", text: "Notes" },
+  ]);
+  await openSeededOutline(page, { path: "/mom", anchorId: "detail" });
+  // No filter: no pill and no header funnel; Find is the only search box.
+  await expect(filterPill(page)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Filter this view" }),
+  ).toHaveCount(0);
 
-  // Idle: ghost, not pressed -- neither the muted nor the solid fill.
-  await expect(magnifier).toHaveAttribute("aria-pressed", "false");
-  await expect(magnifier).not.toHaveClass(muted);
-  await expect(magnifier).not.toHaveClass(solid);
+  await applyFilter(page, "#work");
+  // Focus lands on the applied filter, not on a bullet it may hide.
+  await expect(filterPill(page)).toBeFocused();
+  await expect(row(page, "detail")).toBeVisible();
+  await expect(row(page, "plain")).toHaveCount(0);
+  await expect(filterPill(page)).toHaveText("#workin this node");
 
-  // Open but empty: pressed + MUTED ("a tool is engaged, view still normal").
-  // This is the state the button previously lacked -- opening it now reads.
-  await magnifier.click();
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toBeFocused();
-  await expect(magnifier).toHaveAttribute("aria-pressed", "true");
-  await expect(magnifier).toHaveClass(muted);
-
-  // The same toggle closes an empty summon, then opens it again.
-  await magnifier.click();
-  await expect(input(page)).toHaveCount(0);
-  await magnifier.click();
-  await expect(input(page)).toBeFocused();
-
-  // Query applied: still pressed, now SOLID ("your view is altered") -- so the
-  // toggle-off press that WIPES the query only fires while it reads as "on".
-  await input(page).fill("#work");
+  // The pill reopens Find with the query, scoped to this node.
+  await filterPill(page).click();
+  await expect(findInput(page)).toHaveValue("#work");
+  await expect(
+    page.getByRole("button", { name: /^This node/, pressed: true }),
+  ).toBeVisible();
+  await expect(page.locator('[data-result-id="detail"]')).toBeVisible();
+  // Escape leaves the applied filter alone.
+  await page.keyboard.press("Escape");
+  await expect(findInput(page)).toHaveCount(0);
   await expect(page).toHaveURL(/q=%23work/);
-  await expect(magnifier).toHaveAttribute("aria-pressed", "true");
-  await expect(magnifier).toHaveClass(solid);
-  await expect(magnifier).not.toHaveClass(muted);
 
-  // Toggle-off clears the query, collapses the row, and drops the lit state.
-  await magnifier.click();
+  await page.getByRole("button", { name: "Clear filter" }).click();
   await expect(page).not.toHaveURL(/q=/);
-  await expect(input(page)).toHaveCount(0);
-  await expect(magnifier).toHaveAttribute("aria-pressed", "false");
-  await expect(magnifier).not.toHaveClass(muted);
-  await expect(magnifier).not.toHaveClass(solid);
+  await expect(filterPill(page)).toHaveCount(0);
+  await expect(row(page, "plain")).toBeVisible();
 });
 
-test("typing filters the view live", async ({ page }) => {
+test("Show in outline applies Find's query to the view", async ({ page }) => {
   await load(page);
-  await summon(page);
+  await page.keyboard.press("ControlOrMeta+f");
+  // Home has no narrower place, so Find searches Everywhere.
+  await expect(page.getByRole("button", { name: /^This node/ })).toHaveCount(0);
 
   // `is:todo` (a core operator) keeps the task, prunes the plain bullets.
-  await input(page).fill("is:todo");
+  await findInput(page).fill("is:todo");
+  await page.getByRole("button", { name: /^Show in outline/ }).click();
 
+  await expect(findInput(page)).toHaveCount(0);
   await expect(row(page, "milk").first()).toBeVisible();
   await expect(row(page, "mom")).toHaveCount(0);
   await expect(row(page, "ship")).toHaveCount(0);
   await expect(page).toHaveURL(/[?&]q=is/);
+  await expect(filterPill(page)).toHaveText("is:todoin Home");
 });
 
 test("an empty local filter opens Find everywhere without changing the route", async ({
@@ -120,8 +111,7 @@ test("an empty local filter opens Find everywhere without changing the route", a
     },
   ]);
   await openSeededOutline(page, { path: "/mom", anchorId: "detail" });
-  await summon(page);
-  await input(page).fill("#work");
+  await applyFilter(page, "#work");
   await expect(row(page, "detail")).toHaveCount(0);
   const escape = page.getByRole("button", {
     name: "Find everywhere",
@@ -142,8 +132,7 @@ test("empty-filter recovery ranks useful removals and protects OR operands", asy
   page,
 }) => {
   await load(page);
-  await summon(page);
-  await input(page).fill('#work "Call mom"');
+  await applyFilter(page, '#work "Call mom"');
   const empty = page.getByRole("region", { name: "No filter matches" });
   await expect(empty.getByRole("heading")).toHaveText("No matches");
   const removals = empty.getByRole("button", { name: /^Remove / });
@@ -156,23 +145,23 @@ test("empty-filter recovery ranks useful removals and protects OR operands", asy
     empty.getByRole("button", { name: /^Show completed/ }),
   ).toHaveCount(0);
   await removals.first().click();
-  await expect(input(page)).toHaveValue("#work");
+  await expect(filterPill(page)).toContainText("#work");
   await expect(row(page, "milk")).toBeVisible();
   await expect(row(page, "ship")).toBeVisible();
 
-  await input(page).fill("milk OR mom missing");
+  await applyFilter(page, "milk OR mom missing");
   await expect(removals).toHaveText(['Remove "missing"2']);
   await removals.first().click();
-  await expect(input(page)).toHaveValue("milk OR mom");
+  await expect(filterPill(page)).toContainText("milk OR mom");
   await expect(row(page, "milk")).toBeVisible();
   await expect(row(page, "mom")).toBeVisible();
 
   // Removing mom would also unlock results by changing the OR grouping. Only
   // the independent milk term is safe to offer.
-  await input(page).fill("milk mom OR ship");
+  await applyFilter(page, "milk mom OR ship");
   await expect(removals).toHaveText(['Remove "milk"2']);
   // A sole token defers to Clear filter, rather than a duplicate action.
-  await input(page).fill("missing");
+  await applyFilter(page, "missing");
   await expect(page).toHaveURL(/q=missing/);
   await expect(empty).toBeVisible();
   await expect(removals).toHaveCount(0);
@@ -183,9 +172,7 @@ test("empty-filter recovery ranks useful removals and protects OR operands", asy
 
 test("a free-text term filters by substring", async ({ page }) => {
   await load(page);
-  await summon(page);
-
-  await input(page).fill("milk");
+  await applyFilter(page, "milk");
 
   await expect(row(page, "milk").first()).toBeVisible();
   await expect(row(page, "mom")).toHaveCount(0);
@@ -217,7 +204,7 @@ for (const query of ["#work", "work"]) {
     await editor.press("ArrowDown");
     await expect(row(page, "ship").locator(".node-text")).toBeFocused();
     await expect(row(page, "milk")).toHaveCount(0);
-    await expect(input(page)).toHaveValue(query);
+    await expect(filterPill(page)).toContainText(query);
   });
 }
 
@@ -232,7 +219,7 @@ test("editing the last match keeps the row until blur outside the outline", asyn
   await expect(editor).toBeFocused();
   await expect(page.locator(".outline-empty")).toHaveCount(0);
 
-  await input(page).focus();
+  await filterPill(page).focus();
   await expect(row(page, "milk")).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "No filter matches" }),
@@ -307,7 +294,7 @@ test("a row that still matches after editing stays visible on blur", async ({
     .toBeUndefined();
   await page.evaluate((previous) => previous.restore(), before);
   await before.dispose();
-  await input(page).focus();
+  await filterPill(page).focus();
   await expect(editor).toHaveText("Buy more milk #work");
   await expect(editor).toBeVisible();
   await expect(editor).not.toBeFocused();
@@ -345,7 +332,7 @@ test("a retained row stays filtered out after its focused editor unmounts", asyn
   await page.locator(".outline-scroll").evaluate((el) => el.scrollTo(0, 0));
   await expect(row(page, "node-1")).toBeVisible();
   await expect(row(page, "node-0")).toHaveCount(0);
-  await expect(input(page)).toHaveValue("match");
+  await expect(filterPill(page)).toContainText("match");
 });
 
 test("a focus-only retained parent has no ineffective expand control", async ({
@@ -391,116 +378,43 @@ test("a focus-only retained parent has no ineffective expand control", async ({
   );
 });
 
-test("Enter commits, blurs, and the input stays resident", async ({ page }) => {
-  await load(page);
-  await summon(page);
-
-  await input(page).fill("#work");
-  await input(page).press("Enter");
-
-  // No pills: the input stays resident showing the raw query, but blurred.
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toHaveValue("#work");
-  await expect(input(page)).not.toBeFocused();
-  await expect(page).toHaveURL(/q=%23work/);
-});
-
-test("the input stays resident on blur while a query is active", async ({
+test("the pill stays while you edit, and Cmd+F edits the applied query", async ({
   page,
 }) => {
   await load(page);
-  await summon(page);
+  await applyFilter(page, "#work");
 
-  await input(page).fill("#work");
-  await expect(page).toHaveURL(/q=%23work/);
-
-  // Close the autocomplete popover (so it can't intercept the click), then
-  // blur into the outline by focusing a matching bullet. The row stays open.
-  await input(page).press("Escape");
-  await expect(page.locator('[role="listbox"]')).toHaveCount(0);
+  // Working in the outline keeps the filter and its pill.
   await row(page, "milk").first().locator(".node-text").first().click();
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toHaveValue("#work");
-  await expect(input(page)).not.toBeFocused();
-  await expect(page).toHaveURL(/q=%23work/);
-});
-
-test("empty text + blur collapses the row", async ({ page }) => {
-  await load(page);
-  await summon(page);
-  await expect(input(page)).toBeVisible();
-
-  // Close the empty-focus cheat-sheet popover, then blur with no text and no
-  // active filter -> the subheader collapses away.
-  await input(page).press("Escape");
-  await expect(page.locator('[role="listbox"]')).toHaveCount(0);
-  await row(page, "mom").locator(".node-text").first().click();
-  await expect(input(page)).toHaveCount(0);
-});
-
-test("the clear X wipes the text and the query, keeping focus", async ({
-  page,
-}) => {
-  await load(page);
-  await summon(page);
-
-  await input(page).fill("#work");
+  await expect(filterPill(page)).toHaveText("#workin Home");
   await expect(page).toHaveURL(/q=%23work/);
 
-  await page.getByRole("button", { name: "Clear filter" }).click();
+  // Cmd+F reopens Find with the applied query, ready to change it.
+  await page.keyboard.press("ControlOrMeta+f");
+  await expect(findInput(page)).toHaveValue("#work");
+  await findInput(page).fill("#work is:todo");
+  await findInput(page).press("Shift+Enter");
+  await expect(filterPill(page)).toHaveText("#work is:todoin Home");
+  await expect(row(page, "milk").first()).toBeVisible();
+  await expect(row(page, "ship")).toHaveCount(0);
 
-  await expect(input(page)).toHaveValue("");
-  await expect(input(page)).toBeFocused();
+  // An emptied query clears the filter instead of leaving an empty pill.
+  await page.keyboard.press("ControlOrMeta+f");
+  await findInput(page).fill("");
+  await findInput(page).press("Shift+Enter");
   await expect(page).not.toHaveURL(/q=/);
-  // Cleared but still summoned -> the input stays open.
-  await expect(input(page)).toBeVisible();
-});
-
-test("Escape ladder: close the popover, clear the text, collapse the row", async ({
-  page,
-}) => {
-  await load(page);
-  await summon(page);
-
-  await input(page).fill("#work");
-  await expect(page).toHaveURL(/q=%23work/);
-  // `#work` opens the tag-suggestion popover (ADR 0047 §7 autocomplete).
-  const listbox = page.locator('[role="listbox"]');
-  await expect(listbox).toBeVisible();
-
-  // Stage 1: Escape closes ONLY the popover; the input stays open + focused,
-  // the query intact.
-  await input(page).press("Escape");
-  await expect(listbox).toHaveCount(0);
-  await expect(input(page)).toBeVisible();
-  await expect(input(page)).toBeFocused();
-  await expect(page).toHaveURL(/q=%23work/);
-
-  // Stage 2: Escape clears the text AND the query, keeping focus.
-  await input(page).press("Escape");
-  await expect(input(page)).toHaveValue("");
-  await expect(input(page)).toBeFocused();
-  await expect(page).not.toHaveURL(/q=/);
-
-  // Stage 3: a final Escape (empty, no popover) collapses the row.
-  await input(page).press("Escape");
-  await expect(input(page)).toHaveCount(0);
+  await expect(filterPill(page)).toHaveCount(0);
 });
 
 test("window Escape clears an active filter in one press", async ({ page }) => {
   await load(page);
-  await summon(page);
+  await applyFilter(page, "#work");
+  // Show in outline leaves focus on the pill, outside the outline.
+  await expect(filterPill(page)).toBeFocused();
 
-  await input(page).fill("#work");
-  await input(page).press("Enter"); // commit + blur; input stays resident
-  await expect(input(page)).not.toBeFocused();
-  await expect(page).toHaveURL(/q=%23work/);
-
-  // The caret is not in the outline and no input is focused: one window-level
-  // Escape clears the whole filter and collapses the row.
   await page.keyboard.press("Escape");
   await expect(page).not.toHaveURL(/q=/);
-  await expect(input(page)).toHaveCount(0);
+  await expect(filterPill(page)).toHaveCount(0);
 });
 
 const tree: SeedNode[] = [
@@ -575,7 +489,7 @@ test("editing a mirrored descendant keeps only the focused path and its context 
     "true",
   );
 
-  await input(page).focus();
+  await filterPill(page).focus();
   await expect(row(page, "child")).toHaveCount(0);
   await expect(row(page, "scope")).toHaveCount(0);
   await expect(row(page, "mirror")).toHaveCount(0);
@@ -592,8 +506,7 @@ test("recovery counts stay local through mirrors and respect the completed setti
   );
   await seedOutline(page, tree);
   await openSeededOutline(page, { path: "/scope", anchorId: "mirror" });
-  await summon(page);
-  await input(page).fill("#child missing");
+  await applyFilter(page, "#child missing");
   const empty = page.getByRole("region", { name: "No filter matches" });
   await expect(empty.getByRole("heading")).toContainText("Today");
   // Only the mirrored path is in scope, not its source path under Project.
@@ -605,20 +518,19 @@ test("recovery counts stay local through mirrors and respect the completed setti
   await expect(row(page, "project")).toHaveCount(0);
 
   await openSeededOutline(page, { path: "/project", anchorId: "source" });
-  await summon(page);
-  await input(page).fill("is:complete");
+  await applyFilter(page, "is:complete");
   const showCompleted = empty.getByRole("button", { name: /^Show completed/ });
   await expect(showCompleted).toHaveText("Show completed1");
   await expect(empty.getByRole("button", { name: /^Remove / })).toHaveCount(0);
   await showCompleted.click();
-  await expect(input(page)).toHaveValue("is:complete");
+  await expect(filterPill(page)).toContainText("is:complete");
   await expect(row(page, "done")).toBeVisible();
   await expect(empty).toHaveCount(0);
   expect(
     await page.evaluate(() => localStorage.getItem("dotflowy:show-completed")),
   ).toBe("true");
 
-  await input(page).fill("missing");
+  await applyFilter(page, "missing");
   await expect(empty).toBeVisible();
   await expect(showCompleted).toHaveCount(0);
 });
@@ -628,8 +540,7 @@ test("the same query selects source and mirror content, while is:mirror excludes
 }) => {
   await seedOutline(page, tree);
   await openSeededOutline(page, { anchorId: "project" });
-  await summon(page);
-  await input(page).fill("is:todo -is:complete #dotflowy");
+  await applyFilter(page, "is:todo -is:complete #dotflowy");
   await expect(row(page, "source")).toBeVisible();
   await expect(row(page, "mirror")).toBeVisible();
   await expect(row(page, "mirror").locator(".node-text")).toContainText(
@@ -638,7 +549,7 @@ test("the same query selects source and mirror content, while is:mirror excludes
   await expect(row(page, "done")).toHaveCount(0);
   await expect(row(page, "untagged")).toHaveCount(0);
 
-  await input(page).fill("is:todo -is:complete #dotflowy is:mirror");
+  await applyFilter(page, "is:todo -is:complete #dotflowy is:mirror");
   await expect(row(page, "source")).toHaveCount(0);
   await expect(row(page, "project")).toHaveCount(0);
   await expect(row(page, "mirror")).toBeVisible();
@@ -651,7 +562,6 @@ test("the same query selects source and mirror content, while is:mirror excludes
     "data-context",
     "true",
   );
-  await input(page).press("Enter");
 });
 
 test("a zoomed view finds descendants through a mirror with contextual ancestors", async ({
@@ -662,7 +572,7 @@ test("a zoomed view finds descendants through a mirror with contextual ancestors
     path: "/scope?q=%23child",
     anchorId: "mirror",
   });
-  await expect(input(page)).toHaveValue("#child");
+  await expect(filterPill(page)).toContainText("#child");
   await expect(row(page, "mirror")).toBeVisible();
   await expect(row(page, "mirror").locator(".outline-row")).toHaveAttribute(
     "data-context",

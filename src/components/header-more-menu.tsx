@@ -89,7 +89,7 @@ function ViewMenuItems() {
       {mobile && (
         <DropdownMenuItem onAfterClose={openFilterInput}>
           <SearchIcon />
-          Filter this view
+          Search this view
         </DropdownMenuItem>
       )}
       {current && (
