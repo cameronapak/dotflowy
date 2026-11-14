@@ -310,6 +310,7 @@ test("cardless trial requires a deliberate checkout, retries failures and distin
   );
   // A browser return alone never grants access or claims a payment.
   await page.goto("/settings?checkout=trial");
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(
     page.getByRole("status").filter({ hasText: "Confirming your membership" }),
   ).toBeVisible();
