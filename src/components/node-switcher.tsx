@@ -748,7 +748,8 @@ function SwitcherDialog({
 
   function onKeyDown(e: React.KeyboardEvent) {
     // Undo and redo in the box edit the query, never the outline behind it.
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+    // Once Find is closing, the keys belong to the outline again.
+    if (open && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
       e.stopPropagation();
       e.nativeEvent.stopImmediatePropagation();
       return;
