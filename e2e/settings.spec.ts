@@ -436,11 +436,13 @@ test("Connections separates collapsible setup and access, with revocation availa
     },
   ];
   let failRevoke = true;
+  let failAppRevoke = false;
   await page.route("**/api/mcp-connections", (route) => {
     if (route.request().method() === "DELETE") {
       expect(route.request().postDataJSON()).toEqual({
         clientId: "cursor-client",
       });
+      if (failAppRevoke) return route.fulfill({ status: 503 });
       apps = [];
       return route.fulfill({ json: { revoked: true } });
     }
@@ -488,30 +490,48 @@ test("Connections separates collapsible setup and access, with revocation availa
   await expect(personalKeys).toBeHidden();
   await page.keyboard.press("Space");
   await expect(personalKeys).toBeVisible();
-  await page.getByRole("button", { name: "Revoke Cursor" }).click();
-  await expect(page.getByRole("button", { name: "Revoke Cursor" })).toHaveCount(
+  const authorizedApps = page.locator("#authorized-apps");
+  page.once("dialog", async (dialog) => {
+    expect(dialog.type()).toBe("confirm");
+    expect(dialog.message()).toContain("Cursor");
+    await dialog.dismiss();
+  });
+  await authorizedApps.getByRole("button", { name: "Revoke Cursor" }).click();
+  expect(apps).toHaveLength(1);
+  failAppRevoke = true;
+  page.once("dialog", (dialog) => dialog.accept());
+  await authorizedApps.getByRole("button", { name: "Revoke Cursor" }).click();
+  await expect(authorizedApps.getByRole("alert")).toBeVisible();
+  await expect(
+    authorizedApps.getByText("Cursor", { exact: true }),
+  ).toBeVisible();
+  failAppRevoke = false;
+  page.once("dialog", (dialog) => dialog.accept());
+  await authorizedApps.getByRole("button", { name: "Revoke Cursor" }).click();
+  await expect(authorizedApps.getByText("Cursor", { exact: true })).toHaveCount(
     0,
   );
+  page.once("dialog", async (dialog) => {
+    expect(dialog.type()).toBe("confirm");
+    expect(dialog.message()).toContain("Phone shortcut");
+    await dialog.dismiss();
+  });
   await personalKeys
     .getByRole("button", { name: "Revoke Phone shortcut" })
-    .click();
-  await personalKeys
-    .getByRole("button", { name: "Cancel", exact: true })
     .click();
   expect(keys).toHaveLength(1);
+  page.once("dialog", (dialog) => dialog.accept());
   await personalKeys
     .getByRole("button", { name: "Revoke Phone shortcut" })
-    .click();
-  await personalKeys
-    .getByRole("button", { name: "Confirm revoke", exact: true })
     .click();
   await expect(personalKeys.getByRole("alert")).toBeVisible();
   await expect(
     personalKeys.getByText("Phone shortcut", { exact: true }),
   ).toBeVisible();
   failRevoke = false;
+  page.once("dialog", (dialog) => dialog.accept());
   await personalKeys
-    .getByRole("button", { name: "Confirm revoke", exact: true })
+    .getByRole("button", { name: "Revoke Phone shortcut" })
     .click();
   await expect(
     personalKeys.getByText("Phone shortcut", { exact: true }),

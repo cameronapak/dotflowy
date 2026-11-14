@@ -115,8 +115,9 @@ before the provider can coerce them. New grants require S256 PKCE.
 
 `/api/mcp-connections` is browser-session-only. A same-origin DELETE atomically
 removes this user's tokens, consents, and pending codes for a client, never the shared
-registration or a neighbor's grants. Settings exposes revocation even on Free. Existing
-credentials remain accepted without retroactive consent and can still refresh. A
+registration or a neighbor's grants. Settings exposes revocation even on Free.
+Revoking an app or personal API key from Settings requires native browser confirmation.
+Existing credentials remain accepted without retroactive consent and can still refresh. A
 successful refresh consumes the old grant; competing refreshes cannot both succeed.
 The code exchange also checks that consent still exists after token creation, so a
 revocation during issuance cannot leave a new credential behind.

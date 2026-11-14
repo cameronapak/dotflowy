@@ -104,7 +104,6 @@ export function ApiKeysSettings(props: CaptureDialogProps) {
   }, []);
   const [keys, setKeys] = useState<CaptureKeyEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
 
@@ -147,7 +146,6 @@ export function ApiKeysSettings(props: CaptureDialogProps) {
       });
       if (!response.ok) throw new Error("Couldn't revoke the API key.");
       setKeys((current) => current?.filter((key) => key.id !== id) ?? null);
-      setConfirm(null);
       toast.success("Key revoked");
     } catch {
       setError("Couldn't revoke the API key. Try again.");
@@ -214,39 +212,22 @@ export function ApiKeysSettings(props: CaptureDialogProps) {
                     {formatDate(key.expiresAt)}
                   </p>
                 </div>
-                {confirm === key.id ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="w-full text-xs text-muted-foreground">
-                      The connection using this key will stop working.
-                    </p>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy !== null}
-                      onClick={() => setConfirm(null)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      disabled={busy !== null}
-                      onClick={() => void revoke(key.id)}
-                    >
-                      {busy === key.id ? "Revoking…" : "Confirm revoke"}
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    aria-label={`Revoke ${key.name}`}
-                    disabled={busy !== null}
-                    onClick={() => setConfirm(key.id)}
-                  >
-                    Revoke
-                  </Button>
-                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Revoke ${key.name}`}
+                  disabled={busy !== null}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Revoke API key ${key.name}? The connection using this key will stop working.`,
+                      )
+                    )
+                      void revoke(key.id);
+                  }}
+                >
+                  {busy === key.id ? "Revoking…" : "Revoke"}
+                </Button>
               </li>
             ))}
           </ul>

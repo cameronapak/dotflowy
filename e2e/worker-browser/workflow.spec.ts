@@ -652,6 +652,7 @@ test("MCP sign-in requires consent and Settings revokes the issued grant", async
   ).toBeVisible();
   await connections.scrollIntoViewIfNeeded();
   await page.screenshot({ path: info.outputPath("authorized-apps.png") });
+  page.once("dialog", (dialog) => dialog.accept());
   await page
     .getByRole("button", { name: "Revoke Local review client" })
     .click();

@@ -104,7 +104,14 @@ export function McpConnections() {
                 size="sm"
                 disabled={busy !== null}
                 aria-label={`Revoke ${client.name}`}
-                onClick={() => void revoke(client.clientId)}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Revoke access for ${client.name}? You'll need to reconnect from the app to allow access again.`,
+                    )
+                  )
+                    void revoke(client.clientId);
+                }}
               >
                 {busy === client.clientId ? "Revoking…" : "Revoke"}
               </Button>
