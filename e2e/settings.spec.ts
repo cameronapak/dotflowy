@@ -244,6 +244,8 @@ test("free settings exposes its sections, connections nudge, and disclosed upgra
 test("cardless trial requires a deliberate checkout, retries failures and distinguishes trial access from payment", async ({
   page,
 }) => {
+  // Six app loads and a checkout redirect can outlast 30s on a cold CI shard.
+  test.setTimeout(90_000);
   await seedOutline(page, TREE);
   await page.route("**/api/keys", (route) =>
     route.fulfill({ json: { keys: [] } }),
