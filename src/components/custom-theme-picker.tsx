@@ -23,6 +23,7 @@ import {
 import { MinusIcon, PlusIcon } from "../lib/icons";
 import { cn } from "../lib/utils";
 import {
+  commitColorThemeDraft,
   paintColorThemeDraft,
   setColorTheme,
   type ColorThemeId,
@@ -77,6 +78,16 @@ export function CustomThemePicker({
   const canvas = useRef<HTMLCanvasElement>(null);
   const dragging = useRef<Dot | null>(null);
   const [active, setActive] = useState<Dot>("first");
+  const range = useRef<HTMLInputElement>(null);
+
+  // The range's native change fires once the user lets go, however the drag
+  // ends (pointer up off the track, a cancelled touch, or a key). React's
+  // onChange is the input event, so it only paints.
+  useEffect(() => {
+    const el = range.current;
+    el?.addEventListener("change", commitColorThemeDraft);
+    return () => el?.removeEventListener("change", commitColorThemeDraft);
+  }, [value]);
 
   // The field: one dot per spot, colored as it would look in this Mode.
   useEffect(() => {
@@ -160,7 +171,8 @@ export function CustomThemePicker({
       h: (current.h + step[0] + 360) % 360,
       c: Math.min(MAX_CHROMA, Math.max(MIN_CHROMA, current.c + step[1])),
     };
-    commit(
+    // Paint each step; the key's release saves once (commitColorThemeDraft).
+    draft(
       dot === "second" ? { ...seed, second: moved } : { ...seed, ...moved },
     );
     return true;
@@ -179,6 +191,9 @@ export function CustomThemePicker({
         onFocus={() => setActive(dot)}
         onKeyDown={(e) => {
           if (nudge(dot, e.key)) e.preventDefault();
+        }}
+        onKeyUp={(e) => {
+          if (ARROW_STEPS.has(e.key)) commitColorThemeDraft();
         }}
         className={cn(
           "group/dot absolute -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full outline-none active:cursor-grabbing",
@@ -301,12 +316,7 @@ export function CustomThemePicker({
             onChange={(e) =>
               draft({ ...seed, tint: Number(e.currentTarget.value) / 100 })
             }
-            onPointerUp={(e) =>
-              commit({ ...seed, tint: Number(e.currentTarget.value) / 100 })
-            }
-            onKeyUp={(e) =>
-              commit({ ...seed, tint: Number(e.currentTarget.value) / 100 })
-            }
+            ref={range}
             style={fillStyle}
             className="custom-theme-range min-w-0 flex-1"
           />

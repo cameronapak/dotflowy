@@ -65,7 +65,9 @@ outranks the fixed `.theme-custom` rule wherever the element lands in `<head>`.
 
 The no-flash script cannot run the derivation, so this device caches it:
 `dotflowy:custom-theme` holds `{ id, light, dark }`, written whenever a custom
-theme is saved or adopted from the account. Before first paint, the script
+theme is saved or adopted from the account, and rewritten when the account's
+theme loads and its derived colors differ, so an improved derivation reaches
+the cache without the user picking again. Before first paint, the script
 rebuilds the style element when the cache's id matches the saved theme, and
 sets the status bar from the cached page color. Both the script and
 `customThemeCssFromTokens` drop anything that is not a `#rrggbb` value, so an
@@ -84,8 +86,12 @@ presets the same way.
 The picker shows in Settings → Appearance when Custom is active. Dragging a
 dot paints a draft on every surface without saving. Releasing it saves once,
 through `setColorTheme`, so a drag sends one account write. Arrow keys move
-the focused dot; the palette swatches set the active dot to one of the nine
-`--hue-*` colors. ⌘K "Theme: Custom" opens this picker with the last custom
+the focused dot and save when the key is released; the Page slider saves on
+its native `change`, which fires however the drag ends. The palette swatches
+set the active dot to one of the nine `--hue-*` colors and save at once.
+Theme saves run one at a time in the order they were picked, because
+concurrent writes can reach the account out of order and leave an older
+theme saved. ⌘K "Theme: Custom" opens this picker with the last custom
 theme.
 
 Free users can preview Custom like any paid palette: the draft and preview
@@ -111,4 +117,6 @@ for 4.5:1 primary text, and checks that the CSS holds only hex values.
 `e2e/color-themes.spec.ts` adds 12 sampled custom themes, with and without a
 second color, to both real-stylesheet contrast sweeps of ADR 0082, and checks
 that a saved custom theme paints before the app mounts and comes back from
-the account on a device without the cache.
+the account on a device without the cache. `worker/capture-real.test.ts` checks that the Worker
+rejects a free account's custom theme (403) and an out-of-range or
+CSS-carrying value on any plan (400), and accepts a paid one.

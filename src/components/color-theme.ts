@@ -138,14 +138,19 @@ function paint(id: ColorThemeId) {
   for (const l of listeners) l();
 }
 
+/** Keep the no-flash cache in step with a custom theme's derived colors,
+ *  which change when the derivation improves even though the id does not. */
+function cacheCustomTheme(id: ColorThemeId) {
+  const seed = parseCustomTheme(id);
+  if (!seed) return;
+  const cache = JSON.stringify(customCache(id, seed));
+  if (localStorage.getItem(CUSTOM_THEME_KEY) !== cache)
+    localStorage.setItem(CUSTOM_THEME_KEY, cache);
+}
+
 function applyLocal(id: ColorThemeId) {
   localStorage.setItem(COLOR_THEME_KEY, id);
-  const seed = parseCustomTheme(id);
-  if (seed)
-    localStorage.setItem(
-      CUSTOM_THEME_KEY,
-      JSON.stringify(customCache(id, seed)),
-    );
+  cacheCustomTheme(id);
   paint(draft ?? preview ?? effectiveSavedTheme());
 }
 
@@ -170,6 +175,11 @@ export function paintColorThemeDraft(id: ColorThemeId | null) {
   paint(read());
 }
 
+/** Save the custom theme being dragged, if any, as the user lets go. */
+export function commitColorThemeDraft() {
+  if (draft) setColorTheme(draft);
+}
+
 export function endColorThemePreview() {
   preview = null;
   draft = null;
@@ -187,6 +197,9 @@ export function useColorThemePreview() {
 // Saves in flight. While one runs, the local pick is newer than anything the
 // account snapshot shows, so adopting the snapshot would flash the old theme.
 let pendingSaves = 0;
+// Saves run one at a time, in the order they were picked: concurrent writes
+// can reach the account out of order and leave an older theme saved.
+let saveTail: Promise<void> = Promise.resolve();
 // The last theme the account reported. A row is never deleted, so once one
 // exists a missing row is a refetch in progress, not "back to default".
 let accountTheme: string | null = null;
@@ -199,6 +212,7 @@ function adoptAccountTheme() {
   accountTheme = colorTheme;
   const id = toColorThemeId(colorTheme);
   if (id !== savedTheme()) applyLocal(id);
+  else cacheCustomTheme(id);
 }
 
 /** Free palettes preview locally; only entitled selections reach persistence. */
@@ -224,7 +238,9 @@ export function setColorTheme(id: ColorThemeId) {
   const previous = savedTheme();
   applyLocal(id);
   pendingSaves += 1;
-  setColorThemePreference(id)
+  const save = saveTail.then(() => setColorThemePreference(id));
+  saveTail = save.catch(() => {});
+  save
     .then(() => {
       accountTheme = id;
     })

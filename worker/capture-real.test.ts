@@ -401,6 +401,14 @@ test("membership gates theme writes, keeps the launch exception narrow, and scop
   expect(
     (await request(freeCookie, kvPath, { rows: [theme("leaf")] })).status,
   ).toBe(403);
+  // A Custom theme (ADR 0088) is a paid theme too.
+  expect(
+    (
+      await request(freeCookie, kvPath, {
+        rows: [theme("custom:1:255,0.17,0.3")],
+      })
+    ).status,
+  ).toBe(403);
   expect(
     (await request(freeCookie, kvPath, { rows: [theme("leaf", "alias")] }))
       .status,
@@ -442,6 +450,21 @@ test("membership gates theme writes, keeps the launch exception narrow, and scop
       (await request(freeCookie, kvPath, { rows: [theme("catppuccin")] }))
         .status,
     ).toBe(status === "past_due" ? 403 : 200);
+    expect(
+      (
+        await request(freeCookie, kvPath, {
+          rows: [theme("custom:1:255,0.17,0.3,40,0.2")],
+        })
+      ).status,
+    ).toBe(status === "past_due" ? 403 : 200);
+    // Out-of-range or CSS-carrying values never reach storage, on any plan.
+    for (const bad of [
+      "custom:1:400,0.17,0.3",
+      "custom:1:255,0.17,0.3;}html{background:url(x)}",
+    ])
+      expect(
+        (await request(freeCookie, kvPath, { rows: [theme(bad)] })).status,
+      ).toBe(400);
     // Entitlement or a forged return URL is not a payment receipt.
     expect(
       await (
