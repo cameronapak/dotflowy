@@ -146,6 +146,7 @@ test("CLI setup explains install, login, and a safe read against this deployment
     }),
   );
   await openSettings(page);
+  await page.getByRole("button", { name: "Set up connections" }).click();
   await page.getByRole("button", { name: "Set up command line (CLI)" }).click();
   const dialog = page.getByRole("dialog", {
     name: "Use Dotflowy from your terminal",
@@ -204,6 +205,7 @@ test("free settings exposes its sections, connections nudge, and disclosed upgra
   await seedOutline(page, TREE);
   await mockFreePlan(page);
   await openSettings(page);
+  await page.getByRole("button", { name: "Set up connections" }).click();
 
   await expect(
     page.getByText("Included with Pro", { exact: true }),
@@ -243,6 +245,9 @@ test("cardless trial requires a deliberate checkout, retries failures and distin
   page,
 }) => {
   await seedOutline(page, TREE);
+  await page.route("**/api/keys", (route) =>
+    route.fulfill({ json: { keys: [] } }),
+  );
   let status: "eligible" | "trialing" | "expired" | "active" | "comp" =
     "eligible";
   await page.route("**/api/membership", (route) =>
@@ -409,19 +414,118 @@ test("a checkout return waits for server confirmation and the thank-you stays di
   await expect(thanks).toHaveCount(0);
 });
 
-test("free accounts can manage API keys from Connections", async ({ page }) => {
+test("Connections separates collapsible setup and access, with revocation available on Free", async ({
+  page,
+}) => {
   await seedOutline(page, TREE);
   await mockFreePlan(page);
-  await page.route("**/api/keys", (route) =>
-    route.fulfill({ json: { keys: [] } }),
-  );
+  let apps = [{ clientId: "cursor-client", name: "Cursor" }];
+  let keys = [
+    {
+      id: "phone",
+      name: "Phone shortcut",
+      suffix: "1234",
+      permission: "capture",
+      createdAt: 1,
+      lastUsedAt: null,
+      expiresAt: Date.UTC(2099, 0, 1),
+    },
+  ];
+  let failRevoke = true;
+  await page.route("**/api/mcp-connections", (route) => {
+    if (route.request().method() === "DELETE") {
+      expect(route.request().postDataJSON()).toEqual({
+        clientId: "cursor-client",
+      });
+      apps = [];
+      return route.fulfill({ json: { revoked: true } });
+    }
+    return route.fulfill({ json: { connections: apps } });
+  });
+  await page.route("**/api/keys", (route) => {
+    if (route.request().method() === "DELETE") {
+      expect(route.request().postDataJSON()).toEqual({ id: "phone" });
+      if (failRevoke) return route.fulfill({ status: 503 });
+      keys = [];
+      return route.fulfill({ json: { revoked: true } });
+    }
+    return route.fulfill({ json: { keys } });
+  });
   await openSettings(page);
+  const setup = page.getByRole("button", {
+    name: "Set up connections",
+    exact: true,
+  });
+  const access = page.getByRole("button", {
+    name: "Connection access",
+    exact: true,
+  });
+  const personalKeys = page.getByRole("region", {
+    name: "Personal API keys",
+    exact: true,
+  });
+  await expect(setup).toHaveAttribute("aria-expanded", "false");
+  await expect(access).toHaveAttribute("aria-expanded", "false");
+  await expect(personalKeys).toBeHidden();
+  await setup.click();
+  await access.click();
+  await expect(setup).toHaveAttribute("aria-expanded", "true");
+  await expect(access).toHaveAttribute("aria-expanded", "true");
+  await setup.click();
+  await expect(setup).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    page.getByRole("button", { name: "Set up Apple Shortcut" }),
+  ).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Revoke Cursor" }),
+  ).toBeVisible();
+  await access.focus();
+  await page.keyboard.press("Enter");
+  await expect(personalKeys).toBeHidden();
+  await page.keyboard.press("Space");
+  await expect(personalKeys).toBeVisible();
+  await page.getByRole("button", { name: "Revoke Cursor" }).click();
+  await expect(page.getByRole("button", { name: "Revoke Cursor" })).toHaveCount(
+    0,
+  );
+  await personalKeys
+    .getByRole("button", { name: "Revoke Phone shortcut" })
+    .click();
+  await personalKeys
+    .getByRole("button", { name: "Cancel", exact: true })
+    .click();
+  expect(keys).toHaveLength(1);
+  await personalKeys
+    .getByRole("button", { name: "Revoke Phone shortcut" })
+    .click();
+  await personalKeys
+    .getByRole("button", { name: "Confirm revoke", exact: true })
+    .click();
+  await expect(personalKeys.getByRole("alert")).toBeVisible();
+  await expect(
+    personalKeys.getByText("Phone shortcut", { exact: true }),
+  ).toBeVisible();
+  failRevoke = false;
+  await personalKeys
+    .getByRole("button", { name: "Confirm revoke", exact: true })
+    .click();
+  await expect(
+    personalKeys.getByText("Phone shortcut", { exact: true }),
+  ).toHaveCount(0);
+  await access.click();
+  await page.goto("/settings#authorized-apps");
+  await expect(
+    page.getByRole("heading", { name: "Authorized apps" }),
+  ).toBeVisible();
+  await setup.click();
   await expect(
     page.getByText("Available on every plan.", { exact: false }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Manage", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "API keys" })).toBeVisible();
-  await expect(page.getByText("No API keys yet.")).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByText("No API keys yet."),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "30 days", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");

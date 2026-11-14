@@ -53,8 +53,16 @@ test("Cmd+K plugin settings stay reachable when disabled and share Settings pref
   });
   // Plugin options start closed and open one plugin at a time.
   await expect(external).toBeHidden();
-  await page.getByRole("button", { name: "Embeds options" }).click();
+  const embedsOptions = page.getByRole("button", { name: "Embeds options" });
+  await embedsOptions.focus();
+  await page.keyboard.press("Enter");
+  await expect(embedsOptions).toHaveAttribute("aria-expanded", "true");
   await expect(external).not.toBeChecked();
+  await page.keyboard.press("Space");
+  await expect(embedsOptions).toHaveAttribute("aria-expanded", "false");
+  await expect(external).toBeHidden();
+  await page.keyboard.press("Enter");
+  await expect(external).toBeVisible();
   await page.getByRole("button", { name: "Daily notes options" }).click();
   await expect(external).toBeHidden();
   await expect(
@@ -611,6 +619,9 @@ test("a failed save restores the previous switch and does not change the other f
 test("malformed preferences keep switches unavailable until a successful retry", async ({
   page,
 }) => {
+  await page.route("**/api/keys", (route) =>
+    route.fulfill({ json: { keys: [] } }),
+  );
   await page.route("**/api/auth/subscription/list", (route) =>
     route.fulfill({ json: [] }),
   );

@@ -21,7 +21,7 @@ async function mountDialog(page: Page) {
     (url) => url.pathname === "/api/auth/subscription/list",
     (route) => route.fulfill({ json: [] }),
   );
-  await page.goto("/settings");
+  await page.goto("/settings#capture-keys");
   await page.getByRole("button", { name: "Manage", exact: true }).click();
 }
 
@@ -33,31 +33,31 @@ test("API keys select permissions and expiry, reveal once, copy, and clear on cl
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const secret = "dfc_" + "a".repeat(64);
   const requests: RequestRecord[] = [];
+  let savedKey: object | null = null;
+  let creations = 0;
   await page.route("**/api/keys", async (route) => {
     const request = route.request();
     requests.push({ method: request.method(), body: request.postDataJSON() });
     if (request.method() === "GET") {
-      return route.fulfill({ json: { keys: [] } });
+      return route.fulfill({ json: { keys: savedKey ? [savedKey] : [] } });
     }
-    return route.fulfill({
-      json: {
-        key: secret,
-        entry: {
-          id: "key-1",
-          name: "My iPhone",
-          suffix: "c123",
-          createdAt: Date.UTC(2026, 0, 2),
-          lastUsedAt: null,
-          expiresAt: Date.UTC(2099, 0, 2),
-          permission: request.postDataJSON().permission,
-        },
-      },
-    });
+    savedKey = {
+      id: `key-${++creations}`,
+      name: request.postDataJSON().name,
+      suffix: "c123",
+      createdAt: Date.UTC(2026, 0, 2),
+      lastUsedAt: null,
+      expiresAt: Date.UTC(2099, 0, 2),
+      permission: request.postDataJSON().permission,
+    };
+    return route.fulfill({ json: { key: secret, entry: savedKey } });
   });
 
   await mountDialog(page);
   await expect(page.getByRole("heading", { name: "API keys" })).toBeVisible();
-  await expect(page.getByText("No API keys yet.")).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByText("No API keys yet."),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Capture only", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
@@ -111,6 +111,12 @@ test("API keys select permissions and expiry, reveal once, copy, and clear on cl
     .toBe(secret);
 
   await page.getByRole("button", { name: "Close" }).click();
+  const access = page.getByRole("region", {
+    name: "Personal API keys",
+    exact: true,
+  });
+  await expect(access.getByText("My iPhone", { exact: true })).toBeVisible();
+  await expect(access).toContainText("Read and write");
   await page.getByRole("button", { name: "Manage", exact: true }).click();
   await expect(page.getByLabel("New API key")).toHaveCount(0);
   await expect(
@@ -129,7 +135,7 @@ test("API keys select permissions and expiry, reveal once, copy, and clear on cl
 test("API keys retry failures, rotate with confirmation, and revoke", async ({
   page,
 }) => {
-  let gets = 0;
+  let listUnavailable = true;
   const deletes: unknown[] = [];
   const rotations: unknown[] = [];
   let releaseRotation!: () => void;
@@ -160,8 +166,7 @@ test("API keys retry failures, rotate with confirmation, and revoke", async ({
   await page.route("**/api/keys", async (route) => {
     const request = route.request();
     if (request.method() === "GET") {
-      gets += 1;
-      if (gets === 1)
+      if (listUnavailable)
         return route.fulfill({
           status: 503,
           json: { error: "unavailable", message: "Try later" },
@@ -182,8 +187,11 @@ test("API keys retry failures, rotate with confirmation, and revoke", async ({
 
   await mountDialog(page);
   await expect(page.getByRole("alert")).toHaveText("Try later");
+  listUnavailable = false;
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByText("Phone", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByText("Phone", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("listitem").filter({ hasText: "Phone" }),
   ).toContainText("Capture only · Expires");
@@ -223,12 +231,16 @@ test("API keys retry failures, rotate with confirmation, and revoke", async ({
   await page
     .getByRole("button", { name: "Confirm revoke", exact: true })
     .click();
-  await expect(page.getByText("Phone", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("dialog").getByText("Phone", { exact: true }),
+  ).toHaveCount(0);
   expect(deletes[0]).toEqual({ id: "phone" });
 
   await page.getByRole("button", { name: "Revoke all" }).click();
   await page.getByRole("button", { name: "Confirm revoke all" }).click();
-  await expect(page.getByText("No API keys yet.")).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByText("No API keys yet."),
+  ).toBeVisible();
   expect(deletes[1]).toEqual({});
 });
 
@@ -250,11 +262,11 @@ test("Settings opens focused Apple Shortcut setup with manual copy and a separat
   const keys: unknown[] = [];
   await page.route("**/api/keys", (route) => {
     const request = route.request();
+    if (request.method() === "GET") return route.fulfill({ json: { keys } });
     requests.push({
       method: request.method(),
       body: request.postDataJSON(),
     });
-    if (request.method() === "GET") return route.fulfill({ json: { keys } });
     const entry = {
       id: "setup-key",
       name: "My phone",
@@ -268,7 +280,13 @@ test("Settings opens focused Apple Shortcut setup with manual copy and a separat
     return route.fulfill({ json: { key: secret, entry } });
   });
 
-  await page.goto("/settings");
+  await page.goto("/settings#capture-keys");
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
+  const access = page.getByRole("button", { name: "Connection access" });
+  const personalKeys = page.getByRole("region", { name: "Personal API keys" });
+  await expect(personalKeys.getByText("No API keys yet.")).toBeVisible();
+  await access.click();
+  await page.getByRole("button", { name: "Set up connections" }).click();
   await page.getByRole("button", { name: "Set up Apple Shortcut" }).click();
   const dialog = page.getByRole("dialog", { name: "Add Apple Shortcut" });
   await expect(dialog).toBeVisible();
@@ -366,6 +384,14 @@ test("Settings opens focused Apple Shortcut setup with manual copy and a separat
   await expect(dialog.getByText("Installed", { exact: true })).toHaveCount(0);
   await popup.close();
 
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await access.click();
+  await expect(
+    personalKeys.getByText("My phone", { exact: true }),
+  ).toBeVisible();
+  await access.click();
+  await page.getByRole("button", { name: "Set up Apple Shortcut" }).click();
+  await expect(dialog).toBeVisible();
   await dialog
     .getByRole("link", { name: "Manage API keys in Settings" })
     .click();
@@ -401,6 +427,8 @@ test("Apple Shortcut creation errors preserve input and pending creation cannot 
     finish = resolve;
   });
   await page.route("**/api/keys", async (route) => {
+    if (route.request().method() === "GET")
+      return route.fulfill({ json: { keys: [] } });
     attempts += 1;
     if (attempts === 1)
       return route.fulfill({
@@ -424,6 +452,7 @@ test("Apple Shortcut creation errors preserve input and pending creation cannot 
     });
   });
   await page.goto("/settings");
+  await page.getByRole("button", { name: "Set up connections" }).click();
   await page.getByRole("button", { name: "Set up Apple Shortcut" }).click();
   const dialog = page.getByRole("dialog", { name: "Add Apple Shortcut" });
   await dialog.getByRole("button", { name: "90 days", exact: true }).click();
