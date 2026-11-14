@@ -62,6 +62,7 @@ import {
   PinIcon as Pin,
   PlayIcon as Play,
   Plug01Icon,
+  MinusSignIcon,
   PlusSignIcon,
   PuzzleIcon as Puzzle,
   RefreshIcon as Refresh,
@@ -185,6 +186,7 @@ export const PictureInPictureIcon = createIcon(PictureInPictureOnIcon);
 export const PinIcon = createIcon(Pin);
 export const PlayIcon = createIcon(Play);
 export const PlugIcon = createIcon(Plug01Icon);
+export const MinusIcon = createIcon(MinusSignIcon);
 export const PlusIcon = createIcon(PlusSignIcon);
 export const PuzzleIcon = createIcon(Puzzle);
 export const RainIcon = createIcon(CloudLittleRainIcon);
