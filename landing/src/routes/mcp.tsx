@@ -27,6 +27,10 @@ export const Route = createFileRoute("/mcp")({
 
 const READ_TOOLS = [
   [
+    "get_pro_trial",
+    "Get the browser setup link and eligibility guidance for a Pro trial. Available to authenticated Free accounts; never starts a trial or authorizes payment.",
+  ],
+  [
     "get_outline",
     "Read your outline, or one node and its subtree, with node IDs.",
   ],
@@ -91,11 +95,11 @@ function McpPage() {
               plan, and organization.
             </p>
             <p className="mt-5">
-              Connecting gives the AI app read and write access across your
-              Dotflowy outline, not just selected nodes. It can change text,
-              move nodes, and delete entire subtrees. Connect only apps you
-              trust, and review their tool approval requests before allowing
-              changes.
+              Connecting with OAuth gives the AI app read and write access
+              across your Dotflowy outline, not just selected nodes. It can
+              change text, move nodes, and delete entire subtrees. Connect only
+              apps you trust, and review their tool approval requests before
+              allowing changes.
             </p>
           </header>
 
@@ -119,10 +123,20 @@ function McpPage() {
           <section id="setup" aria-labelledby="setup-heading">
             <h2 id="setup-heading">Connect Claude</h2>
             <p className="mt-4">
-              You need a Dotflowy account with a <strong>Pro</strong> or{" "}
-              <strong>Founding</strong> plan. The Free plan does not include MCP
-              tool use. Your Claude account must support custom remote
+              You need a Dotflowy account. Reading or changing your outline
+              requires <strong>Pro</strong> or <strong>Founding</strong>,
+              including an active Pro trial. Authenticated Free accounts can
+              call <code>get_pro_trial</code> for setup instructions, but cannot
+              access the outline. Your Claude account must support custom remote
               connectors, and your organization must permit the connection.
+            </p>
+            <p className="mt-4">
+              If eligible, choose <strong>Start 14-day Pro trial</strong> in
+              Settings, then complete browser Stripe Checkout. No card is
+              required. Without a payment method the trial cancels after 14
+              days; a saved or added payment method can enable the disclosed
+              $5/month renewal unless canceled. Connecting MCP does not start a
+              trial or authorize payment. Eligibility is checked in Settings.
             </p>
             <p className="mt-4">Use this server URL:</p>
             <pre className="mt-3 overflow-x-auto rounded-lg border border-border bg-muted px-4 py-3 text-sm">
@@ -241,20 +255,40 @@ function McpPage() {
             <h2 id="security-heading">Security and privacy</h2>
             <h3 className="mt-6">Account access and authentication</h3>
             <p className="mt-3">
-              Dotflowy authenticates MCP requests with OAuth bearer tokens and
-              routes them to the signed-in user&apos;s outline. The connector
-              does not grant access to other users&apos; outlines. You sign in
-              with Dotflowy, rather than giving the AI app your Dotflowy
-              password.
+              Dotflowy authenticates MCP requests with OAuth bearer tokens or
+              personal API keys and routes them to the signed-in user&apos;s
+              outline. The connector does not grant access to other users&apos;
+              outlines. You sign in with Dotflowy, rather than giving the AI app
+              your Dotflowy password.
             </p>
             <p className="mt-4">
-              There is no Dotflowy read-only connection mode or per-subtree
-              authorization. Scoping a tool call to a node limits that request,
-              not the connection&apos;s permissions. Collapsing nodes, hiding
-              completed nodes, or turning off an editor feature does not
-              restrict MCP access. Use your AI app&apos;s tool controls to limit
-              what it invokes, but do not treat them as a Dotflowy permission
-              boundary.
+              OAuth connections have full read and write access. Before you
+              approve, Dotflowy shows the app name, callback hostname, account,
+              and permissions. OpenID scopes describe identity and refresh
+              access, not outline permission levels. If your app accepts a
+              manually configured bearer token, you can create a server-enforced
+              read-only key in Settings → Connections → API keys. Capture-only
+              keys cannot use MCP. There is no per-subtree authorization.
+              Scoping a tool call to a node limits that request, not the
+              connection&apos;s permissions. Collapsing nodes, hiding completed
+              nodes, or turning off an editor feature does not restrict MCP
+              access. Use your AI app&apos;s tool controls to limit what it
+              invokes, but do not treat them as a Dotflowy permission boundary.
+            </p>
+            <h3 className="mt-6">Tool permissions and external requests</h3>
+            <p className="mt-3">
+              Read tools never change the outline. Add, mirror, and import tools
+              add content; importing does not replace existing nodes. Update,
+              delete, and move tools can change existing content or structure
+              and are annotated as destructive. These hints help your AI app ask
+              for confirmation, but are not permission enforcement.
+            </p>
+            <p className="mt-4">
+              Adding or updating text through add_node, add_subtree,
+              update_node, or add_to_today can fetch public URLs to fill in link
+              titles. Those tools advertise open-world access. Other tools stay
+              within your outline. A read-only API key cannot invoke any write
+              tool.
             </p>
             <h3 className="mt-6">Locked content</h3>
             <p className="mt-3">
@@ -290,11 +324,14 @@ function McpPage() {
             </p>
             <h3 className="mt-6">Disconnecting and revocation</h3>
             <p className="mt-3">
-              You can disable or remove Dotflowy in your AI app&apos;s connector
-              settings. Dotflowy does not currently provide a page to list and
-              revoke individual MCP client connections. Do not assume removal in
-              an AI app invalidates credentials already issued by Dotflowy. If
-              you suspect unwanted access, contact{" "}
+              In Dotflowy Settings → Connections → Authorized apps, choose
+              Revoke to invalidate all access and refresh tokens issued to that
+              OAuth client for your account. New requests fail; another account
+              using the same client is unaffected. Reconnect from the AI app to
+              grant access again. Revoke personal keys separately under API
+              keys. Removing Dotflowy in an AI app alone may not invalidate its
+              tokens, and revocation does not erase data already sent to that
+              provider. For help, contact{" "}
               <a href="mailto:support@dotflowy.com">support@dotflowy.com</a>.
             </p>
           </section>

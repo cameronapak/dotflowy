@@ -447,7 +447,7 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
     import_opml: [false, false],
     update_node: [false, true],
     delete_node: [false, true],
-    move_nodes: [false, false],
+    move_nodes: [false, true],
   };
   expect(json.result.tools).toHaveLength(Object.keys(expectedHints).length);
   for (const [name, [readOnlyHint, destructiveHint]] of Object.entries(
@@ -457,6 +457,9 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
     expect(tool(name).annotations.title.trim().length).toBeGreaterThan(0);
     expect(tool(name).annotations.readOnlyHint).toBe(readOnlyHint);
     expect(tool(name).annotations.destructiveHint).toBe(destructiveHint);
+    expect(tool(name).annotations.openWorldHint).toBe(
+      ["add_node", "add_subtree", "update_node", "add_to_today"].includes(name),
+    );
   }
 
   // Creation tools take `kind: "paragraph"`; none of them REQUIRE it.

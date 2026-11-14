@@ -174,6 +174,7 @@ interface ToolDescriptor {
     title: string;
     readOnlyHint: boolean;
     destructiveHint: boolean;
+    openWorldHint: boolean;
   };
 }
 
@@ -207,6 +208,7 @@ const toolList: ToolDescriptor[] = tools.map((tool) => {
       title: tool.title,
       readOnlyHint: tool.readOnly,
       destructiveHint: tool.destructive,
+      openWorldHint: tool.openWorld ?? false,
     },
   };
   if (tool.output) descriptor.outputSchema = publishedSchema(tool.output);

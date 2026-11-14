@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 
 import type { OutlineSnapshot } from "../../worker/backup";
@@ -542,4 +543,142 @@ test("a share survives sign-in, saves only on Add to Today, and a cross-site pos
     hostile.getByRole("figure", { name: "Shared content" }),
   ).toHaveText("planted by a link");
   expect((await inspect()).nodes).toHaveLength(after);
+});
+
+test("MCP sign-in requires consent and Settings revokes the issued grant", async ({
+  page,
+  context,
+}, info) => {
+  const { origin } = backend;
+  const email = "oauth@worker-browser.test";
+  const password = "disposable-browser-password";
+  const signup = await context.request.post(
+    `${origin}/api/auth/sign-up/email`,
+    {
+      headers: { origin },
+      data: { email, name: "OAuth review", password },
+    },
+  );
+  expect(signup.status()).toBe(200);
+  const { user } = await signup.json();
+  await backend.db
+    .prepare('UPDATE "user" SET emailVerified=1 WHERE id=?')
+    .bind(user.id)
+    .run();
+  const registered = await context.request.post(
+    `${origin}/api/auth/mcp/register`,
+    {
+      data: {
+        client_name: "Local review client",
+        redirect_uris: [`${origin}/privacy`],
+        token_endpoint_auth_method: "none",
+      },
+    },
+  );
+  expect(registered.status()).toBe(201);
+  const { client_id } = await registered.json();
+  const verifier = "disposable-browser-verifier-012345678901234567890123456789";
+  const query = new URLSearchParams({
+    client_id,
+    response_type: "code",
+    redirect_uri: `${origin}/privacy`,
+    scope: "openid offline_access",
+    state: "browser-review",
+    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    code_challenge_method: "S256",
+    resource: `${origin}/mcp`,
+  });
+  const authorizeUrl = `${origin}/api/auth/mcp/authorize?${query}`;
+  await page.goto(authorizeUrl);
+  await expect(page.getByPlaceholder("Email")).toBeVisible();
+  await page.getByPlaceholder("Email").fill(email);
+  await page.getByPlaceholder("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Connect to Dotflowy" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Local review client", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(new URL(origin).host, { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Keep access through refresh tokens when you are away."),
+  ).toBeVisible();
+  await page.screenshot({ path: info.outputPath("consent.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    page.getByRole("button", { name: "Allow access" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: info.outputPath("consent-narrow.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.getByRole("button", { name: "Deny", exact: true }).click();
+  await page.waitForURL((url) => url.pathname === "/privacy");
+  expect(new URL(page.url()).searchParams.get("error")).toBe("access_denied");
+  expect(new URL(page.url()).searchParams.get("state")).toBe("browser-review");
+  await page.goto(authorizeUrl);
+  await expect(
+    page.getByRole("button", { name: "Allow access" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Allow access" }).click();
+  await page.waitForURL((url) => url.pathname === "/privacy");
+  const code = new URL(page.url()).searchParams.get("code");
+  expect(code).toBeTruthy();
+  const granted = await context.request.post(`${origin}/api/auth/mcp/token`, {
+    headers: { origin },
+    form: {
+      client_id,
+      grant_type: "authorization_code",
+      code: code!,
+      redirect_uri: `${origin}/privacy`,
+      code_verifier: verifier,
+    },
+  });
+  expect(granted.status()).toBe(200);
+  const { access_token, refresh_token } = await granted.json();
+  await page.goto(`${origin}/settings#authorized-apps`);
+  const connections = page.locator("#authorized-apps");
+  await expect(
+    connections.getByText("Local review client", { exact: true }),
+  ).toBeVisible();
+  await connections.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath("authorized-apps.png") });
+  await page
+    .getByRole("button", { name: "Revoke Local review client" })
+    .click();
+  await expect(
+    connections.getByRole("button", { name: "Revoke Local review client" }),
+  ).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("revoked.png") });
+  expect(
+    (
+      await context.request.post(`${origin}/mcp`, {
+        headers: { authorization: `Bearer ${access_token}` },
+        data: { jsonrpc: "2.0", id: 1, method: "tools/list" },
+      })
+    ).status(),
+  ).toBe(401);
+  expect(
+    (
+      await context.request.post(`${origin}/api/auth/mcp/token`, {
+        headers: { origin },
+        form: { client_id, grant_type: "refresh_token", refresh_token },
+      })
+    ).status(),
+  ).toBe(401);
+  await page.goto(`${origin}/mcp-consent?consent_code=expired`);
+  await expect(page.getByRole("alert")).toContainText("expired");
+  await expect(page.getByRole("button", { name: "Allow access" })).toHaveCount(
+    0,
+  );
+  await page.screenshot({ path: info.outputPath("consent-expired.png") });
 });
