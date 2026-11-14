@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import {
   ArrowLeftIcon,
   CheckIcon,
+  ChevronDownIcon,
   CopyIcon,
   DownloadIcon,
   FileUploadIcon,
@@ -61,6 +62,14 @@ import {
 } from "../components/ui/accordion";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import {
+  ResponsiveMenu,
+  ResponsiveMenuContent,
+  ResponsiveMenuRadioGroup,
+  ResponsiveMenuRadioItem,
+  ResponsiveMenuSeparator,
+  ResponsiveMenuTrigger,
+} from "../components/ui/responsive-menu";
 import { Switch } from "../components/ui/switch";
 import { parseCustomTheme, seedColor } from "../data/custom-theme";
 import {
@@ -1179,50 +1188,30 @@ function PluginsSection() {
   );
 }
 
-/** The Custom tile (ADR 0088): one slot that reopens this device's last
- *  custom theme, painted with that theme's first and second colors. */
-function CustomThemeTile({
-  active,
-  current,
-  locked,
-  disabled,
-}: {
-  active: boolean;
-  current: ColorThemeId;
-  locked: boolean;
-  disabled: boolean;
-}) {
-  const id = active ? current : customThemeToReopen();
+/** A theme's swatch: a preset's page and primary, or a custom theme's first
+ *  and second colors (ADR 0088). */
+function ThemeSwatch({ id }: { id: ColorThemeId }) {
   const seed = parseCustomTheme(id);
-  const dark = document.documentElement.classList.contains("dark");
-  const first = seed ? seedColor(seed.h, seed.c, dark) : "transparent";
-  const second = seed?.second
-    ? seedColor(seed.second.h, seed.second.c, dark)
-    : first;
+  let background: string;
+  if (seed) {
+    const dark = document.documentElement.classList.contains("dark");
+    const first = seedColor(seed.h, seed.c, dark);
+    const second = seed.second
+      ? seedColor(seed.second.h, seed.second.c, dark)
+      : first;
+    background = `linear-gradient(135deg, ${second} 50%, ${first} 50%)`;
+  } else {
+    const swatch = COLOR_THEMES.find((t) => t.id === id)?.swatch;
+    background = swatch
+      ? `linear-gradient(135deg, ${swatch[0]} 50%, ${swatch[1]} 50%)`
+      : "transparent";
+  }
   return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      aria-label={locked ? "Custom, preview with Pro or Founding" : "Custom"}
-      disabled={disabled}
-      onClick={() => setColorTheme(id)}
-      className={cn(
-        "inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[0.8rem] font-medium transition outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-        active
-          ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/10"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className="size-3 shrink-0 rounded-full ring-1 ring-foreground/15"
-        style={{
-          background: `linear-gradient(135deg, ${second} 50%, ${first} 50%)`,
-        }}
-      />
-      <span className="truncate">Custom</span>
-    </button>
+    <span
+      aria-hidden="true"
+      className="size-3 shrink-0 rounded-full ring-1 ring-foreground/15"
+      style={{ background }}
+    />
   );
 }
 
@@ -1231,6 +1220,13 @@ function AppearanceSection() {
   const colorTheme = useColorTheme();
   const preview = useColorThemePreview();
   const membership = useMembership();
+  const customTheme = isCustomTheme(colorTheme)
+    ? colorTheme
+    : customThemeToReopen();
+  const locked = (id: ColorThemeId) =>
+    membership.plan === "free" &&
+    id !== "default" &&
+    !(membership.legacyLeaf && id === "leaf");
   const { textSize, setTextSize } = useTextSize();
   const preferences = useEditorFeatures();
   const [savingAiAppIcons, setSavingAiAppIcons] = useState(false);
@@ -1253,65 +1249,70 @@ function AppearanceSection() {
     <div id="appearance" className="scroll-mt-20">
       <Section title="Appearance">
         <RowGroup>
-          {/* The color theme (ADR 0082). Six choices don't fit beside the
-            label, so they wrap on their own row. */}
+          {/* The color theme (ADR 0082): one row like Mode, with the choices
+            in a menu (a sheet on narrow screens). */}
           <div className="flex flex-col gap-3 bg-card px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-medium text-foreground">Theme</span>
-              <Badge variant="secondary">
-                {membership.state === "ready" && membership.plan !== "free"
-                  ? "Included with your subscription"
-                  : "Included with Pro"}
-              </Badge>
-            </div>
-            <div
-              role="radiogroup"
-              aria-label="Theme"
-              className="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-1 rounded-lg bg-muted p-1"
-            >
-              {COLOR_THEMES.map((t) => {
-                const active = t.id === colorTheme;
-                const locked =
-                  membership.plan === "free" &&
-                  t.id !== "default" &&
-                  !(membership.legacyLeaf && t.id === "leaf");
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    aria-label={
-                      locked
-                        ? `${t.label}, preview with Pro or Founding`
-                        : t.label
-                    }
-                    disabled={membership.state !== "ready"}
-                    onClick={() => setColorTheme(t.id)}
-                    className={cn(
-                      "inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[0.8rem] font-medium transition outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                      active
-                        ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/10"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-foreground">Theme</div>
+                <div className="mt-0.5 text-sm text-muted-foreground">
+                  {membership.state === "ready" && membership.plan !== "free"
+                    ? "Included with your subscription"
+                    : "Included with Pro"}
+                </div>
+              </div>
+              <ResponsiveMenu title="Theme">
+                <ResponsiveMenuTrigger
+                  aria-label={`Theme, ${colorThemeLabel(colorTheme)}`}
+                  disabled={membership.state !== "ready"}
+                  className="inline-flex h-8 max-w-48 shrink-0 items-center gap-2 rounded-lg bg-muted pr-2 pl-3 text-[0.8rem] font-medium text-foreground transition outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-muted-foreground"
+                >
+                  <ThemeSwatch id={colorTheme} />
+                  <span className="truncate">
+                    {colorThemeLabel(colorTheme)}
+                  </span>
+                  <ChevronDownIcon />
+                </ResponsiveMenuTrigger>
+                <ResponsiveMenuContent align="end" className="w-56">
+                  <ResponsiveMenuRadioGroup
+                    value={colorTheme}
+                    // SAFETY: every item's value is a preset id or customTheme.
+                    onValueChange={(id) => setColorTheme(id as ColorThemeId)}
                   >
-                    <span
-                      aria-hidden="true"
-                      className="size-3 shrink-0 rounded-full ring-1 ring-foreground/15"
-                      style={{
-                        background: `linear-gradient(135deg, ${t.swatch[0]} 50%, ${t.swatch[1]} 50%)`,
-                      }}
-                    />
-                    <span className="truncate">{t.label}</span>
-                  </button>
-                );
-              })}
-              <CustomThemeTile
-                active={isCustomTheme(colorTheme)}
-                current={colorTheme}
-                locked={membership.plan === "free"}
-                disabled={membership.state !== "ready"}
-              />
+                    {COLOR_THEMES.map((t) => (
+                      <ResponsiveMenuRadioItem
+                        key={t.id}
+                        value={t.id}
+                        aria-label={
+                          locked(t.id)
+                            ? `${t.label}, preview with Pro or Founding`
+                            : t.label
+                        }
+                      >
+                        <ThemeSwatch id={t.id} />
+                        {t.label}
+                      </ResponsiveMenuRadioItem>
+                    ))}
+                    <ResponsiveMenuSeparator />
+                    {/* One custom slot that reopens this device's last custom
+                      theme (ADR 0088). */}
+                    <ResponsiveMenuRadioItem
+                      value={customTheme}
+                      aria-label={
+                        locked(customTheme)
+                          ? "Custom, preview with Pro or Founding"
+                          : "Custom"
+                      }
+                    >
+                      <ThemeSwatch id={customTheme} />
+                      Custom
+                      <span className="truncate text-muted-foreground">
+                        {colorThemeLabel(customTheme)}
+                      </span>
+                    </ResponsiveMenuRadioItem>
+                  </ResponsiveMenuRadioGroup>
+                </ResponsiveMenuContent>
+              </ResponsiveMenu>
             </div>
             {isCustomTheme(colorTheme) && (
               <CustomThemePicker

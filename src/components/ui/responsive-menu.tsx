@@ -18,6 +18,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuCheckboxItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuGroup,
 } from "./dropdown-menu";
@@ -205,6 +207,74 @@ export function ResponsiveMenuCheckboxItem({
     >
       {children}
     </DropdownMenuCheckboxItem>
+  );
+}
+
+const MobileRadioGroup = createContext<{
+  value: string;
+  onValueChange: (value: string) => void;
+} | null>(null);
+
+export function ResponsiveMenuRadioGroup({
+  value,
+  onValueChange,
+  children,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  children: React.ReactNode;
+}) {
+  return useContext(MobileMenu) ? (
+    <MobileRadioGroup value={{ value, onValueChange }}>
+      {children}
+    </MobileRadioGroup>
+  ) : (
+    <DropdownMenuRadioGroup
+      value={value}
+      onValueChange={(next: string) => onValueChange(next)}
+    >
+      {children}
+    </DropdownMenuRadioGroup>
+  );
+}
+
+/** A radio choice that closes the menu once picked. */
+export function ResponsiveMenuRadioItem({
+  value,
+  children,
+  "aria-label": ariaLabel,
+}: {
+  value: string;
+  children: React.ReactNode;
+  "aria-label"?: string;
+}) {
+  const mobile = useContext(MobileMenu);
+  const group = useContext(MobileRadioGroup);
+  if (mobile && group) {
+    const checked = group.value === value;
+    return (
+      <button
+        type="button"
+        role="menuitemradio"
+        aria-checked={checked}
+        aria-label={ariaLabel}
+        className={itemClass}
+        onClick={() => {
+          mobile.close();
+          group.onValueChange(value);
+        }}
+      >
+        {children}
+        <span aria-hidden="true" className="ml-auto">
+          {checked ? "✓" : ""}
+        </span>
+      </button>
+    );
+  }
+  return (
+    <DropdownMenuRadioItem value={value} closeOnClick aria-label={ariaLabel}>
+      {children}
+    </DropdownMenuRadioItem>
   );
 }
 

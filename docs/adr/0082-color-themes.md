@@ -89,7 +89,10 @@ status bar color before first paint; the account value wins once it loads.
 Themes are classes, not `data-theme`, because Liquid Glass reads
 `[data-theme]` and Picture-in-Picture copies only `className`.
 
-Pick a theme in Settings → Appearance or from ⌘K ("Theme: …"). Mode is now
+Pick a theme in Settings → Appearance or from ⌘K ("Theme: …"). Settings shows
+the theme as one row like Mode: the current theme opens a menu of every choice,
+a sheet below 768px ([ADR 0066](./0066-narrow-screen-menu-drawers.md)). A grid
+of every choice took three rows on desktop and seven on a 375px phone. Mode is now
 labeled "Mode" in both places.
 
 Additional palettes require Unlimited or Founding; Dotflowy and every Mode

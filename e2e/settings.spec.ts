@@ -402,9 +402,11 @@ test("a checkout return waits for server confirmation and the thank-you stays di
   await expect(page).toHaveURL(/settings#appearance$/);
   await page.reload();
   await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
+  await page.getByRole("button", { name: /^Theme, / }).click();
   await expect(
-    page.getByRole("radio", { name: "Leaf", exact: true }),
-  ).toBeEnabled();
+    page.getByRole("menuitemradio", { name: "Leaf", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(thanks).toHaveCount(0);
   await page.goto("/settings?checkout=canceled");
   await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
