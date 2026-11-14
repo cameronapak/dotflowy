@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.8.1
+
+### Patch Changes
+
+- 782c4d6: Require explicit approval for new MCP connections, add per-app access revocation in Settings, and correct endpoint discovery and tool permission hints.
+
 ## 3.8.0
 
 ### Minor Changes
