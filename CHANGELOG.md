@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.10.4
+
+### Patch Changes
+
+- 9ee7d0f: Ask for browser confirmation before revoking an authorized app or API key in Settings.
+
 ## 3.10.3
 
 ### Patch Changes
