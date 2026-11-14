@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.10.2
+
+### Patch Changes
+
+- 6618c71: Separate Connections settings into collapsible Set up and Access groups, show authorized apps and API keys together, and smooth settings panels when opening and closing.
+
 ## 3.10.1
 
 ### Patch Changes
