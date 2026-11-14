@@ -41,6 +41,41 @@ authenticate browser APIs or key management.
 Turning Daily notes off
 in Settings → Plugins does not disable explicit MCP or CLI daily operations.
 
+## OAuth consent and revocation
+
+Every new OAuth authorization requires explicit approval in Dotflowy, even if
+the client omits `prompt=consent`. The consent page shows the authenticated
+account, registered client name, callback hostname, full-outline read/write
+permissions, and offline access when requested. Client names are self-declared,
+not evidence that Dotflowy verified the app. OAuth has no read-only or subtree
+scope; `openid`, `profile`, `email`, and `offline_access` describe identity and
+refresh behavior, not outline permissions. Use a read-only API key when supported.
+
+Settings → Connections → Authorized apps lists clients with active credentials.
+Revoke removes **all access and refresh tokens** for that user/client, its saved
+consents and pending authorization codes. It does not disable the shared client
+registration, affect another user, revoke personal API keys, stop work already
+authorized by an in-flight request, or erase copies held by the client. Removing
+the connector in the AI app alone may not revoke its tokens.
+
+Root and `/mcp`-suffixed protected-resource discovery both identify the full
+`https://<your-deployment>/mcp` URL. The retained `/api/mcp` alias has its own
+path-aware discovery document. Existing bearer tokens and API keys remain valid
+without retroactive consent. New authorization uses S256 PKCE and explicit consent;
+successful refresh consumes the previous refresh grant. A client must save the
+new token pair, not retry the old refresh token.
+
+## Tool annotations
+
+`get_pro_trial`, `get_outline`, `search_nodes`, and `export_opml` are read-only. `update_node`,
+`delete_node`, and `move_nodes` are destructive because they can replace or
+remove existing content or structure. Add, mirror, and import tools remain
+non-destructive: they add nodes, and import never replaces an existing outline.
+`add_node`, `add_subtree`, `update_node`, and `add_to_today` advertise
+`openWorldHint: true` because text writes can fetch public link titles. Other
+tools advertise a closed world. Annotations guide client confirmation UI; the
+server's credentials, permission checks, and mutation guards enforce access.
+
 ## Search with DQL
 
 `search_nodes` uses DQL (Dotflowy Query Language), the same grammar as the app's

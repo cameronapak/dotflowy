@@ -100,8 +100,41 @@ the cookie, and it would drag CSRF concerns onto an endpoint meant for non-brows
 the OAuth query intact; after sign-in the AuthScreen resumes with a **top-level navigation** back to
 the authorize endpoint (the code must reach the client's `redirect_uri` as a real redirect — the
 plugin's after-hook fires on the sign-in _fetch_, whose cross-origin 302 a browser fetch can't
-reliably deliver). No consent page: the plugin auto-issues the code for a signed-in user, acceptable
-for a single-user-instance posture; a consent screen is an easy later add (`oidcConfig.consentPage`).
+reliably deliver). The original implementation auto-issued codes without a consent page.
+
+_Amended 2026-11-14:_ **Public connector readiness requires explicit consent and user-owned revocation.**
+Every new authorization forces `prompt=consent` server-side and uses `/mcp-consent`
+outside the editor shell. Display data comes from unexpired provider state and the
+registered callback, never consent-page query labels. Consent checks bind the pending
+code to the session's user; the token endpoint rejects pending consent codes (the
+Better Auth 1.6 MCP handler otherwise accepts them). Denial preserves OAuth state
+and existing callback query parameters. Approval transitions live pending state and
+saves consent in one conditional D1 transaction, so a concurrent revocation cannot
+restore consent through a stale approval. Non-string authorization codes are rejected
+before the provider can coerce them. New grants require S256 PKCE.
+
+`/api/mcp-connections` is browser-session-only. A same-origin DELETE atomically
+removes this user's tokens, consents, and pending codes for a client, never the shared
+registration or a neighbor's grants. Settings exposes revocation even on Free. Existing
+credentials remain accepted without retroactive consent and can still refresh. A
+successful refresh consumes the old grant; competing refreshes cannot both succeed.
+The code exchange also checks that consent still exists after token creation, so a
+revocation during issuance cannot leave a new credential behind.
+Revocation cannot undo requests already authorized or delete client-held copies.
+
+Protected-resource metadata now uses the **full endpoint URL**, including `/mcp`,
+not the origin-only identifier in the original decision above. Root discovery remains
+for older clients; path-aware `/api/mcp` metadata describes that retained alias.
+No token-format, identity, storage, SDK, or CIMD migration is part of this amendment.
+
+Tool hints follow actual behavior: moves are non-additive structural changes and
+therefore destructive; creates, mirrors, and additive OPML imports remain false.
+Only text-authoring tools with public link-title enrichment advertise open-world
+interaction. Hints never substitute for permission enforcement.
+
+References: [Claude authentication](https://claude.com/docs/connectors/building/authentication),
+[review criteria](https://claude.com/docs/connectors/building/review-criteria), and
+[MCP ToolAnnotations](https://modelcontextprotocol.io/specification/2025-11-25/schema#toolannotations).
 
 _Amended 2026-07-25:_ **DCR is deprecated upstream; Better Auth isn't ready for the successor yet —
 watch, don't move.** The 2026-07-28 spec deprecates RFC 7591 Dynamic Client Registration in favor of

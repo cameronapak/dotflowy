@@ -441,6 +441,7 @@ test("the color theme is the account's and survives cleared storage", async ({
   // Lose this device's mirror: the account row brings the theme back.
   await page.evaluate(() => localStorage.clear());
   await page.reload();
+  await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
   await expect(page.getByRole("radio", { name: "Leaf" })).toHaveAttribute(
     "aria-checked",
     "true",

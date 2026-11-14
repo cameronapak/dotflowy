@@ -2,7 +2,7 @@ import { hashPassword } from "better-auth/crypto";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { build } from "esbuild";
 import { Miniflare, Response as FixtureResponse } from "miniflare";
-import { createHmac, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2156,6 +2156,419 @@ test("invalid capture input creates no nodes; key management enforces origin and
     manageBody: { name: "legacy route", expiry: "30d", permission: "write" },
   });
   expect(escalation.response.status).toBe(400);
+});
+
+test("OAuth discovery, explicit account-bound consent, refresh rotation and isolated revocation", async () => {
+  const db = await mf.getD1Database("DB");
+  const origin = "http://fixture";
+  for (const path of ["/mcp", "/api/mcp"]) {
+    const denied = await mf.dispatchFetch(`${origin}${path}`, {
+      method: "POST",
+    });
+    expect(denied.status).toBe(401);
+    const metadataUrl = denied.headers
+      .get("www-authenticate")!
+      .match(/resource_metadata="([^"]+)"/)![1]!;
+    expect(await (await mf.dispatchFetch(metadataUrl)).json()).toMatchObject({
+      resource: `${origin}${path}`,
+      authorization_servers: [origin],
+    });
+  }
+  expect(
+    await (
+      await mf.dispatchFetch(`${origin}/.well-known/oauth-protected-resource`)
+    ).json(),
+  ).toMatchObject({ resource: `${origin}/mcp` });
+  const cookies: [string, string] = ["", ""];
+  const users = [];
+  for (let i = 0; i < 2; i++) {
+    const userId = randomUUID();
+    const password = "oauth-fixture-password";
+    await fixture("seed", { userId, password: await hashPassword(password) });
+    users.push(userId);
+    const response = await mf.dispatchFetch(
+      `${origin}/api/auth/sign-in/email`,
+      {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({
+          email: `${userId.toLowerCase()}@capture.test`,
+          password,
+        }),
+      },
+    );
+    expect(response.status).toBe(200);
+    cookies[i] = response.headers
+      .getSetCookie()
+      .map((value) => value.split(";")[0])
+      .join("; ");
+  }
+  const register = await mf.dispatchFetch(`${origin}/api/auth/mcp/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      client_name: "Local OAuth reviewer",
+      redirect_uris: ["https://client.example/callback?existing=1"],
+      token_endpoint_auth_method: "none",
+    }),
+  });
+  expect(register.status).toBe(201);
+  // SAFETY: This successful DCR response is produced by the real provider; its client id is used in the exercised authorization flow.
+  const client = (await register.json()) as { client_id: string };
+  const verifier = "disposable-oauth-verifier-012345678901234567890123456789";
+  const query = new URLSearchParams({
+    client_id: client.client_id,
+    response_type: "code",
+    redirect_uri: "https://client.example/callback?existing=1",
+    scope: "openid offline_access",
+    state: "unpredictable-state",
+    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    code_challenge_method: "S256",
+    resource: `${origin}/mcp`,
+  });
+  const wrongResource = new URLSearchParams(query);
+  wrongResource.set("resource", "https://unrelated.example/mcp");
+  expect(
+    (
+      await mf.dispatchFetch(
+        `${origin}/api/auth/mcp/authorize?${wrongResource}`,
+        { headers: { cookie: cookies[0] }, redirect: "manual" },
+      )
+    ).status,
+  ).toBe(400);
+  const signedOut = await mf.dispatchFetch(
+    `${origin}/api/auth/mcp/authorize?${query}`,
+    { redirect: "manual" },
+  );
+  expect(new URL(signedOut.headers.get("location")!, origin).pathname).toBe(
+    "/",
+  );
+  expect(
+    new URL(signedOut.headers.get("location")!, origin).searchParams.get(
+      "client_id",
+    ),
+  ).toBe(client.client_id);
+  const authorize = async (cookie = cookies[0], params = query) => {
+    const response = await mf.dispatchFetch(
+      `${origin}/api/auth/mcp/authorize?${params}`,
+      { headers: { cookie }, redirect: "manual" },
+    );
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location")!, origin);
+    expect(location.pathname).toBe("/mcp-consent");
+    expect(location.searchParams.has("code")).toBe(false);
+    return location.searchParams.get("consent_code")!;
+  };
+  const decide = (
+    code: string,
+    accept: boolean,
+    cookie = cookies[0],
+    requestOrigin = origin,
+  ) =>
+    mf.dispatchFetch(`${origin}/api/auth/oauth2/consent`, {
+      method: "POST",
+      headers: {
+        cookie,
+        origin: requestOrigin,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ consent_code: code, accept }),
+    });
+  const tokenRequest = (values: Record<string, string>) =>
+    mf.dispatchFetch(`${origin}/api/auth/mcp/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: client.client_id,
+        ...values,
+      }).toString(),
+    });
+  const exchange = (code: string, codeVerifier = verifier) =>
+    tokenRequest({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: query.get("redirect_uri")!,
+      code_verifier: codeVerifier,
+      resource: `${origin}/mcp`,
+    });
+  const pending = await authorize();
+  const withoutPkce = new URLSearchParams(query);
+  withoutPkce.delete("code_challenge");
+  withoutPkce.delete("code_challenge_method");
+  const noPkce = await mf.dispatchFetch(
+    `${origin}/api/auth/mcp/authorize?${withoutPkce}`,
+    { headers: { cookie: cookies[0] }, redirect: "manual" },
+  );
+  expect(
+    new URL(noPkce.headers.get("location")!, origin).searchParams.get("error"),
+  ).toBe("invalid_request");
+  expect(
+    (
+      await mf.dispatchFetch(`${origin}/api/mcp-consent?code=${pending}`, {
+        headers: { cookie: cookies[1] },
+      })
+    ).status,
+  ).toBe(400);
+  const details = await mf.dispatchFetch(
+    `${origin}/api/mcp-consent?code=${pending}`,
+    { headers: { cookie: cookies[0] } },
+  );
+  expect(details.headers.get("cache-control")).toBe("private, no-store");
+  expect(await details.json()).toMatchObject({
+    name: "Local OAuth reviewer",
+    redirectHost: "client.example",
+    scopes: ["openid", "offline_access"],
+  });
+  expect((await decide(pending, true, cookies[1])).status).toBe(403);
+  expect(
+    (await decide(pending, true, cookies[0], "https://evil.example")).status,
+  ).toBe(403);
+  // Consent codes cannot be exchanged as authorization codes.
+  expect((await exchange(await authorize())).status).not.toBe(200);
+  const denied = await decide(pending, false);
+  expect(denied.status).toBe(200);
+  // SAFETY: Provider consent replies contain redirectURI, whose state and query are asserted below.
+  const deniedRedirect = new URL(
+    ((await denied.json()) as { redirectURI: string }).redirectURI,
+  );
+  expect(deniedRedirect.searchParams.get("state")).toBe("unpredictable-state");
+  expect(deniedRedirect.searchParams.get("existing")).toBe("1");
+  expect(deniedRedirect.searchParams.get("error")).toBe("access_denied");
+  expect((await decide(pending, true)).status).toBe(403);
+  const expired = await authorize();
+  await db
+    .prepare("UPDATE verification SET expiresAt = ? WHERE identifier = ?")
+    .bind("2000-01-01T00:00:00.000Z", expired)
+    .run();
+  expect((await decide(expired, true)).status).toBe(403);
+  const issue = async (cookie = cookies[0]) => {
+    const consent = await decide(await authorize(cookie), true, cookie);
+    expect(consent.status).toBe(200);
+    // SAFETY: Successful provider consent returns the registered redirect, tested by the token exchange below.
+    const redirect = new URL(
+      ((await consent.json()) as { redirectURI: string }).redirectURI,
+    );
+    expect(redirect.searchParams.get("state")).toBe("unpredictable-state");
+    const response = await exchange(redirect.searchParams.get("code")!);
+    expect(
+      response.status,
+      response.status === 200 ? undefined : await response.clone().text(),
+    ).toBe(200);
+    // SAFETY: Successful token responses are exercised as real MCP access and refresh credentials below.
+    return (await response.json()) as {
+      access_token: string;
+      refresh_token: string;
+    };
+  };
+  const first = await issue();
+  const unapproved = await authorize();
+  for (const credentials of [
+    {
+      grant_type: "authorization_code",
+      code: [unapproved],
+      redirect_uri: query.get("redirect_uri")!,
+      code_verifier: verifier,
+    },
+    { grant_type: "refresh_token", refresh_token: [first.refresh_token] },
+  ]) {
+    const malformed = await mf.dispatchFetch(`${origin}/api/auth/mcp/token`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        client_id: client.client_id,
+        ...credentials,
+      }),
+    });
+    expect(malformed.status).toBe(400);
+  }
+  const otherUser = await issue(cookies[1]);
+  const mcp = (token: string, path = "/mcp") =>
+    mf.dispatchFetch(`${origin}${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+  expect((await mcp(first.access_token)).status).toBe(200);
+  expect((await mcp(first.access_token, "/api/mcp")).status).toBe(200);
+  const refreshed = await tokenRequest({
+    grant_type: "refresh_token",
+    refresh_token: first.refresh_token,
+  });
+  expect(refreshed.status).toBe(200);
+  // SAFETY: The refreshed pair has the same provider contract as the first pair and is used below.
+  const current = (await refreshed.json()) as typeof first;
+  expect(
+    (
+      await tokenRequest({
+        grant_type: "refresh_token",
+        refresh_token: first.refresh_token,
+      })
+    ).status,
+  ).not.toBe(200);
+  expect((await mcp(current.access_token)).status).toBe(200);
+  const racing = await issue();
+  const competitors = await Promise.all(
+    [0, 1].map(() =>
+      tokenRequest({
+        grant_type: "refresh_token",
+        refresh_token: racing.refresh_token,
+      }),
+    ),
+  );
+  expect(
+    competitors.filter((response) => response.status === 200),
+  ).toHaveLength(1);
+  const inFlight = await authorize();
+  const workerOrigin = (await mf.ready).origin;
+  const revoke = (cookie: string, requestOrigin = workerOrigin) =>
+    mf.dispatchFetch(`${origin}/api/mcp-connections`, {
+      method: "DELETE",
+      headers: {
+        cookie,
+        origin: requestOrigin,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ clientId: client.client_id }),
+    });
+  expect((await revoke(cookies[0], "https://evil.example")).status).toBe(403);
+  const list = await mf.dispatchFetch(`${origin}/api/mcp-connections`, {
+    headers: { cookie: cookies[0] },
+  });
+  expect(await list.json()).toEqual({
+    connections: [{ clientId: client.client_id, name: "Local OAuth reviewer" }],
+  });
+  const revoked = await revoke(cookies[0]);
+  expect(revoked.status, await revoked.text()).toBe(200);
+  expect((await mcp(current.access_token)).status).toBe(401);
+  expect(
+    (
+      await tokenRequest({
+        grant_type: "refresh_token",
+        refresh_token: current.refresh_token,
+      })
+    ).status,
+  ).not.toBe(200);
+  expect((await decide(inFlight, true)).status).toBe(403);
+  expect((await mcp(otherUser.access_token)).status).toBe(200);
+  expect(
+    (
+      await mf.dispatchFetch(`${origin}/api/mcp-connections`, {
+        headers: { authorization: `Bearer ${otherUser.access_token}` },
+      })
+    ).status,
+  ).toBe(401);
+  // Legacy credentials still work and refresh without retroactive consent.
+  await db
+    .prepare(
+      "INSERT INTO oauthAccessToken (id,accessToken,refreshToken,accessTokenExpiresAt,refreshTokenExpiresAt,clientId,userId,scopes,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(
+      randomUUID(),
+      "legacy-oauth-fixture",
+      "legacy-refresh-fixture",
+      Date.now() + 60000,
+      Date.now() + 60000,
+      client.client_id,
+      users[0],
+      "openid offline_access",
+      Date.now(),
+      Date.now(),
+    )
+    .run();
+  expect((await mcp("legacy-oauth-fixture")).status).toBe(200);
+  const legacyRefreshed = await tokenRequest({
+    grant_type: "refresh_token",
+    refresh_token: "legacy-refresh-fixture",
+  });
+  expect(legacyRefreshed.status).toBe(200);
+  // SAFETY: The provider's successful refresh response is exercised as an MCP bearer below.
+  const legacyCurrent = (await legacyRefreshed.json()) as {
+    access_token: string;
+  };
+  expect((await mcp(legacyCurrent.access_token)).status).toBe(200);
+  expect((await mcp("legacy-oauth-fixture")).status).toBe(401);
+  expect((await revoke(cookies[0])).status).toBe(200);
+  expect((await mcp(legacyCurrent.access_token)).status).toBe(401);
+
+  // Revoke after the approval reads pending state but before its write. The
+  // provider must not restore consent after that pending state is deleted.
+  const staleConsent = await authorize();
+  await db
+    .prepare(`CREATE TRIGGER revoke_during_approval BEFORE UPDATE ON verification
+    WHEN OLD.identifier = '${staleConsent}' BEGIN
+      DELETE FROM oauthAccessToken WHERE userId = json_extract(OLD.value, '$.userId') AND clientId = json_extract(OLD.value, '$.clientId');
+      DELETE FROM oauthConsent WHERE userId = json_extract(OLD.value, '$.userId') AND clientId = json_extract(OLD.value, '$.clientId');
+      DELETE FROM verification WHERE identifier = OLD.identifier;
+    END`)
+    .run();
+  try {
+    expect((await decide(staleConsent, true)).status).toBe(403);
+    expect(
+      await db
+        .prepare(
+          "SELECT id FROM oauthConsent WHERE userId = ? AND clientId = ?",
+        )
+        .bind(users[0], client.client_id)
+        .all(),
+    ).toMatchObject({ results: [] });
+  } finally {
+    await db.exec("DROP TRIGGER revoke_during_approval");
+  }
+
+  // Deterministically model revocation after code consumption but before the
+  // candidate token is returned, rather than depending on request timing.
+  const finalConsent = await decide(await authorize(), true);
+  expect(finalConsent.status).toBe(200);
+  // SAFETY: The successful provider consent response returns the callback URL used in the exchange below.
+  const finalRedirect = new URL(
+    ((await finalConsent.json()) as { redirectURI: string }).redirectURI,
+  );
+  await db
+    .prepare(`CREATE TRIGGER revoke_during_exchange AFTER INSERT ON oauthAccessToken BEGIN
+      DELETE FROM oauthConsent WHERE userId = NEW.userId AND clientId = NEW.clientId;
+    END`)
+    .run();
+  try {
+    const revokedExchange = await exchange(
+      finalRedirect.searchParams.get("code")!,
+    );
+    expect(revokedExchange.status).toBe(401);
+    expect(await revokedExchange.json()).toMatchObject({
+      error: "invalid_grant",
+    });
+    expect(
+      await (
+        await mf.dispatchFetch(`${origin}/api/mcp-connections`, {
+          headers: { cookie: cookies[0] },
+        })
+      ).json(),
+    ).toEqual({ connections: [] });
+  } finally {
+    await db.exec("DROP TRIGGER revoke_during_exchange");
+  }
+  const otherConnections = () =>
+    mf.dispatchFetch(`${origin}/api/mcp-connections`, {
+      headers: { cookie: cookies[1] },
+    });
+  await db
+    .prepare(
+      "UPDATE oauthAccessToken SET accessTokenExpiresAt = ? WHERE accessToken = ?",
+    )
+    .bind("2000-01-01T00:00:00.000Z", otherUser.access_token)
+    .run();
+  expect(await (await otherConnections()).json()).toEqual({
+    connections: [{ clientId: client.client_id, name: "Local OAuth reviewer" }],
+  });
+  await db
+    .prepare(
+      "UPDATE oauthAccessToken SET refreshTokenExpiresAt = ? WHERE accessToken = ?",
+    )
+    .bind("2000-01-01T00:00:00.000Z", otherUser.access_token)
+    .run();
+  expect(await (await otherConnections()).json()).toEqual({ connections: [] });
 });
 
 test("API keys enforce MCP permissions, plan gates, capture scope, and live revocation", async () => {

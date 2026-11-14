@@ -56,7 +56,7 @@ We share data with exactly these processors, for exactly these purposes:
 Two more behaviors in the spirit of full disclosure:
 
 - **Link previews.** When you paste a URL, our server fetches that page once to grab its title. Fetched titles are cached for up to 24 hours and that cache is shared across users — it holds only the public page title, keyed by the URL.
-- **AI agents (MCP).** No agent can touch your outline unless **you** authorize it via OAuth. An agent you authorize can read and edit your notes; you can revoke its access at any time. Text you mark as a spoiler (`||like this||`) is redacted from what agents read — that's context hygiene to keep flagged text out of an AI's view, **not** a security boundary (an agent you've authorized acts with your keys).
+- **AI agents (MCP).** No agent can touch your outline unless **you** authorize it via OAuth or give it a personal API key. OAuth gives full-outline read and write access; API keys can limit access to read-only. Revoke OAuth access in Settings → Connections → Authorized apps, or revoke a personal key under API keys. Revocation blocks new requests, not work already authorized or data already sent to the connected provider. Text you mark as a spoiler (`||like this||`) is redacted from what agents read — that's context hygiene to keep flagged text out of an AI's view, **not** a security boundary (an agent you've authorized acts with your keys).
 
 We never sell your data, share it for advertising, or use it to train AI models. There are no other recipients.
 
