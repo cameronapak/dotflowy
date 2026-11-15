@@ -1077,6 +1077,89 @@ for (const width of [1280, 390]) {
   });
 }
 
+test("paragraph links convert to embeds in rows and zoomed titles", async ({
+  page,
+}) => {
+  await mockProvider(page);
+  await seedOutline(
+    page,
+    [
+      {
+        id: "plain",
+        parentId: null,
+        prevSiblingId: null,
+        text: URL,
+        kind: "paragraph",
+      },
+      {
+        id: "media",
+        parentId: null,
+        prevSiblingId: "plain",
+        text: `[My video](${URL})`,
+        kind: "paragraph",
+      },
+      {
+        id: "note",
+        parentId: "media",
+        prevSiblingId: null,
+        text: "Keep this child note",
+      },
+      {
+        id: "mirror",
+        parentId: null,
+        prevSiblingId: "media",
+        text: "",
+        mirrorOf: "media",
+      },
+    ],
+    { kv: { "account-prefs": [allowed] } },
+  );
+  await openSeededOutline(page, { anchorId: "plain" });
+  const editor = page.getByRole("dialog", { name: "Edit link" });
+  for (const id of ["plain", "media"]) {
+    if (id === "media") {
+      await page.goto("/media");
+      await page.locator(".zoomed-title-text").waitFor();
+    }
+    const text =
+      id === "plain" ? note(page, id) : page.locator(".zoomed-title-text");
+    await text.getByRole("button", { name: "Edit link" }).click();
+    await expect(
+      editor.getByRole("button", { name: "Embed", exact: true }),
+    ).toBeEnabled();
+    await editor.getByRole("button", { name: "Embed", exact: true }).click();
+    await editor.getByRole("button", { name: "Done" }).click();
+    await expect(
+      page.locator(`[data-node-body="${id}"] iframe`),
+    ).toHaveAttribute("src", SRC);
+    const nodes: ApiNode[] = await page.evaluate(() =>
+      fetch("/api/nodes").then((r) => r.json()),
+    );
+    expect(nodes.find((node) => node.id === id)).toMatchObject({
+      kind: "embed",
+      isTask: false,
+      text: URL,
+    });
+  }
+  await expect(note(page, "note")).toHaveText("Keep this child note");
+  await page.reload();
+  await page.locator(".zoomed-title-text").waitFor();
+  await expect(page.locator('[data-node-body="media"] iframe')).toHaveAttribute(
+    "src",
+    SRC,
+  );
+  await expect(note(page, "note")).toHaveText("Keep this child note");
+  await openSeededOutline(page, { anchorId: "mirror" });
+  await expect(note(page, "mirror").getByRole("link")).toHaveAttribute(
+    "href",
+    URL,
+  );
+  await expect(
+    page.locator('li[data-node-id="mirror"] iframe'),
+  ).toHaveAttribute("src", SRC);
+  await expect(note(page, "note")).toHaveCount(2);
+});
+
 test("pencil preserves surrounding prose and explains unavailable Embed", async ({
   page,
 }) => {

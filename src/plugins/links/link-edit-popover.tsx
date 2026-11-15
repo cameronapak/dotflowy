@@ -72,7 +72,6 @@ export function submitLinkEdit(
   if (
     display === "embed" &&
     (!wholeNode ||
-      (node.kind !== null && node.kind !== "embed") ||
       (!getEditorFeatures().embeds && node.kind !== "embed") ||
       !embedResource(trimmedUrl))
   )
@@ -134,7 +133,7 @@ export function openLinkEditPopover(
       x={args.x}
       y={args.y}
       display={display}
-      canEmbed={standalone && (node?.kind === null || node?.kind === "embed")}
+      canEmbed={standalone}
       mirrorCount={
         index.mirrorsBySource.get(node?.id ?? args.nodeId)?.length ?? 0
       }
