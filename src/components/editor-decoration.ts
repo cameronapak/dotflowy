@@ -20,6 +20,14 @@ export function useInputDecoration(ref: RefObject<HTMLElement | null>) {
 
   function paintInput(el: HTMLElement, text: string) {
     if (composingRef.current) return;
+    console.debug(
+      "[df-input]",
+      JSON.stringify({
+        t: Math.round(performance.now()),
+        text,
+        caret: getCaretOffset(el),
+      }),
+    );
     decorate(el, text, getCaretOffset(el), true);
     syncedRef.current = text;
   }
@@ -68,6 +76,19 @@ export function useStoredTextDecoration({
         const dom = readSource(el);
         if (dom !== node.text && dom.startsWith(node.text)) return;
       }
+    }
+    if (focused) {
+      console.debug(
+        "[df-repaint]",
+        JSON.stringify({
+          t: Math.round(performance.now()),
+          dom: readSource(el),
+          node: node.text,
+          synced: syncedRef.current,
+          echoed: echoedTextFor(node.id) ?? null,
+          caret: getCaretOffset(el),
+        }),
+      );
     }
     decorate(el, node.text, focused ? getCaretOffset(el) : null, focused);
     syncedRef.current = node.text;

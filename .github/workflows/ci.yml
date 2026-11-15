@@ -219,6 +219,34 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --frozen-lockfile
+      - run: |
+          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          bunx playwright install --with-deps webkit
+      - name: Repeat the first WebKit tests in fresh processes
+        run: |
+          failed=0
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            bun run test:e2e:app e2e/selection-format-webkit.spec.ts e2e/typing-suggestions-webkit.spec.ts --project=engine-webkit --workers=1 --retries=0 --reporter=list > out-$i.log 2>&1 || failed=$((failed+1))
+            grep -a -E "DIAG|df-|passed|failed" out-$i.log | grep -v WebServer || true
+          done
+          echo "FAILED_ITERATIONS=$failed"
+
   # Preserve the existing required check name. A skipped or failed prerequisite
   # must fail this gate, including when deployment calls the workflow.
   quality:

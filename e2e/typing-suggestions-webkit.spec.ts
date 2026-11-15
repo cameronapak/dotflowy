@@ -17,11 +17,20 @@ test("a touch selects a suggestion without moving editor focus", async ({
     { id: "tagged", parentId: null, prevSiblingId: null, text: "Ship #urgent" },
     { id: "edit", parentId: null, prevSiblingId: "tagged", text: "" },
   ]);
+  const log: string[] = [];
+  page.on("console", (message) => {
+    if (message.text().startsWith("[df-")) log.push(message.text());
+  });
   await page.goto("/");
   const editor = page.locator('[data-node-id="edit"] .node-text');
   const suggestions = page.locator(".typing-suggestions");
   await editor.tap();
   await page.keyboard.type("Keep #urg");
+  await page.waitForTimeout(300);
+  const typed = await editor.textContent();
+  console.log(`DIAG typed=${JSON.stringify(typed)}`);
+  if (typed !== "Keep #urg") console.log(`DIAGLOG\n${log.join("\n")}`);
+  expect(typed).toBe("Keep #urg");
   await expect(suggestions).toHaveCSS("opacity", "1");
   await page.getByRole("option", { name: /urgent/ }).tap();
   await expect(editor).toContainText("Keep #urgent");
