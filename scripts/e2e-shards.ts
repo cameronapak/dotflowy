@@ -58,24 +58,24 @@ export function assignShards(
   return shards.map((shard) => shard.files.sort());
 }
 
-const Listing = Schema.Struct({
-  suites: Schema.Array(Schema.Struct({ file: Schema.String })),
-});
 const Timings = Schema.Record(Schema.String, Schema.Number);
 
-/** The spec files of the Chromium project, relative to `e2e/`, from Playwright. */
+/**
+ * The spec files of the Chromium project, relative to `e2e/`, from Playwright.
+ * `--list` prints one `[chromium] › file:line:column › title` row per test. The
+ * JSON reporter is not used: CI points it at a file, and stdout stays empty.
+ */
 async function chromiumFiles(): Promise<string[]> {
-  const output =
-    await $`bun run --silent test:e2e:app:chromium --list --reporter=json`
-      .cwd(ROOT)
-      .text();
-  const report = Schema.decodeUnknownSync(Listing)(
-    JSON.parse(output.slice(output.indexOf("{"))),
-  );
-  const files = report.suites.map((suite) => suite.file);
-  if (files.length === 0)
-    throw new Error("Playwright listed no Chromium specs");
-  return files;
+  const output = await $`bun run --silent test:e2e:app:chromium --list`
+    .cwd(ROOT)
+    .text();
+  const files = new Set<string>();
+  for (const line of output.split("\n")) {
+    const file = /^\[chromium\] › (.+?):\d+:\d+ › /.exec(line.trim())?.[1];
+    if (file) files.add(file);
+  }
+  if (files.size === 0) throw new Error("Playwright listed no Chromium specs");
+  return [...files];
 }
 
 function readTimings(): Record<string, number> {
