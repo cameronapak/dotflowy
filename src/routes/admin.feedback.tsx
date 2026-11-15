@@ -1,7 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 
+import { AdminNav } from "../components/admin-nav";
 import { FeedbackReply } from "../components/feedback-reply";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -249,8 +250,8 @@ export const Route = createFileRoute("/admin/feedback")({
   component: FeedbackInbox,
 });
 
-// Deliberately unlinked from customer chrome, like the other admin views.
-// The API owns authorization and never exposes submissions to other users.
+// Behind the /admin gate (ADR 0090). The API still owns authorization and
+// never exposes submissions to other users.
 function FeedbackInbox() {
   const [kind, setKind] = useState("");
   const [plan, setPlan] = useState("");
@@ -296,9 +297,9 @@ function FeedbackInbox() {
   }
   return (
     <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-6 bg-background p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      <header className="flex flex-col gap-4">
+        <AdminNav />
         <h1 className="text-xl font-semibold">Feedback inbox</h1>
-        <Link to="/">Back to outline</Link>
       </header>
       <p className="text-sm text-muted-foreground">
         Private reports, newest first. Give member ideas extra weight, but

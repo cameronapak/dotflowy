@@ -1,17 +1,16 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { AdminNav } from "../components/admin-nav";
 import { Button } from "../components/ui/button";
-import { buttonVariants } from "../components/ui/button-variants";
 import { Input } from "../components/ui/input";
 
 /**
- * Admin-only "restore one user" view (ticket #220). Like /admin/waitlist, the
- * REAL gate is server-side: POST /api/admin/restore requires a session whose
- * email is on the Worker's ADMIN_EMAILS allowlist and 404s otherwise — this page
- * is just a thin renderer over that endpoint, so a non-admin who guesses the URL
- * and submits sees the same "Not found." a bad route would give. Deliberately
- * unlinked from the app chrome, no dialog framework. The heavy lifting (the DO's
+ * Admin-only "restore one user" view (ticket #220), behind the /admin gate
+ * (ADR 0090), so a non-admin never sees the form. The REAL gate is
+ * server-side: POST /api/admin/restore requires an admin session
+ * (isAdminSession) and 404s otherwise, which still flips this page to
+ * "Not found." if access is removed mid-session. No dialog framework. The heavy lifting (the DO's
  * 30-day Point-in-Time Recovery) is the endpoint's; see
  * docs/runbooks/restore-user-pitr.md for the curl equivalent and the undo flow.
  */
@@ -50,8 +49,8 @@ function AdminRestore() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<RestoreResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // A 404 (non-admin, or missing route) flips the whole page to "Not found.",
-  // exactly like the waitlist page — the admin surface must not advertise itself.
+  // A 404 (access removed since the gate checked) flips the whole page to
+  // "Not found.", exactly like the waitlist page.
   const [denied, setDenied] = useState(false);
 
   const trimmedId = identifier.trim();
@@ -114,20 +113,13 @@ function AdminRestore() {
 
   return (
     <main className="mx-auto min-h-dvh w-full max-w-2xl bg-background p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Restore a user</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Roll one user&rsquo;s outline back within the last 30 days. Isolated
-            to that user; other outlines are untouched.
-          </p>
-        </div>
-        <Link
-          to="/"
-          className={buttonVariants({ variant: "ghost", size: "sm" })}
-        >
-          Back to outline
-        </Link>
+      <AdminNav />
+      <div className="mt-4 mb-6">
+        <h1 className="text-xl font-semibold">Restore a user</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Roll one user&rsquo;s outline back within the last 30 days. Isolated
+          to that user; other outlines are untouched.
+        </p>
       </div>
 
       {result ? (

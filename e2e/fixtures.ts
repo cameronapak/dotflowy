@@ -335,6 +335,10 @@ export async function seedOutline(
   await page.route("**/api/mcp-connections", (route) =>
     reply(route, { connections: [] }),
   );
+  // An ordinary account. Admin journeys override this after seeding.
+  await page.route("**/api/account-capabilities", (route) =>
+    reply(route, { admin: false }),
+  );
 
   // The app is gated behind a Better Auth session (root AuthGate). The editor
   // only mounts once `useSession()` resolves to a session, so mock the
