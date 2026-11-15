@@ -65,7 +65,7 @@
     "@hugeicons/core-free-icons": "^4.3.5",
     "@hugeicons/react": "^1.1.10",
     "@icons-pack/react-simple-icons": "^13.15.1",
-    "@onlymoein/liquidglass": "0.12.0",
+    "@onlymoein/liquidglass": "0.16.4",
     "@react-aria/utils": "^3.34.1",
     "@rgrove/parse-xml": "^5.0.0",
     "@sentry/cloudflare": "^10.74.0",
@@ -141,6 +141,6 @@
   },
   "packageManager": "bun@1.4.2",
   "patchedDependencies": {
-    "@onlymoein/liquidglass@0.12.0": "patches/@onlymoein%2Fliquidglass@0.12.0.patch"
+    "@onlymoein/liquidglass@0.16.4": "patches/@onlymoein%2Fliquidglass@0.16.4.patch"
   }
 }

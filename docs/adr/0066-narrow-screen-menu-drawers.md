@@ -18,14 +18,16 @@ leave focus in an external editor.
 
 ## Modal sheets use the package defaults
 
-`@onlymoein/liquidglass` 0.12.0 owns the native modal dialog, glass material,
+`@onlymoein/liquidglass` 0.16.4 owns the native modal dialog, glass material,
 corners, handle, spring, detents, and reduced-motion entry/exit. The first detent
 is medium (51.6%); dragging the handle expands to large. Short sheets also start
 at medium: the exported API has no content-fit height. Do not clamp their CSS
 height, because that breaks expansion. There is no app-made title bar, X button,
 or second gesture engine. Each dialog has an accessible name. Keyboard users can
 scroll to every control without expanding it. Dragging starts only on the
-package handle, not inside the scrolling content.
+package handle, not inside the scrolling content. Since 0.13.0, upstream also
+drags from content; the shared integration uses its `data-lg-no-sheet-drag`
+opt-out to preserve independent content scrolling.
 
 The shared integration lazily loads the package for narrow screens, follows the
 app's explicit theme through the package's `data-theme`, focuses a form's
@@ -51,7 +53,9 @@ autofocus and the package's focus handoff remain unchanged.
 Drag-release snapping also respects reduced motion. Pinch zoom remains native.
 Remove each patch hunk when upstream supplies the
 same behavior. Both ESM and CommonJS builds are patched. The former React Aria
-Sheet patch and its styles are removed.
+Sheet patch and its styles are removed. The 0.16.4 upgrade retains all existing
+fixes and regenerates the patch against that release's ESM and CommonJS output;
+upstream has not supplied these fixes yet.
 
 Content clips to the package's animated corners. App separators use the
 package Menu's separator spacing and color. Size-specific lens variables reset
