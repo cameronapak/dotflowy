@@ -4,6 +4,7 @@ import { echoedTextFor } from "../data/collection";
 import { getHistoryState } from "../data/history";
 import { getLiveNode } from "../data/live-nodes";
 import { hasFoldingToken } from "../plugins/registry";
+import { keepsFocusedDom } from "./focused-repaint";
 import {
   decorate,
   getCaretOffset,
@@ -72,25 +73,33 @@ export function useStoredTextDecoration({
     if (syncedRef.current === node.text) return;
     const focused = document.activeElement === el;
     if (focused && !getHistoryState().busy) {
-      if (echoedTextFor(node.id) === node.text) return;
-      if (keepFocusedPrefix) {
-        const dom = readSource(el);
-        if (dom !== node.text && dom.startsWith(node.text)) return;
+      const live = getLiveNode(node.id)?.text;
+      if (live !== undefined && live !== node.text) {
+        console.debug(
+          "[df-skip]",
+          JSON.stringify({
+            t: Math.round(performance.now()),
+            dom: readSource(el),
+            node: node.text,
+            synced: syncedRef.current,
+            echoed: echoedTextFor(node.id) ?? null,
+            live,
+            caret: getCaretOffset(el),
+          }),
+        );
       }
     }
-    if (focused) {
-      console.debug(
-        "[df-repaint]",
-        JSON.stringify({
-          t: Math.round(performance.now()),
-          dom: readSource(el),
-          node: node.text,
-          synced: syncedRef.current,
-          echoed: echoedTextFor(node.id) ?? null,
-          live: getLiveNode(node.id)?.text ?? null,
-          caret: getCaretOffset(el),
-        }),
-      );
+    if (
+      focused &&
+      !getHistoryState().busy &&
+      keepsFocusedDom({
+        rendered: node.text,
+        live: getLiveNode(node.id)?.text,
+        echoed: echoedTextFor(node.id),
+        heldDom: keepFocusedPrefix ? readSource(el) : null,
+      })
+    ) {
+      return;
     }
     decorate(el, node.text, focused ? getCaretOffset(el) : null, focused);
     syncedRef.current = node.text;

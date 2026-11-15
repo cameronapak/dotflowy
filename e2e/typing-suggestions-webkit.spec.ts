@@ -30,8 +30,10 @@ test("a touch selects a suggestion without moving editor focus", async ({
   await page.waitForTimeout(300);
   const typed = await editor.textContent();
   appendFileSync("diag.log", `DIAG typed=${JSON.stringify(typed)}\n`);
-  if (typed !== "Keep #urg")
+  const notable = log.some((line) => !line.startsWith("[df-input]"));
+  if (typed !== "Keep #urg" || notable) {
     appendFileSync("diag.log", `DIAGLOG\n${log.join("\n")}\n`);
+  }
   expect(typed).toBe("Keep #urg");
   await expect(suggestions).toHaveCSS("opacity", "1");
   await page.getByRole("option", { name: /urgent/ }).tap();
