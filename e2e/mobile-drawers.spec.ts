@@ -1036,6 +1036,24 @@ test.describe("narrow-screen drawers", () => {
     await page.getByTestId("week-calendar-month").tap();
     await expect(drawer(page)).toBeVisible();
     await settleSheet(page);
+    // A short calendar leaves blank content below its controls. That space,
+    // like the controls themselves, must not start a sheet drag.
+    const content = sheet(page).locator(".lg-sheet-content");
+    const box = (await content.boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height - 48;
+    expect(
+      await page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.className,
+        { x, y },
+      ),
+    ).toBe("lg-sheet-content");
+    const top = (await sheet(page).boundingBox())!.y;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + 40, { steps: 4 });
+    expect((await sheet(page).boundingBox())!.y).toBeCloseTo(top, 0);
+    await page.mouse.up();
     await page.getByTestId("month-picker-next").tap();
     await expect(drawer(page)).toContainText("July 2030");
     await settleSheet(page);

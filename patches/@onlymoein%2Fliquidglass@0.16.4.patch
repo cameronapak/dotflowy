@@ -1,8 +1,8 @@
 diff --git a/dist/index.cjs b/dist/index.cjs
-index 3da8337d298b4472bcd7b4be63f4b39748c7f2c4..e89886df987d1b494471621de2c25d5cde77c1be 100644
+index f22a899a..d0843e05 100644
 --- a/dist/index.cjs
 +++ b/dist/index.cjs
-@@ -3260,32 +3260,41 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+@@ -4042,32 +4042,41 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
  			phase
  		};
  	});
@@ -15,7 +15,7 @@ index 3da8337d298b4472bcd7b4be63f4b39748c7f2c4..e89886df987d1b494471621de2c25d5c
 +		const viewport = window.visualViewport;
 +		let screen = innerHeight;
 +		const sizeViewport = () => {
-+			// Pinch zoom remains native; only follow an unzoomed keyboard viewport.
++			// Pinch zoom stays native; only follow an unzoomed keyboard viewport.
 +			if (viewport && viewport.scale > 1) return;
 +			screen = viewport?.height || innerHeight;
 +			dialog.style.top = `${Math.max(0, viewport?.offsetTop || 0)}px`;
@@ -51,7 +51,7 @@ index 3da8337d298b4472bcd7b4be63f4b39748c7f2c4..e89886df987d1b494471621de2c25d5c
  		};
  		const spring = createSpring(0, SPRING[0], SPRING[1], (next) => {
  			stopLens?.();
-@@ -3299,12 +3308,26 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+@@ -4081,12 +4090,26 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
  		spring.paint();
  		const stopRim = fitRim(sheet);
  		const first = heights()[0] ?? 0;
@@ -79,7 +79,7 @@ index 3da8337d298b4472bcd7b4be63f4b39748c7f2c4..e89886df987d1b494471621de2c25d5c
  			clearInterval(settled);
  			spring.stop();
  			stopLens?.();
-@@ -3355,7 +3378,7 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+@@ -4196,7 +4219,7 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
  		}
  		const ahead = height + now.speed * .15;
  		const nearest = heights.reduce((best, value) => Math.abs(value - ahead) < Math.abs(best - ahead) ? value : best, heights[0] ?? 0);
@@ -88,11 +88,19 @@ index 3da8337d298b4472bcd7b4be63f4b39748c7f2c4..e89886df987d1b494471621de2c25d5c
  	};
  	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("dialog", {
  		ref: dialogRef,
+@@ -4228,6 +4251,7 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+ 				})
+ 			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+ 				className: "lg-sheet-content",
++				"data-lg-no-sheet-drag": "",
+ 				children
+ 			})]
+ 		})] })
 diff --git a/dist/index.js b/dist/index.js
-index 95b342daf0290f4de810363c5aea81b47c0cec6c..0a6ad2a1fe54308d4687c7c7804b7c7b1220a6d9 100644
+index 7facb0d9..31535698 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -3259,32 +3259,41 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+@@ -4041,32 +4041,41 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
  			phase
  		};
  	});
@@ -105,7 +113,7 @@ index 95b342daf0290f4de810363c5aea81b47c0cec6c..0a6ad2a1fe54308d4687c7c7804b7c7b
 +		const viewport = window.visualViewport;
 +		let screen = innerHeight;
 +		const sizeViewport = () => {
-+			// Pinch zoom remains native; only follow an unzoomed keyboard viewport.
++			// Pinch zoom stays native; only follow an unzoomed keyboard viewport.
 +			if (viewport && viewport.scale > 1) return;
 +			screen = viewport?.height || innerHeight;
 +			dialog.style.top = `${Math.max(0, viewport?.offsetTop || 0)}px`;
@@ -141,7 +149,7 @@ index 95b342daf0290f4de810363c5aea81b47c0cec6c..0a6ad2a1fe54308d4687c7c7804b7c7b
  		};
  		const spring = createSpring(0, SPRING[0], SPRING[1], (next) => {
  			stopLens?.();
-@@ -3298,12 +3307,26 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+@@ -4080,12 +4089,26 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
  		spring.paint();
  		const stopRim = fitRim(sheet);
  		const first = heights()[0] ?? 0;
@@ -169,7 +177,7 @@ index 95b342daf0290f4de810363c5aea81b47c0cec6c..0a6ad2a1fe54308d4687c7c7804b7c7b
  			clearInterval(settled);
  			spring.stop();
  			stopLens?.();
-@@ -3354,7 +3377,7 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+@@ -4195,7 +4218,7 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
  		}
  		const ahead = height + now.speed * .15;
  		const nearest = heights.reduce((best, value) => Math.abs(value - ahead) < Math.abs(best - ahead) ? value : best, heights[0] ?? 0);
@@ -178,3 +186,11 @@ index 95b342daf0290f4de810363c5aea81b47c0cec6c..0a6ad2a1fe54308d4687c7c7804b7c7b
  	};
  	return /* @__PURE__ */ jsx("dialog", {
  		ref: dialogRef,
+@@ -4227,6 +4250,7 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+ 				})
+ 			}), /* @__PURE__ */ jsx("div", {
+ 				className: "lg-sheet-content",
++				"data-lg-no-sheet-drag": "",
+ 				children
+ 			})]
+ 		})] })
