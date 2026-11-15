@@ -186,7 +186,8 @@ beforeAll(async () => {
             },
             ADMIN_EMAILS: {
               type: "text",
-              value: "feedback-other@capture.test",
+              value:
+                "feedback-other@capture.test,capabilities-admin@capture.test",
             },
           },
           exports: {
@@ -532,6 +533,18 @@ test("membership gates theme writes, keeps the launch exception narrow, and scop
   ).toEqual({ plan: "free" });
   expect((await request("", "/api/admin/feedback")).status).toBe(404);
   expect((await request(freeCookie, "/api/admin/feedback")).status).toBe(404);
+  // The admin capability comes from the session and agrees with enforcement.
+  const adminCookie = await signIn("capabilities-admin");
+  expect((await request("", "/api/account-capabilities")).status).toBe(401);
+  for (const [cookie, admin] of [
+    [freeCookie, false],
+    [adminCookie, true],
+  ] as const) {
+    const capabilities = await request(cookie, "/api/account-capabilities");
+    expect(capabilities.headers.get("cache-control")).toBe("private, no-store");
+    expect(await capabilities.json()).toEqual({ admin });
+  }
+  expect((await request(adminCookie, "/api/admin/feedback")).status).toBe(200);
 });
 
 test("only a signed paid checkout queues a welcome, and webhook retries cannot revive a dismissed note", async () => {

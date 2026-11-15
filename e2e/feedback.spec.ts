@@ -133,14 +133,29 @@ test("admin triage preserves failed and neighboring drafts, confirms private not
     }
     return route.fulfill({ json: report });
   });
-  await page.goto("/admin/feedback");
+  // Admin is reachable from the App menu only once the server says so; a
+  // capability change shows when the window regains focus.
+  await openSeededOutline(page);
+  const appMenu = page.getByRole("button", { name: "Account and help" });
+  await appMenu.click();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Admin" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.route("**/api/account-capabilities", (route) =>
+    route.fulfill({ json: { admin: true } }),
+  );
+  const capabilityCheck = page.waitForResponse("**/api/account-capabilities");
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await capabilityCheck;
+  await appMenu.click();
+  await page.getByRole("menuitem", { name: "Admin" }).click();
+  await page.getByRole("link", { name: /Feedback inbox/ }).click();
   const first = page
     .getByTestId("feedback-report")
     .filter({ hasText: "Support a daily review shortcut." });
   const second = page
     .getByTestId("feedback-report")
     .filter({ hasText: "The menu closes unexpectedly." });
-  // A direct inbox visit also cold-loads the authenticated application shell.
   await first.waitFor({ state: "visible" });
   await expect(page.getByLabel("Status", { exact: true })).toHaveValue("open");
   await expect(first).toContainText("Not sent to the reporter.");

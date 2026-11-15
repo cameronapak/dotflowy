@@ -13,11 +13,12 @@ research in [#155](https://github.com/cameronapak/dotflowy/issues/155).
 
 ## Who can run it
 
-The endpoint is gated by the `ADMIN_EMAILS` allowlist (a `wrangler.jsonc` var),
-exactly like `/admin/waitlist`. It is **fail-closed**: unset = nobody, and a
+The endpoint is gated by the admin allowlist (`ADMIN_USER_IDS`, or
+`ADMIN_EMAILS` when that is unset; both `wrangler.jsonc` vars), exactly like
+`/admin/waitlist`. It is **fail-closed**: unset = nobody, and a
 non-admin (or unauthenticated) caller gets the same `404` a missing route would —
-the surface never advertises itself. You must be signed in to the app with an
-admin email, and send that session's cookie with the request.
+the surface never advertises itself. You must be signed in to the app as an
+admin account, and send that session's cookie with the request.
 
 ## 1. Find the user id
 

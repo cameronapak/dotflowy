@@ -16,11 +16,13 @@ import {
   SearchIcon,
   SettingsIcon,
   ShieldCheckIcon,
+  ShieldIcon,
   SlidersIcon,
   SparklesIcon,
   UserIcon,
 } from "@/lib/icons";
 
+import { useAdminAccess } from "../data/admin-access";
 import { useUnseenReleaseCount } from "../data/changelog-cursor";
 import { openFeedbackReport } from "../data/feedback";
 import { useMembership } from "../data/membership";
@@ -219,6 +221,7 @@ function AppMenuItems() {
   const navigate = useNavigate();
   const unseen = useUnseenReleaseCount();
   const { plan } = useMembership();
+  const { access } = useAdminAccess();
   const paid = plan !== null && plan !== "free";
   return (
     <>
@@ -240,6 +243,14 @@ function AppMenuItems() {
         <SettingsIcon />
         Settings
       </DropdownMenuItem>
+
+      {/* Only when the server says this session is an admin (ADR 0090). */}
+      {access === "admin" && (
+        <DropdownMenuItem onAfterClose={() => void navigate({ to: "/admin" })}>
+          <ShieldIcon />
+          Admin
+        </DropdownMenuItem>
+      )}
 
       {/* The permanent home for the changelog (ADR 0046). While releases
         are unread, it's emphasized -- bolder text + a solid count pill --
