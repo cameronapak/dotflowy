@@ -29,8 +29,10 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
           # `changeset status --since` diffs against the base branch, so the
-          # shallow default clone isn't enough.
+          # shallow default clone isn't enough. It compares paths, not file
+          # contents, so history arrives without its blobs.
           fetch-depth: 0
+          filter: blob:none
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -72,6 +74,23 @@ jobs:
         run: |
           git fetch --no-tags origin "$GITHUB_BASE_REF"
           bun run check:changeset
+
+  worker:
+    # The real-Worker browser suite needs nothing from checks. Its own runner
+    # keeps a browser install and a Miniflare run off the nonbrowser lane.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --frozen-lockfile
       - name: Install Worker browser
         run: |
           # Use the same mirror workaround as the app shards below.
@@ -90,7 +109,7 @@ jobs:
 
   app:
     # Independent runners need no output from checks. The quality gate below
-    # still requires both lanes, including failed or skipped prerequisites.
+    # still requires every lane, including failed or skipped prerequisites.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -140,10 +159,11 @@ jobs:
   # must fail this gate, including when deployment calls the workflow.
   quality:
     if: always()
-    needs: [checks, app]
+    needs: [checks, worker, app]
     runs-on: ubuntu-latest
     steps:
       - name: Require every check and browser shard
         run: |
           test "${{ needs.checks.result }}" = success
+          test "${{ needs.worker.result }}" = success
           test "${{ needs.app.result }}" = success

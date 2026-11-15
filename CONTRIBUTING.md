@@ -313,9 +313,9 @@ browser.
   `e2e/bootstrap-readiness.spec.ts` holds one lazy bootstrap to check this
   contract; run it with `bun run test:e2e:app e2e/bootstrap-readiness.spec.ts`.
 - **CI's `quality` gate requires all checks and the full browser regression.**
-  Nonbrowser checks and the real-Worker suite run once, alongside eight isolated CI
-  runners that each run one app shard with one worker, zero retries, and retained
-  failure traces. Every app test runs on exactly one shard; each shard stops at
+  Nonbrowser checks and the real-Worker suite each run once on their own runner,
+  alongside eight isolated CI runners that each run one app shard with one worker,
+  zero retries, and retained failure traces. Every app test runs on exactly one shard; each shard stops at
   its first failure without canceling the others. Per-test JSON timing reports
   are uploaded on every run. Require `quality` in branch rules before relying
   on it instead of a full local browser run.
