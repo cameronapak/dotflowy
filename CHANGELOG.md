@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.10.5
+
+### Patch Changes
+
+- e1c2261: Update mobile glass components with upstream rendering and resizing improvements while preserving keyboard-aware sheets and independent content scrolling.
+
 ## 3.10.4
 
 ### Patch Changes
