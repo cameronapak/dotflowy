@@ -2,6 +2,7 @@ import { useEffect, useRef, type RefObject } from "react";
 
 import { echoedTextFor } from "../data/collection";
 import { getHistoryState } from "../data/history";
+import { getLiveNode } from "../data/live-nodes";
 import { hasFoldingToken } from "../plugins/registry";
 import {
   decorate,
@@ -86,6 +87,7 @@ export function useStoredTextDecoration({
           node: node.text,
           synced: syncedRef.current,
           echoed: echoedTextFor(node.id) ?? null,
+          live: getLiveNode(node.id)?.text ?? null,
           caret: getCaretOffset(el),
         }),
       );
