@@ -56,10 +56,11 @@ jobs:
         run: bun run test
       - name: Release automation tests
         run: |
-          bunx --no-install oxlint scripts/release.ts scripts/release.test.ts scripts/shortcut.ts scripts/shortcut.test.ts scripts/heavy-lane.ts scripts/heavy-lane.test.ts scripts/cf-dev.ts
+          bunx --no-install oxlint scripts/release.ts scripts/release.test.ts scripts/shortcut.ts scripts/shortcut.test.ts scripts/heavy-lane.ts scripts/heavy-lane.test.ts scripts/e2e-shards.ts scripts/e2e-shards.test.ts scripts/cf-dev.ts
           bun test scripts/release.test.ts
           bun test scripts/shortcut.test.ts
           bun test scripts/heavy-lane.test.ts
+          bun test scripts/e2e-shards.test.ts
       # AGENTS.md states gotchas inline and points at docs/ + docs/adr/ for the
       # rest. That trade is only safe while every pointer resolves: an agent
       # reads a miss, shrugs, and proceeds without the constraint it was meant
@@ -143,7 +144,12 @@ jobs:
       # Two workers: the runner has four cores, and the bundle's static server
       # is no longer a shared bottleneck the way the development server was.
       - name: App browser regression
-        run: bun run test:e2e:app:chromium --shard=${{ matrix.shard }}/${{ strategy.job-total }} --workers=2 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
+        # Shards are filled by recorded time, not test count. The file list is
+        # its own statement so a failure stops the step: with no file arguments
+        # Playwright would run the whole project.
+        run: |
+          files=$(bun scripts/e2e-shards.ts files ${{ matrix.shard }} ${{ strategy.job-total }})
+          bun run test:e2e:app:chromium $files --workers=2 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
       - name: Upload browser timings

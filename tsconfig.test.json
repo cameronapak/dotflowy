@@ -18,6 +18,9 @@
     "worker/**/*.test.ts",
     "scripts/heavy-lane.ts",
     "scripts/heavy-lane.test.ts",
+    "scripts/e2e-shards.ts",
+    "scripts/e2e-shards.test.ts",
+    "scripts/check-e2e-lanes.ts",
     "scripts/release.ts",
     "scripts/release.test.ts"
   ],
