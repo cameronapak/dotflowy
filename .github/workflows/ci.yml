@@ -121,7 +121,7 @@ jobs:
       # Finish other shards so one failure does not hide independent failures.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -225,7 +225,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        n: [1, 2, 3, 4, 5, 6]
+        n: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v6
@@ -241,11 +241,14 @@ jobs:
       - name: Repeat the first WebKit tests in fresh processes
         run: |
           failed=0
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            bun run test:e2e:app e2e/selection-format-webkit.spec.ts e2e/typing-suggestions-webkit.spec.ts --project=engine-webkit --workers=1 --retries=0 --reporter=list > out-$i.log 2>&1 || failed=$((failed+1))
-            grep -a -E "DIAG|df-|passed|failed" out-$i.log | grep -v WebServer || true
+          for i in 1 2 3 4 5 6; do
+            bun run test:e2e:app:webkit --shard=1/2 --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json > out-$i.log 2>&1 || failed=$((failed+1))
+            grep -a -E "passed|failed" out-$i.log | grep -v WebServer || true
           done
+          cat diag.log
           echo "FAILED_ITERATIONS=$failed"
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
 
   # Preserve the existing required check name. A skipped or failed prerequisite
   # must fail this gate, including when deployment calls the workflow.

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { appendFileSync } from "node:fs";
 
 import { seedOutline } from "./fixtures";
 
@@ -28,8 +29,9 @@ test("a touch selects a suggestion without moving editor focus", async ({
   await page.keyboard.type("Keep #urg");
   await page.waitForTimeout(300);
   const typed = await editor.textContent();
-  console.log(`DIAG typed=${JSON.stringify(typed)}`);
-  if (typed !== "Keep #urg") console.log(`DIAGLOG\n${log.join("\n")}`);
+  appendFileSync("diag.log", `DIAG typed=${JSON.stringify(typed)}\n`);
+  if (typed !== "Keep #urg")
+    appendFileSync("diag.log", `DIAGLOG\n${log.join("\n")}\n`);
   expect(typed).toBe("Keep #urg");
   await expect(suggestions).toHaveCSS("opacity", "1");
   await page.getByRole("option", { name: /urgent/ }).tap();
