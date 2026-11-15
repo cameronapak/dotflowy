@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.10.6
+
+### Patch Changes
+
+- c289a0d: Allow a single link in a paragraph or numbered node to convert to an Embed through the link editor.
+
 ## 3.10.5
 
 ### Patch Changes
