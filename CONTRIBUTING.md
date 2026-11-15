@@ -315,7 +315,8 @@ browser.
 - **CI's `quality` gate requires all checks and the full browser regression.**
   Nonbrowser checks and the real-Worker suite each run once on their own runner,
   alongside nine isolated app runners: eight run one shard of the Chromium project
-  each, and one runs every WebKit project. All use two workers, zero retries, and
+  each, and one runs every WebKit project. The Chromium shards use two workers and
+  the WebKit runner one. All use zero retries and
   retained failure traces. Every app test runs on exactly one of them, which
   `bun run check:e2e-lanes` verifies; each stops at its first failure without
   canceling the others. Per-test JSON timing reports
