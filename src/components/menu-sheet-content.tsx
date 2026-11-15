@@ -104,10 +104,7 @@ export default function MenuSheetContent({
         onOpenChange={setOpen}
         detents={detents}
       >
-        {/* Keep content scrolling independent of the package's sheet drag. */}
-        <div className="contents" data-lg-no-sheet-drag="">
-          {children}
-        </div>
+        {children}
       </Sheet>
     </div>
   );

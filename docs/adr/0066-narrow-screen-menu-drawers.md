@@ -26,8 +26,9 @@ height, because that breaks expansion. There is no app-made title bar, X button,
 or second gesture engine. Each dialog has an accessible name. Keyboard users can
 scroll to every control without expanding it. Dragging starts only on the
 package handle, not inside the scrolling content. Since 0.13.0, upstream also
-drags from content; the shared integration uses its `data-lg-no-sheet-drag`
-opt-out to preserve independent content scrolling.
+drags from content; the package patch applies its `data-lg-no-sheet-drag`
+opt-out to the scroll container, including blank space and safe-area padding,
+to preserve independent content scrolling.
 
 The shared integration lazily loads the package for narrow screens, follows the
 app's explicit theme through the package's `data-theme`, focuses a form's

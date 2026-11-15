@@ -846,38 +846,16 @@ test.describe("narrow-screen drawers", () => {
 
     // The package owns handle dragging. Content scrolling must not drag the
     // sheet or activate a menu item; only the handle starts a pull.
-    const top = (await sheet(page).boundingBox())!.y;
-    const cdp = await page.context().newCDPSession(page);
-    const contentStart = Date.now() / 1000;
-    const contentX = box.x + box.width / 2;
-    const contentY = box.y + 25;
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchStart",
-      touchPoints: [{ x: contentX, y: contentY }],
-      timestamp: contentStart,
-    });
-    for (let step = 1; step <= 4; step++) {
-      await cdp.send("Input.dispatchTouchEvent", {
-        type: "touchMove",
-        touchPoints: [{ x: contentX, y: contentY + step * 12 }],
-        timestamp: contentStart + step * 0.02,
-      });
-    }
-    expect((await sheet(page).boundingBox())!.y).toBeCloseTo(top, 0);
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchEnd",
-      touchPoints: [],
-      timestamp: contentStart + 0.1,
-    });
-    await settleSheet(page);
     const handle = (await sheet(page)
       .locator(".lg-sheet-handle")
       .boundingBox())!;
     const y = handle.y + handle.height / 2;
     const x = handle.x + handle.width / 2;
+    const top = (await sheet(page).boundingBox())!.y;
     const pageY = await page
       .locator(".outline-scroll")
       .evaluate((el) => el.scrollTop);
+    const cdp = await page.context().newCDPSession(page);
     const start = Date.now() / 1000;
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
@@ -1058,6 +1036,24 @@ test.describe("narrow-screen drawers", () => {
     await page.getByTestId("week-calendar-month").tap();
     await expect(drawer(page)).toBeVisible();
     await settleSheet(page);
+    // A short calendar leaves blank content below its controls. That space,
+    // like the controls themselves, must not start a sheet drag.
+    const content = sheet(page).locator(".lg-sheet-content");
+    const box = (await content.boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height - 48;
+    expect(
+      await page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.className,
+        { x, y },
+      ),
+    ).toBe("lg-sheet-content");
+    const top = (await sheet(page).boundingBox())!.y;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + 40, { steps: 4 });
+    expect((await sheet(page).boundingBox())!.y).toBeCloseTo(top, 0);
+    await page.mouse.up();
     await page.getByTestId("month-picker-next").tap();
     await expect(drawer(page)).toContainText("July 2030");
     await settleSheet(page);

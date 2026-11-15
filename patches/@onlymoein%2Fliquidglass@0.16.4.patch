@@ -1,5 +1,5 @@
 diff --git a/dist/index.cjs b/dist/index.cjs
-index f22a899a..dc6df0a5 100644
+index f22a899a..d0843e05 100644
 --- a/dist/index.cjs
 +++ b/dist/index.cjs
 @@ -4042,32 +4042,41 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
@@ -88,8 +88,16 @@ index f22a899a..dc6df0a5 100644
  	};
  	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("dialog", {
  		ref: dialogRef,
+@@ -4228,6 +4251,7 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+ 				})
+ 			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+ 				className: "lg-sheet-content",
++				"data-lg-no-sheet-drag": "",
+ 				children
+ 			})]
+ 		})] })
 diff --git a/dist/index.js b/dist/index.js
-index 7facb0d9..74fc293a 100644
+index 7facb0d9..31535698 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -4041,32 +4041,41 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
@@ -178,3 +186,11 @@ index 7facb0d9..74fc293a 100644
  	};
  	return /* @__PURE__ */ jsx("dialog", {
  		ref: dialogRef,
+@@ -4227,6 +4250,7 @@ function Sheet({ open: openProp, defaultOpen = false, onOpenChange, detents = ["
+ 				})
+ 			}), /* @__PURE__ */ jsx("div", {
+ 				className: "lg-sheet-content",
++				"data-lg-no-sheet-drag": "",
+ 				children
+ 			})]
+ 		})] })
