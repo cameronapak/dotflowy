@@ -119,8 +119,12 @@ The same radio-style display menu remains available for all three pure forms:
 one supported-provider URL, one Markdown link to a supported-provider URL, or an
 Embed. A muted, outlined More button before the source is always visible; the
 current form is checked and disabled. Adding any other text makes the node
-ordinary prose and removes the menu. This keeps a dismissed paste choice and
-every later conversion reversible without storing a representation field.
+ordinary prose and removes the menu. Conversion is independent of the starting
+Kind: a paragraph, numbered node, or task containing only one supported URL or
+Markdown link can become an Embed through the same link editor as a bullet.
+This replaces its Kind rather than combining presentations, and preserves child
+notes and mirror identity. This keeps a dismissed paste choice and every later
+conversion reversible without storing a representation field.
 Initial paste and existing-node actions share one menu implementation. Its
 popover portals outside the outline canvas so horizontal overflow cannot clip
 it.
