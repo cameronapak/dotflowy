@@ -190,8 +190,10 @@ jobs:
         run: |
           sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
           bunx playwright install --with-deps webkit
+      # One worker. With two, a WebKit spec typed while the page was still
+      # settling and a character landed out of order (run 43743181372).
       - name: App browser regression
-        run: bun run test:e2e:app:webkit --workers=2 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
+        run: bun run test:e2e:app:webkit --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
       - name: Upload browser timings
