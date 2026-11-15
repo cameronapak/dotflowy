@@ -172,8 +172,7 @@ jobs:
   app-webkit:
     # Every WebKit project, on the two runners that install WebKit.
     # `check:e2e-lanes` proves this lane and the Chromium shards together run
-    # each app test exactly once. Playwright's `--shard` splits the lane in two;
-    # WebKit runs one worker, so a second runner is its only parallelism.
+    # each app test exactly once. Playwright's `--shard` splits the lane in two.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -196,8 +195,9 @@ jobs:
         run: |
           sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
           bunx playwright install --with-deps webkit
-      # One worker. With two, a WebKit spec typed while the page was still
-      # settling and a character landed out of order (run 43743181372).
+      # One worker. Two workers have five green runs here; raising it is its
+      # own measured change. The one failure seen at two was the editor race
+      # that ADR 0010 now records, which also failed at one worker.
       - name: App browser regression
         run: bun run test:e2e:app:webkit --shard=${{ matrix.webkit_shard }}/${{ strategy.job-total }} --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
         env:
