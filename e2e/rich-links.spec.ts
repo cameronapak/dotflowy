@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
+  outlineRevealed,
   placeCaret,
   seedOutline,
   type ApiNode,
@@ -842,6 +843,7 @@ test("the pencil on a folded link opens the editor; Done rewrites label and url"
   ]);
 
   const pencil = text(page, "n").getByRole("button", { name: "Edit link" });
+  await outlineRevealed(page);
   const buttonBox = await pencil.boundingBox();
   await pencil.click();
 

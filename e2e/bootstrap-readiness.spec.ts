@@ -33,8 +33,12 @@ test("navigation waits for the lazy editor before checking saved content", async
   });
   let held = false;
   // Hold this test's first lazy editor bootstrap, not the outline API read.
+  // The development server serves the lazy editor as its source module. The
+  // bundle serves it as a hashed chunk.
   await page.route(
-    (url) => url.pathname === "/src/components/OutlineEditor.tsx",
+    (url) =>
+      url.pathname === "/src/components/OutlineEditor.tsx" ||
+      /^\/assets\/OutlineEditor-[\w-]+\.js$/.test(url.pathname),
     async (route) => {
       held = true;
       markEntered();

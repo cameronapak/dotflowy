@@ -202,19 +202,26 @@ test.describe("touch drag", () => {
       .locator(".outline-scroll")
       .evaluate((el) => el.scrollTop);
     const cdp = await page.context().newCDPSession(page);
+    // Describe a slow 700ms swipe instead of letting CDP latency set its speed.
+    // Moves that arrive in a burst read as a flick, and the fling carries the
+    // list far enough to unmount the row this test taps next.
+    const start = Date.now() / 1000;
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
       touchPoints: [{ x, y }],
+      timestamp: start,
     });
     for (let step = 1; step <= 6; step++) {
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchMove",
         touchPoints: [{ x, y: y - step * 20 }],
+        timestamp: start + step * 0.1,
       });
     }
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchEnd",
       touchPoints: [],
+      timestamp: start + 0.7,
     });
     await expect
       .poll(() =>

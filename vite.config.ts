@@ -3,7 +3,8 @@ import { sentryVitePlugin } from "@sentry/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact, { reactCompilerPreset } from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { readdirSync, readFileSync } from "node:fs";
+import { defineConfig, type BuildEnvironmentOptions, type Plugin } from "vite";
 
 import pkg from "./package.json";
 import { changelogPlugin } from "./scripts/vite-plugin-changelog";
@@ -16,6 +17,56 @@ import { changelogPlugin } from "./scripts/vite-plugin-changelog";
 // to the public CDN and expose original source.
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
 
+// The app browser suite runs against a bundle (`scripts/e2e-bundle.ts`), not
+// the development server. Its specs read live app state by importing a source
+// module by URL inside the page, such as `import("/src/data/history.ts")`. The
+// development server answers that URL with the module the app already loaded.
+// A bundle has no such URL, so this build emits each module the specs name as
+// a chunk at that exact path. The chunk shares the app's module instances.
+const E2E_DIR = new URL("./e2e/", import.meta.url);
+function e2eModuleUrls(): Plugin {
+  const paths = new Set<string>();
+  for (const name of readdirSync(E2E_DIR)) {
+    if (!name.endsWith(".ts")) continue;
+    const source = readFileSync(new URL(name, E2E_DIR), "utf8");
+    for (const match of source.matchAll(/"(\/src\/[^"]+\.tsx?)"/g)) {
+      if (match[1]) paths.add(match[1]);
+    }
+  }
+  return {
+    name: "dotflowy:e2e-module-urls",
+    applyToEnvironment: (environment) => environment.name === "client",
+    enforce: "pre",
+    buildStart() {
+      for (const path of paths) {
+        this.emitFile({
+          type: "chunk",
+          id: new URL(`.${path}`, import.meta.url).pathname,
+          fileName: path.slice(1),
+          preserveSignature: "exports-only",
+        });
+      }
+    },
+    // TanStack Start builds its manifest from the one client entry and rejects
+    // a second. These chunks are loaded by specs, never by the document.
+    generateBundle(_options, bundle) {
+      for (const path of paths) {
+        const chunk = bundle[path.slice(1)];
+        if (chunk?.type === "chunk") chunk.isEntry = false;
+      }
+    },
+  };
+}
+// `scripts/e2e-bundle.ts` sets this to the directory it serves. The directory
+// comes from config, not `--outDir`: TanStack Start prerenders the shell from
+// the server build it finds through this config, and a CLI flag does not reach it.
+const e2eBundleDir = process.env.DOTFLOWY_E2E_BUNDLE;
+// Emit source maps only when we're going to upload + delete them (below), so
+// they never ship to the CDN on a tokenless build.
+const build: BuildEnvironmentOptions = {};
+if (sentryAuthToken) build.sourcemap = true;
+if (e2eBundleDir) build.outDir = e2eBundleDir;
+
 // SPA mode: no SSR. This sidesteps localStorage-on-server entirely,
 // which matters because TanStack DB's localStorage collection reads
 // globalThis.localStorage. With SPA mode there's no server render pass
@@ -23,9 +74,7 @@ const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
 //
 // It also keeps deployment trivial: any static CDN works.
 export default defineConfig({
-  // Emit source maps only when we're going to upload + delete them (below), so
-  // they never ship to the CDN on a tokenless build.
-  build: sentryAuthToken ? { sourcemap: true } : {},
+  build,
   // cf:dev crosses high-latency portals: one client bundle avoids many waves
   // of chunk requests. Keep production and the Vite HMR loop unchanged.
   environments:
@@ -80,6 +129,7 @@ export default defineConfig({
     // reactCompilerPreset helper rather than a viteReact `babel` option.
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
+    ...(e2eBundleDir ? [e2eModuleUrls()] : []),
     // Last: after the bundle + maps exist. No-op without SENTRY_AUTH_TOKEN.
     ...(sentryAuthToken
       ? [

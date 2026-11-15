@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import {
   mockKeyboardViewport,
   openSeededOutline,
+  outlineRevealed,
   placeCaret,
   seedOutline,
   STANDARD_TREE,
@@ -20,6 +21,7 @@ test("writing hides chrome without moving content; pointer and keyboard restore 
   await placeCaret(node, "end");
   await expect(chrome).toHaveCSS("opacity", "1");
   await expect(addNode).toHaveCSS("opacity", "1");
+  await outlineRevealed(page);
   const bounds = await node.boundingBox();
   await page.keyboard.type(" Writing");
   await expect(chrome).toHaveCSS("opacity", "0");

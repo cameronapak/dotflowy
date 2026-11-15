@@ -170,6 +170,29 @@ export async function openSeededOutline(
   await ready.waitFor({ state: "visible" });
 }
 
+/**
+ * The outline fades in and rises 4px when it replaces the loading skeleton
+ * (`.outline-reveal` in styles.css). A position read during that entrance is
+ * not the resting position. Call this before you record geometry to compare
+ * against later.
+ */
+export async function outlineRevealed(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document
+          .getAnimations()
+          .some(
+            (animation) =>
+              animation instanceof CSSAnimation &&
+              animation.animationName === "outline-reveal" &&
+              animation.playState !== "finished",
+          ),
+      ),
+    )
+    .toBe(false);
+}
+
 // A node as the test author cares about it -- structural fields only. Everything
 // the schema also requires (isTask/completed/collapsed/timestamps) is filled in
 // with inert defaults by seedOutline so each test only states what matters.

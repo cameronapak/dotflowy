@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { placeCaret, seedOutline, type SeedNode } from "./fixtures";
+import {
+  outlineRevealed,
+  placeCaret,
+  seedOutline,
+  type SeedNode,
+} from "./fixtures";
 
 const TREE: SeedNode[] = [
   { id: "before", parentId: null, prevSiblingId: null, text: "Plan the week" },
@@ -44,6 +49,8 @@ async function load(
   await seedOutline(page, nodes);
   await page.goto(path);
   await expect(text(page, "task")).toBeVisible({ timeout: 15_000 });
+  // These tests compare row positions against the ones they read here.
+  await outlineRevealed(page);
   await page.clock.install();
   await page.clock.pauseAt(new Date());
 }
