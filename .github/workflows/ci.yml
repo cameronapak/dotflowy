@@ -140,8 +140,10 @@ jobs:
           # These shards run headless Chromium only. WebKit's 185 system
           # packages install once, in the app-webkit job.
           bunx playwright install --with-deps --only-shell chromium
+      # Two workers: the runner has four cores, and the bundle's static server
+      # is no longer a shared bottleneck the way the development server was.
       - name: App browser regression
-        run: bun run test:e2e:app:chromium --shard=${{ matrix.shard }}/${{ strategy.job-total }} --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
+        run: bun run test:e2e:app:chromium --shard=${{ matrix.shard }}/${{ strategy.job-total }} --workers=2 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
       - name: Upload browser timings
@@ -183,7 +185,7 @@ jobs:
           sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
           bunx playwright install --with-deps webkit
       - name: App browser regression
-        run: bun run test:e2e:app:webkit --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
+        run: bun run test:e2e:app:webkit --workers=2 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
       - name: Upload browser timings
