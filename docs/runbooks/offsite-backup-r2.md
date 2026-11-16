@@ -46,7 +46,7 @@ Workers Logs (`backup sweep: N/N DOs exported`).
 
 ## Listing a user's backups
 
-Admin-gated (`ADMIN_EMAILS`, fail-closed, 404 for non-admins — same gate as the
+Admin-gated (`ADMIN_USER_IDS`, else `ADMIN_EMAILS`; fail-closed, 404 for non-admins — same gate as the
 PITR restore). Signed in as an admin:
 
 ```sh

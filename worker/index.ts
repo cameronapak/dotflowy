@@ -1295,6 +1295,16 @@ function handleApiRequest(
       return yield* handleFeedbackRequest(request, env, session, executionCtx);
     }
 
+    // What this session may see in the app chrome (ADR 0090). A display hint
+    // only: every admin route keeps its own isAdminSession check.
+    if (url.pathname === "/api/account-capabilities") {
+      if (request.method !== "GET")
+        return json({ error: "method not allowed" }, 405, { Allow: "GET" });
+      return json({ admin: isAdminSession(session, env) }, 200, {
+        "cache-control": "private, no-store",
+      });
+    }
+
     if (url.pathname === "/api/membership/trial") {
       return yield* trialCheckout(request, env.DB, session.user.id, auth);
     }
