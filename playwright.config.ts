@@ -3,7 +3,8 @@ import { fileURLToPath } from "node:url";
 
 // Chromium and headless by default. These are behavioral tests (caret/visual-line
 // navigation needs a real layout engine). Engine-specific regressions can override
-// browserName: typing-suggestions-webkit covers touch suggestion selection.
+// browserName: typing-suggestions-webkit covers touch suggestion selection. Name
+// such a spec `*-webkit.spec.ts`, which puts it in the engine-webkit project.
 // `E2E_PORT` exists for the one case a fixed port can't serve: two agent
 // worktrees running the suite at once. Give the second one its own port.
 const PORT = Number(process.env.E2E_PORT ?? 3210);
@@ -12,10 +13,13 @@ const VITE = fileURLToPath(
   new URL("./node_modules/vite/bin/vite.js", import.meta.url),
 );
 
+// Real Worker suites own their backend rather than using this Vite server.
+const REAL_WORKER_SPECS = "worker-browser/**";
+const ENGINE_WEBKIT_SPECS = "*-webkit.spec.ts";
+
 export default defineConfig({
   testDir: "./e2e",
-  // Real Worker suites own their backend rather than using this Vite server.
-  testIgnore: ["worker-browser/**"],
+  testIgnore: [REAL_WORKER_SPECS],
   fullyParallel: true,
   // Each worker owns a browser in addition to the shared Vite server. Leave
   // room for the agent and other checks on a medium Orb (4 CPUs, 8 GB RAM).
@@ -29,7 +33,19 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "chromium",
+      // A project's testIgnore replaces the top-level one, so repeat it.
+      testIgnore: [REAL_WORKER_SPECS, ENGINE_WEBKIT_SPECS],
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // These specs set `browserName: "webkit"` themselves. Their own project
+      // keeps them in CI's WebKit lane; the Chromium shards install no WebKit.
+      name: "engine-webkit",
+      testMatch: ENGINE_WEBKIT_SPECS,
+      use: { ...devices["Desktop Chrome"] },
+    },
     {
       name: "selection-menu-webkit",
       testMatch: "node-multi-select.spec.ts",
