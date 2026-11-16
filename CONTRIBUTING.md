@@ -319,7 +319,12 @@ browser.
   the WebKit runner one. All use zero retries and
   retained failure traces. Every app test runs on exactly one of them, which
   `bun run check:e2e-lanes` verifies; each stops at its first failure without
-  canceling the others. Per-test JSON timing reports
+  canceling the others. `scripts/e2e-shards.ts` fills the Chromium shards by
+  the recorded time in `e2e/shard-timings.json`, whole spec files at a time. A
+  spec with no timing still lands in a shard. Stale timings unbalance the
+  shards but cannot drop a test. To refresh them, download a green run's
+  reports with `gh run download <run-id> -D <dir>` and run
+  `bun scripts/e2e-shards.ts record <dir>`. Per-test JSON timing reports
   are uploaded on every run. Require `quality` in branch rules before relying
   on it instead of a full local browser run.
   PRs run CI directly; `main` uses deployment's exact-commit call, not a second
