@@ -1,15 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { AdminNav } from "../components/admin-nav";
 import { Button } from "../components/ui/button";
-import { buttonVariants } from "../components/ui/button-variants";
 
 /**
- * Admin-only waitlist view. The REAL gate is server-side: GET /api/waitlist
- * requires a session whose email is on the Worker's ADMIN_EMAILS allowlist and
- * 404s otherwise — this page is just a renderer, so a non-admin who guesses
- * the URL sees the same "Not found" a bad route would give. Deliberately
- * unlinked from the app chrome.
+ * Admin-only waitlist view, behind the /admin gate (ADR 0090). The REAL gate is
+ * server-side: GET /api/waitlist requires an admin session (isAdminSession)
+ * and 404s otherwise, so this page still shows "Not found" on a refused load.
  */
 
 interface WaitlistEntry {
@@ -69,7 +67,8 @@ function AdminWaitlist() {
 
   return (
     <main className="mx-auto min-h-dvh w-full max-w-2xl bg-background p-6">
-      <div className="mb-6 flex items-center justify-between">
+      <AdminNav />
+      <div className="mt-4 mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Waitlist</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -77,19 +76,11 @@ function AdminWaitlist() {
             waiting for an invite
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {entries.length > 0 && (
-            <Button variant="outline" size="sm" onClick={copyEmails}>
-              {copied ? "Copied" : "Copy emails"}
-            </Button>
-          )}
-          <Link
-            to="/"
-            className={buttonVariants({ variant: "ghost", size: "sm" })}
-          >
-            Back to outline
-          </Link>
-        </div>
+        {entries.length > 0 && (
+          <Button variant="outline" size="sm" onClick={copyEmails}>
+            {copied ? "Copied" : "Copy emails"}
+          </Button>
+        )}
       </div>
 
       {entries.length === 0 ? (

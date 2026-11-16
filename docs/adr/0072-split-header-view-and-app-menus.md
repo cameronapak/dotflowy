@@ -43,3 +43,7 @@ More trigger. Search opens the command center, Quick-add is the trailing
 prominent action, and Search this view (Filter this view before [ADR 0089](./0089-one-search-box.md)) is the View section's first row. Home
 and Today are labelled dock destinations. Desktop keeps the two menus and the
 controls described above.
+
+**Admin amendment ([ADR 0090](./0090-admin-navigation.md)).** When the server
+says the session is an admin, the App menu shows **Admin** below Settings, on
+desktop and in the phone More menu. Everyone else sees the list above.
