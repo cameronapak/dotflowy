@@ -65,3 +65,8 @@ FEEDBACK_REPLY_MODE=simulate
 # These are authorization config and a public client ID, not credentials.
 # AMP_FEEDBACK_USER_ID=
 # AMP_FEEDBACK_CLIENT_ID=
+
+# Optional local admin (/admin pages, ADR 0090). wrangler.jsonc pins
+# ADMIN_USER_IDS to the production admin's id, so locally no account is an
+# admin until you set your LOCAL Better Auth user.id here.
+# ADMIN_USER_IDS=
