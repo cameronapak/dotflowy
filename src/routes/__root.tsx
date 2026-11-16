@@ -37,6 +37,7 @@ import { TextSizeProvider } from "../components/text-size-provider";
 import { ThemeProvider } from "../components/theme-provider";
 import { Toaster } from "../components/ui/sonner";
 import { UpdateAvailableToast } from "../components/update-available";
+import { AdminAccessProvider } from "../data/admin-access";
 import { MembershipProvider } from "../data/membership";
 import { hardReset, useSession } from "../lib/auth-client";
 import { FAVICON_DARK, FAVICON_LIGHT } from "../lib/favicon";
@@ -269,10 +270,12 @@ function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
     <>
       <AmpFeedback userId={session.user.id} />
       <MembershipProvider>
-        <MembershipWelcome />
-        {children}
-        <MembershipDialog />
-        <FeedbackDialog />
+        <AdminAccessProvider>
+          <MembershipWelcome />
+          {children}
+          <MembershipDialog />
+          <FeedbackDialog />
+        </AdminAccessProvider>
       </MembershipProvider>
     </>
   );

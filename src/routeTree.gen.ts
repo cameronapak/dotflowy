@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NodeIdRouteImport } from './routes/$nodeId'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as DemoRouteImport } from './routes/demo'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as PrivacyRouteImport } from './routes/privacy'
@@ -19,6 +20,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ShareRouteImport } from './routes/share'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TodayRouteImport } from './routes/today'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminFeedbackRouteImport } from './routes/admin.feedback'
 import { Route as AdminRestoreRouteImport } from './routes/admin.restore'
 import { Route as AdminWaitlistRouteImport } from './routes/admin.waitlist'
@@ -31,6 +33,11 @@ const IndexRoute = IndexRouteImport.update({
 const NodeIdRoute = NodeIdRouteImport.update({
   id: '/$nodeId',
   path: '/$nodeId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DemoRoute = DemoRouteImport.update({
@@ -73,25 +80,31 @@ const TodayRoute = TodayRouteImport.update({
   path: '/today',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminFeedbackRoute = AdminFeedbackRouteImport.update({
-  id: '/admin/feedback',
-  path: '/admin/feedback',
-  getParentRoute: () => rootRouteImport,
+  id: '/feedback',
+  path: '/feedback',
+  getParentRoute: () => AdminRoute,
 } as any)
 const AdminRestoreRoute = AdminRestoreRouteImport.update({
-  id: '/admin/restore',
-  path: '/admin/restore',
-  getParentRoute: () => rootRouteImport,
+  id: '/restore',
+  path: '/restore',
+  getParentRoute: () => AdminRoute,
 } as any)
 const AdminWaitlistRoute = AdminWaitlistRouteImport.update({
-  id: '/admin/waitlist',
-  path: '/admin/waitlist',
-  getParentRoute: () => rootRouteImport,
+  id: '/waitlist',
+  path: '/waitlist',
+  getParentRoute: () => AdminRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/admin': typeof AdminRouteWithChildren
   '/demo': typeof DemoRoute
   '/mcp-consent': typeof McpConsentRoute
   '/privacy': typeof PrivacyRoute
@@ -103,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/admin/feedback': typeof AdminFeedbackRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
+  '/admin/': typeof AdminIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -118,11 +132,13 @@ export interface FileRoutesByTo {
   '/admin/feedback': typeof AdminFeedbackRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
+  '/admin': typeof AdminIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/$nodeId': typeof NodeIdRoute
+  '/admin': typeof AdminRouteWithChildren
   '/demo': typeof DemoRoute
   '/mcp-consent': typeof McpConsentRoute
   '/privacy': typeof PrivacyRoute
@@ -134,12 +150,14 @@ export interface FileRoutesById {
   '/admin/feedback': typeof AdminFeedbackRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
+  '/admin/': typeof AdminIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/$nodeId'
+    | '/admin'
     | '/demo'
     | '/mcp-consent'
     | '/privacy'
@@ -151,6 +169,7 @@ export interface FileRouteTypes {
     | '/admin/feedback'
     | '/admin/restore'
     | '/admin/waitlist'
+    | '/admin/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -166,10 +185,12 @@ export interface FileRouteTypes {
     | '/admin/feedback'
     | '/admin/restore'
     | '/admin/waitlist'
+    | '/admin'
   id:
     | '__root__'
     | '/'
     | '/$nodeId'
+    | '/admin'
     | '/demo'
     | '/mcp-consent'
     | '/privacy'
@@ -181,11 +202,13 @@ export interface FileRouteTypes {
     | '/admin/feedback'
     | '/admin/restore'
     | '/admin/waitlist'
+    | '/admin/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   NodeIdRoute: typeof NodeIdRoute
+  AdminRoute: typeof AdminRouteWithChildren
   DemoRoute: typeof DemoRoute
   McpConsentRoute: typeof McpConsentRoute
   PrivacyRoute: typeof PrivacyRoute
@@ -194,9 +217,6 @@ export interface RootRouteChildren {
   ShareRoute: typeof ShareRoute
   TermsRoute: typeof TermsRoute
   TodayRoute: typeof TodayRoute
-  AdminFeedbackRoute: typeof AdminFeedbackRoute
-  AdminRestoreRoute: typeof AdminRestoreRoute
-  AdminWaitlistRoute: typeof AdminWaitlistRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -213,6 +233,13 @@ declare module '@tanstack/react-router' {
       path: '/$nodeId'
       fullPath: '/$nodeId'
       preLoaderRoute: typeof NodeIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/demo': {
@@ -271,33 +298,57 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TodayRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/': {
+      id: '/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/feedback': {
       id: '/admin/feedback'
-      path: '/admin/feedback'
+      path: '/feedback'
       fullPath: '/admin/feedback'
       preLoaderRoute: typeof AdminFeedbackRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/admin/restore': {
       id: '/admin/restore'
-      path: '/admin/restore'
+      path: '/restore'
       fullPath: '/admin/restore'
       preLoaderRoute: typeof AdminRestoreRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/admin/waitlist': {
       id: '/admin/waitlist'
-      path: '/admin/waitlist'
+      path: '/waitlist'
       fullPath: '/admin/waitlist'
       preLoaderRoute: typeof AdminWaitlistRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminRoute
     }
   }
 }
 
+interface AdminRouteChildren {
+  AdminFeedbackRoute: typeof AdminFeedbackRoute
+  AdminRestoreRoute: typeof AdminRestoreRoute
+  AdminWaitlistRoute: typeof AdminWaitlistRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminFeedbackRoute: AdminFeedbackRoute,
+  AdminRestoreRoute: AdminRestoreRoute,
+  AdminWaitlistRoute: AdminWaitlistRoute,
+  AdminIndexRoute: AdminIndexRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   NodeIdRoute: NodeIdRoute,
+  AdminRoute: AdminRouteWithChildren,
   DemoRoute: DemoRoute,
   McpConsentRoute: McpConsentRoute,
   PrivacyRoute: PrivacyRoute,
@@ -306,9 +357,6 @@ const rootRouteChildren: RootRouteChildren = {
   ShareRoute: ShareRoute,
   TermsRoute: TermsRoute,
   TodayRoute: TodayRoute,
-  AdminFeedbackRoute: AdminFeedbackRoute,
-  AdminRestoreRoute: AdminRestoreRoute,
-  AdminWaitlistRoute: AdminWaitlistRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
