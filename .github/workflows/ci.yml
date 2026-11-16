@@ -170,11 +170,16 @@ jobs:
           retention-days: 7
 
   app-webkit:
-    # Every WebKit project, on the one runner that installs WebKit.
+    # Every WebKit project, on the two runners that install WebKit.
     # `check:e2e-lanes` proves this lane and the Chromium shards together run
-    # each app test exactly once.
+    # each app test exactly once. Playwright's `--shard` splits the lane in two.
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Not named `shard`: `check:e2e-lanes` reads the Chromium matrix by that name.
+        webkit_shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -190,17 +195,18 @@ jobs:
         run: |
           sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
           bunx playwright install --with-deps webkit
-      # One worker. With two, a WebKit spec typed while the page was still
-      # settling and a character landed out of order (run 43743181372).
+      # One worker. Two workers have five green runs here; raising it is its
+      # own measured change. The one failure seen at two was the editor race
+      # that ADR 0010 now records, which also failed at one worker.
       - name: App browser regression
-        run: bun run test:e2e:app:webkit --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
+        run: bun run test:e2e:app:webkit --shard=${{ matrix.webkit_shard }}/${{ strategy.job-total }} --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
       - name: Upload browser timings
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: app-test-timings-webkit
+          name: app-test-timings-webkit-${{ matrix.webkit_shard }}
           path: test-results/results.json
           if-no-files-found: ignore
           retention-days: 7
@@ -208,7 +214,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-failure-traces-webkit
+          name: e2e-failure-traces-webkit-${{ matrix.webkit_shard }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7

@@ -460,6 +460,18 @@ for (const collapsed of [undefined, false, true]) {
     await expect(text(page, "keepme")).toBeFocused();
     await page.keyboard.type("X");
     await expect(text(page, "keepme")).toHaveText("Xalpha");
+    // A field PATCH leaves a tick after its keystroke (ADR 0010). Reload only
+    // once the server store holds the edit, or the reload outruns the send.
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const nodes: { id: string; text: string }[] = await (
+            await fetch("/api/nodes")
+          ).json();
+          return nodes.find((node) => node.id === "keepme")?.text;
+        }),
+      )
+      .toBe("Xalpha");
     await page.reload();
     await text(page, "keepme").waitFor({ state: "visible" });
     await expect(text(page, "keepme")).toHaveText("Xalpha");
