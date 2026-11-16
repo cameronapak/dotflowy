@@ -331,8 +331,8 @@ browser.
   `--workers=2` only when the machine has spare capacity. Both suites default to
   one worker; `bun run test:e2e:serial` also explicitly pins the app worker count.
   Investigate contention failures rather than masking them with retries.
-  The app suite runs its own Vite
-  server on port 3210; kill a zombie or set `E2E_PORT`. For a caret, set the
+  The app suite builds and serves its own bundle
+  on port 3210; kill a zombie or set `E2E_PORT`. For a caret, set the
   Selection range directly. `toHaveText` normalizes whitespace.
 
 ### Test within a medium Orb's budget
@@ -358,11 +358,11 @@ prevent port collisions, not resource contention.
   `bun scripts/heavy-lane.ts bun test ./src/data/tree.test.ts` or
   `bun run test:e2e:app e2e/keyboard-nav.spec.ts`.
 - Keep the one-worker browser default. Each extra worker adds a test process
-  and a browser process tree alongside the shared Vite server. The real-Worker
+  and a browser process tree alongside the shared app server. The real-Worker
   suite already uses one worker, and `test:e2e` runs the two suites in sequence.
   CI sharding uses separate machines, not additional workers inside one Orb.
 - Stop idle development services before the full browser run. Playwright owns
-  its Vite server; the app fixtures mock the data API, and the real-Worker suite
+  its app server; the app fixtures mock the data API, and the real-Worker suite
   owns an isolated Miniflare runtime. Neither needs a separate `cf:dev` server.
   In an Orb, inspect `amp orb service list` and stop only services you own with
   `amp orb service stop <name>`.
@@ -444,16 +444,23 @@ lint through `bun run lint`; `lint:cli` is the focused local command.
 
 | Surface | Additional checks                                                                                                       | Runtime or fixtures                                                                                                                                                                                                 |
 | ------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Editor  | `bun run test:e2e:app e2e/<name>.spec.ts --workers=1`                                                                   | Playwright starts its own Vite development server on `E2E_PORT` (default 3210). [`e2e/fixtures.ts`](./e2e/fixtures.ts) mocks the data API.                                                                          |
+| Editor  | `bun run test:e2e:app e2e/<name>.spec.ts --workers=1`                                                                   | Playwright builds and serves a development-mode bundle on `E2E_PORT` (default 3210). [`e2e/fixtures.ts`](./e2e/fixtures.ts) mocks the data API.                                                                     |
 | CLI     | `bun run lint:cli`, `bun run build:cli`, `bun run typecheck:cli`, `bun run test:cli`, `bun run --cwd cli check:package` | Install `cli/` dependencies first with `bun install --cwd cli --frozen-lockfile`. Tests run the Node executable against loopback fixtures. The [live test](./cli/README.md#development-and-verification) is opt-in. |
 | Landing | `bun run --cwd landing typecheck`, `bun run --cwd landing build`                                                        | Install `landing/` dependencies first. Inspect the rendered change at desktop and mobile widths.                                                                                                                    |
 
-E2E tests run against Vite development mode. Quick-add's deferred-resolve tests
+E2E tests run against a development-mode bundle
+([ADR 0091](./docs/adr/0091-browser-suite-runs-against-a-bundle.md)).
+`scripts/e2e-bundle.ts` builds it once per run into
+`node_modules/.cache/e2e-bundle` and serves it; `dist/` is untouched. Set
+`E2E_SERVER=dev` to drive the Vite development server instead while you iterate
+on one spec. `import.meta.env.DEV` is true in both. A spec may import a source
+module inside the page by URL, such as `import("/src/data/history.ts")`; the
+bundle emits every `"/src/…"` path that appears in `e2e/*.ts`. Before you record
+a position to compare against later, call `outlineRevealed(page)`: the outline
+rises 4px as it replaces the skeleton. Quick-add's deferred-resolve tests
 hold the real Daily claim request through `holdDailyClaims` in the fixture;
-they do not require development-only app hooks. The committed Playwright config
-invokes the installed Vite entry point directly
-to avoid nested Bun script PATH failures. It rejects a busy port instead of
-adopting another checkout's server; set `E2E_PORT` for concurrent runs.
+they do not require development-only app hooks. The server rejects a busy port
+instead of adopting another checkout's server; set `E2E_PORT` for concurrent runs.
 
 ### Profile editor performance
 

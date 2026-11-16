@@ -12,6 +12,16 @@ const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const VITE = fileURLToPath(
   new URL("./node_modules/vite/bin/vite.js", import.meta.url),
 );
+const BUNDLE = fileURLToPath(
+  new URL("./scripts/e2e-bundle.ts", import.meta.url),
+);
+// The suite runs against a development-mode bundle (ADR 0091). `E2E_SERVER=dev`
+// drives the Vite development server instead, for a spec you are iterating on
+// against source you keep editing.
+const SERVER = process.env.E2E_SERVER ?? "bundle";
+if (SERVER !== "bundle" && SERVER !== "dev") {
+  throw new Error(`E2E_SERVER must be "bundle" or "dev", not "${SERVER}"`);
+}
 
 // Real Worker suites own their backend rather than using this Vite server.
 const REAL_WORKER_SPECS = "worker-browser/**";
@@ -84,7 +94,7 @@ export default defineConfig({
       use: { ...devices["iPhone 13"] },
     },
   ],
-  // Always boot our own Vite server, NEVER adopt one already on the port.
+  // Always boot our own server, NEVER adopt one already on the port.
   // `dev`/`dev:web` serve :3000, so the only thing that ever answers on this
   // port is another Playwright run -- a zombie from an aborted suite, or a
   // sibling worktree serving DIFFERENT source. Reusing either runs the tests
@@ -94,7 +104,11 @@ export default defineConfig({
   webServer: {
     // Use the installed entry point: Bun's nested script launch can lose .bin
     // from PATH in an orb.
-    command: `"${process.execPath}" "${VITE}" dev --port ${PORT} --strictPort`,
+    command:
+      SERVER === "dev"
+        ? `"${process.execPath}" "${VITE}" dev --port ${PORT} --strictPort`
+        : `bun "${BUNDLE}"`,
+    env: { E2E_PORT: String(PORT) },
     cwd: ROOT,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,
