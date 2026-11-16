@@ -39,6 +39,17 @@ closes for structural writes (see [ADR 0009: Atomic structural writes](./0009-at
   repaints; the echo only matches AFTER the local change has itself echoed. Reconciliation for the
   skipped case resumes on blur (`onBlur` re-reads the DOM).
 
+**A third race, found later: the superseded render.** The store-sync effect runs after a render,
+not with it. A keystroke can land between a render's commit and that render's effect. By then the
+DOM and the store hold the newer text, but the effect still holds the older text it rendered with.
+It repainted the DOM back to the older text, and the next render painted the newer text again with
+the caret one place back, so the rest of the word landed before the last typed character. A browser
+test caught it once in 48 runs on a loaded CI runner: typing `Keep #urg` produced `Kep #urge`. The
+effect now reads the store's current text (`getLiveNode`) and leaves the DOM alone when the store
+has already moved past its render; the newer render reconciles. `keepsFocusedDom` in
+`focused-repaint.ts` holds the three reasons a focused editor is not repainted, with a unit test
+for each.
+
 Rows and zoomed titles share that effect. History restoration bypasses the
 focused-echo guard. The title also retains its existing focused-prefix hold;
 rows do not, so local shrinks remain visible. Quick-add keeps its separate draft
