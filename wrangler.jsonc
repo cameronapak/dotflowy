@@ -39,13 +39,15 @@
   // knowing the value grants nothing — admin still requires signing IN as that
   // account. Fail-closed: neither var set = no admins.
   //
-  // ADMIN_USER_IDS (the pinned identity, #232) takes precedence: set it to the
-  // admin's Better Auth `user.id` (from the D1 `user` table) to CLOSE the
-  // register-the-admin-email-first path — when set, ADMIN_EMAILS is ignored.
-  // Left unset for now so ADMIN_EMAILS keeps working; flip it on once the id is
-  // confirmed (a wrong id locks admin until this line is fixed).
-  //   "ADMIN_USER_IDS": "<owner user.id>",
+  // ADMIN_USER_IDS (the pinned identity, #232) takes precedence: the admin's
+  // Better Auth `user.id` (from the D1 `user` table). It CLOSES the
+  // register-the-admin-email-first path; while it is set, ADMIN_EMAILS is
+  // ignored and stays only as the fallback if this line is removed. A wrong id
+  // locks admin until this line is fixed. Cam's id was read from production D1
+  // (one verified account for his email). Local admin testing: put your local
+  // user.id in .dev.vars ADMIN_USER_IDS, which overrides this var.
   "vars": {
+    "ADMIN_USER_IDS": "idRRaRzPaxcKYOYH5fqv79tB9G8PtUBt",
     "ADMIN_EMAILS": "cameronandrewpak@gmail.com",
     // Notification destination only; never grants admin access.
     "FEEDBACK_NOTIFICATION_EMAIL": "cameronandrewpak@gmail.com",
