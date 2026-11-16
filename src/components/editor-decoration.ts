@@ -2,7 +2,9 @@ import { useEffect, useRef, type RefObject } from "react";
 
 import { echoedTextFor } from "../data/collection";
 import { getHistoryState } from "../data/history";
+import { getLiveNode } from "../data/live-nodes";
 import { hasFoldingToken } from "../plugins/registry";
+import { keepsFocusedDom } from "./focused-repaint";
 import {
   decorate,
   getCaretOffset,
@@ -62,12 +64,17 @@ export function useStoredTextDecoration({
     if (!el || composingRef.current) return;
     if (syncedRef.current === node.text) return;
     const focused = document.activeElement === el;
-    if (focused && !getHistoryState().busy) {
-      if (echoedTextFor(node.id) === node.text) return;
-      if (keepFocusedPrefix) {
-        const dom = readSource(el);
-        if (dom !== node.text && dom.startsWith(node.text)) return;
-      }
+    if (
+      focused &&
+      !getHistoryState().busy &&
+      keepsFocusedDom({
+        rendered: node.text,
+        live: getLiveNode(node.id)?.text,
+        echoed: echoedTextFor(node.id),
+        heldDom: keepFocusedPrefix ? readSource(el) : null,
+      })
+    ) {
+      return;
     }
     decorate(el, node.text, focused ? getCaretOffset(el) : null, focused);
     syncedRef.current = node.text;

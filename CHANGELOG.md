@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.10.7
+
+### Patch Changes
+
+- 0254a0f: Fix typed characters landing out of order when a keystroke arrives while the page is busy.
+
 ## 3.10.6
 
 ### Patch Changes

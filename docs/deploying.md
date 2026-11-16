@@ -163,7 +163,7 @@ sessions in D1. Signup is **open** — `SIGNUP_OPEN="true"`, human-gated by
 where an account needs a code from the `INVITE_CODES` secret or a per-email
 invite; both stay valid as backdoors in every state, and the public
 `POST /api/waitlist` still collects emails (viewable by admins — the
-`ADMIN_EMAILS` var — at `/admin/waitlist`).
+`ADMIN_USER_IDS` var, or `ADMIN_EMAILS` when that is unset — at `/admin/waitlist`).
 
 The static shell is public so the login screen loads; only `/api/nodes` +
 `/api/kv` require a session. Set `BETTER_AUTH_SECRET`

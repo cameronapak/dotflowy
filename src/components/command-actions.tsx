@@ -1,4 +1,4 @@
-import { useParams } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { useMemo } from "react";
 
 import {
@@ -19,6 +19,7 @@ import {
   PlugIcon,
   PlusIcon,
   RedoIcon,
+  ShieldIcon,
   SparklesIcon,
   SunIcon,
   TextSizeIcon,
@@ -27,6 +28,7 @@ import {
 
 import type { CommandCenterAction } from "../data/command-center";
 
+import { useAdminAccess } from "../data/admin-access";
 import { useEditorFeatures } from "../data/editor-features";
 import { openFeedbackReport } from "../data/feedback";
 import { useMembership } from "../data/membership";
@@ -89,6 +91,9 @@ export function useGlobalActions(opts: {
   const rootId = useParams({ strict: false }).nodeId ?? null;
   const rootNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const history = useHistoryState();
+  const navigate = useNavigate();
+  const { access } = useAdminAccess();
+  const admin = access === "admin";
 
   return useMemo(() => {
     const a: CommandCenterAction[] = [
@@ -313,6 +318,18 @@ export function useGlobalActions(opts: {
       });
     }
 
+    // Only when the server says this session is an admin (ADR 0090).
+    if (admin)
+      a.push({
+        id: "g:admin",
+        label: "Open admin",
+        description: "Feedback inbox, waitlist, and user restore",
+        icon: ShieldIcon,
+        scope: "global",
+        keywords: ["admin", "feedback", "inbox", "waitlist", "restore"],
+        run: () => void navigate({ to: "/admin" }),
+      });
+
     a.push(
       {
         id: "g:mcp",
@@ -400,5 +417,7 @@ export function useGlobalActions(opts: {
     rootNode,
     openConnect,
     daily,
+    admin,
+    navigate,
   ]);
 }
