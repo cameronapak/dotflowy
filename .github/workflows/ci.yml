@@ -29,8 +29,10 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
           # `changeset status --since` diffs against the base branch, so the
-          # shallow default clone isn't enough.
+          # shallow default clone isn't enough. It compares paths, not file
+          # contents, so history arrives without its blobs.
           fetch-depth: 0
+          filter: blob:none
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -64,6 +66,10 @@ jobs:
       # to load. Enforced here rather than remembered.
       - name: Doc pointers
         run: bun run check:docs
+      # The app suite runs as lanes on separate runners. A Playwright project
+      # that matches no lane would stop running without failing anything.
+      - name: App browser lanes cover every test
+        run: bun run check:e2e-lanes
       # Every PR discloses what it changed, or says out loud that it changed
       # nothing worth telling anyone (`bunx changeset --empty`). A version bump
       # nobody trusts is worse than no version at all -- ADR 0046.
@@ -72,6 +78,23 @@ jobs:
         run: |
           git fetch --no-tags origin "$GITHUB_BASE_REF"
           bun run check:changeset
+
+  worker:
+    # The real-Worker browser suite needs nothing from checks. Its own runner
+    # keeps a browser install and a Miniflare run off the nonbrowser lane.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --frozen-lockfile
       - name: Install Worker browser
         run: |
           # Use the same mirror workaround as the app shards below.
@@ -90,7 +113,7 @@ jobs:
 
   app:
     # Independent runners need no output from checks. The quality gate below
-    # still requires both lanes, including failed or skipped prerequisites.
+    # still requires every lane, including failed or skipped prerequisites.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -109,14 +132,16 @@ jobs:
         with:
           bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
-      - name: Install test browsers
+      - name: Install Chromium
         run: |
           # Slow Azure mirror downloads can exhaust the job before tests start.
           # https://github.com/actions/runner-images/issues/14823
           sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
-          bunx playwright install --with-deps chromium webkit
+          # These shards run headless Chromium only. WebKit's 185 system
+          # packages install once, in the app-webkit job.
+          bunx playwright install --with-deps --only-shell chromium
       - name: App browser regression
-        run: bun run test:e2e:app --shard=${{ matrix.shard }}/${{ strategy.job-total }} --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
+        run: bun run test:e2e:app:chromium --shard=${{ matrix.shard }}/${{ strategy.job-total }} --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
       - name: Upload browser timings
@@ -136,14 +161,58 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  app-webkit:
+    # Every WebKit project, on the one runner that installs WebKit.
+    # `check:e2e-lanes` proves this lane and the Chromium shards together run
+    # each app test exactly once.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --frozen-lockfile
+      - name: Install WebKit
+        run: |
+          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          bunx playwright install --with-deps webkit
+      - name: App browser regression
+        run: bun run test:e2e:app:webkit --workers=1 --retries=0 --max-failures=1 --trace=retain-on-failure --reporter=github,json
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
+      - name: Upload browser timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-test-timings-webkit
+          path: test-results/results.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-traces-webkit
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Preserve the existing required check name. A skipped or failed prerequisite
   # must fail this gate, including when deployment calls the workflow.
   quality:
     if: always()
-    needs: [checks, app]
+    needs: [checks, worker, app, app-webkit]
     runs-on: ubuntu-latest
     steps:
       - name: Require every check and browser shard
         run: |
           test "${{ needs.checks.result }}" = success
+          test "${{ needs.worker.result }}" = success
           test "${{ needs.app.result }}" = success
+          test "${{ needs.app-webkit.result }}" = success
