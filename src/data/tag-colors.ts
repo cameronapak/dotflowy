@@ -115,7 +115,8 @@ export function clearTagColor(tag: string) {
  * The override stylesheet body: one rule per colored tag, keyed by `data-tag`
  * (case-insensitively, so any casing of the tag matches the lowercased key).
  * The doubled `[data-tag]` bumps specificity above the single-class default so
- * the fill wins. Invalid colors / unsafe tag names are skipped.
+ * the fill wins. Blend the chosen hue toward its surrounding highlight, or
+ * the page elsewhere. Invalid colors / unsafe tag names are skipped.
  */
 export function tagColorsCss(rows: TagColorRow[]): string {
   const lines: string[] = [];
@@ -123,7 +124,7 @@ export function tagColorsCss(rows: TagColorRow[]): string {
     const color = resolveTagColor(r.color);
     if (color && /^[\p{L}\p{N}_-]+$/u.test(r.tag)) {
       lines.push(
-        `[data-tag="${r.tag}" i][data-tag]{background:var(--tag-${color});color:var(--tag-${color}-fg);border-color:transparent}`,
+        `[data-tag="${r.tag}" i][data-tag]{background:color-mix(in oklab,var(--hue-${color}) var(--tag-fill-mix),var(--highlight-bg,var(--background)));color:oklch(from var(--tag-${color}-fg) var(--tag-ink-lightness,l) c h);border-color:transparent}`,
       );
     }
   }

@@ -108,6 +108,23 @@ function specForMatch(m: RegExpMatchArray): TokenSpec | null {
   return null;
 }
 
+/** One combined candidate scan, with optional balanced-token resolution.
+ * A private regex keeps recursive interior scans from moving the outer cursor. */
+export function* inlineTokenMatches(text: string, formattingOnly = false) {
+  const re = new RegExp(tokenRegex.source, tokenRegex.flags);
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const spec = specForMatch(m);
+    if (formattingOnly && !spec?.formatting) continue;
+    if (spec?.matchEnd) {
+      const end = spec.matchEnd(text, m.index);
+      if (end === null) continue;
+      m[0] = text.slice(m.index, end);
+      re.lastIndex = end;
+    }
+    yield m;
+  }
+}
+
 /** Render one matched token to its descriptor, dispatching to its plugin. A
  *  widget result is stamped with the token id (its component key) so the
  *  serializer can address the right `<dotflowy-widget>` component (ADR 0006). */

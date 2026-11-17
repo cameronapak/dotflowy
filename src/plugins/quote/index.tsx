@@ -35,6 +35,8 @@ import { definePlugin, type PluginContext, type TokenView } from "../types";
 import { QUOTE_FILTER_OPERATORS } from "./filter-operators";
 
 function renderMarker(tok: string, view: TokenView) {
+  // A recursive inline slice is not the start of the node's text.
+  if (view.start !== 0) return tok;
   if (isRevealed(view))
     return {
       tag: "span",

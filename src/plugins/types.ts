@@ -26,7 +26,7 @@ export type { FilterOperator } from "../data/filter-query";
 // A token plugin contributes a regex SOURCE FRAGMENT (not a standalone RegExp)
 // and a `render` that returns a declarative element descriptor, never an HTML
 // string. The core composes all fragments into ONE combined regex (one
-// `matchAll` pass, preserving the per-node hot path) and owns escaping +
+// `matchAll` pass per source slice, including opted-in interiors) and owns escaping +
 // serialization -- so a plugin can never hand the core raw HTML (D3/D6/D10).
 
 /**
@@ -48,7 +48,7 @@ export type El = string | ElNode;
 export interface ElNode {
   tag: string;
   attrs?: Record<string, string | number | boolean | undefined>;
-  children?: El[];
+  children?: (El | WidgetEl)[];
 }
 
 /** A JSON-serializable value. Widget props cross the contentEditable's innerHTML
@@ -106,6 +106,14 @@ export interface TokenView {
   revealOffset: number | null;
   start: number;
   end: number;
+  /** Decorate a strictly smaller interior slice with the same token registry.
+   *  `start` is its absolute source offset. Selection endpoints and caret
+   *  reveal remain source-based; strings are still escaped by the core. */
+  renderInline(
+    text: string,
+    start: number,
+    formattingOnly?: boolean,
+  ): (El | WidgetEl)[];
 }
 
 export interface TokenSpec {
@@ -117,6 +125,11 @@ export interface TokenSpec {
    * fragment in its own named group for dispatch. Internal groups are allowed.
    */
   pattern: string;
+  /** Resolve a candidate's full extent when balanced delimiters cannot be
+   * expressed by the regex alone. Null leaves the candidate as literal text. */
+  matchEnd?(source: string, start: number): number | null;
+  /** Safe inside a link label: formatting, not another navigation/control. */
+  formatting?: boolean;
   /**
    * Orders the alternation branch (lower = matched first on an overlapping
    * span). Today: links 0, code 10, tags 20 -- so a link's interior stays

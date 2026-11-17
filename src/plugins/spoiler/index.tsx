@@ -27,13 +27,20 @@ import { SpoilerIcon } from "@/lib/icons";
 import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
 import { SPOILER_PATTERN, spoilerInterior } from "../../data/spoiler";
 import { isRevealed, mdPunct } from "../token-kit";
-import { definePlugin, type El, type PluginContext } from "../types";
+import {
+  definePlugin,
+  type El,
+  type PluginContext,
+  type TokenView,
+} from "../types";
 
 const SPOILER_MARKER: MarkerPair = { pre: "||", post: "||" };
 
 // The at-rest opaque bar: `--spoiler` (muted-foreground in the default theme,
 // a primary blend in other color themes, ADR 0082) paints the whole run in a solid
-// mid-grey (a spoiler bar, deliberately NOT the harsh primary black) and
+// mid-grey (a spoiler bar, deliberately NOT the harsh primary black). Inside
+// highlights, blend the matching palette foreground toward the highlight fill
+// for a stronger colored bar that still belongs to its surrounding surface.
 // `text-transparent` hides the letters behind it, so the interior is present in
 // the DOM (selectable, and `data-src` carries the raw `||text||` so in-app
 // copy/export round-trip verbatim -- ADR 0043's human-egress row) but
@@ -45,10 +52,10 @@ const SPOILER_MARKER: MarkerPair = { pre: "||", post: "||" };
 // against the fences on BOTH edges when revealed (padding would inset the fence
 // and read as a phantom space on the left). `rounded` still softens the ends.
 const BAR_CLASS =
-  "md-spoiler bg-(--spoiler) text-transparent rounded-[0.25em] box-decoration-clone cursor-text";
+  "md-spoiler bg-(--spoiler) text-transparent rounded-[0.25em] box-decoration-clone cursor-text [.md-highlight_&]:bg-[color-mix(in_oklab,var(--highlight-fg)_90%,var(--highlight-bg))]";
 
 // The revealed container: no bar (the interior must be legible), the interior
-// in MUTED text, the dimmed `||` fences INSIDE it as real walk-through text (so
+// in readable inline ink, the dimmed `||` fences as real walk-through text (so
 // the caret steps through the fence one char at a time -- `||interior|` is
 // reachable), over a tint that matches the node-multi-selection slab (ADR 0018,
 // `oklch(from var(--primary) l c h / 0.1)` in styles.css) -- a 10% primary
@@ -56,7 +63,7 @@ const BAR_CLASS =
 // on the light page. Keyed by `.md-spoiler-reveal` so the exact from-color +
 // alpha lives in styles.css next to the selection slab it mirrors.
 const REVEAL_CLASS =
-  "md-spoiler-reveal text-muted-foreground rounded-[0.25em] box-decoration-clone";
+  "md-spoiler-reveal text-(--inline-ink) rounded-[0.25em] box-decoration-clone";
 
 // A folded run: one ATOMIC span skinned as the opaque bar. The bar's TEXT is the
 // FULL source `||text||` (rendered transparent behind the bar), NOT just the
@@ -85,12 +92,12 @@ function foldedSpoilerEl(tok: string): El {
 // interior INSIDE the still-tinted container (the code-box model). Nothing here
 // carries `data-src`, so readSource and the caret math treat the whole thing as
 // ordinary text -- the caret walks the fences one step at a time.
-function revealedSpoilerEl(interior: string): El {
+function revealedSpoilerEl(interior: string, view: TokenView): El {
   const fence = mdPunct("||");
   return {
     tag: "span",
     attrs: { class: REVEAL_CLASS, "data-spoiler-reveal": true },
-    children: [fence, interior, fence],
+    children: [fence, ...view.renderInline(interior, view.start + 2), fence],
   };
 }
 
@@ -108,11 +115,12 @@ export default definePlugin({
       pattern: SPOILER_PATTERN,
       precedence: 40,
       folds: true,
+      formatting: true,
       render: (tok, view) => {
         // Reveal iff the caret sits within or adjacent to the run (offset in
         // `[start, end]`, inclusive) -- the link/emphasis/code reveal rule.
         return isRevealed(view)
-          ? revealedSpoilerEl(spoilerInterior(tok))
+          ? revealedSpoilerEl(spoilerInterior(tok), view)
           : foldedSpoilerEl(tok);
       },
     },

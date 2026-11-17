@@ -25,7 +25,13 @@ import {
 } from "../../data/links";
 import { getTreeIndex } from "../../data/tree-store";
 import { isRevealed, mdPunct, resolveNodeId } from "../token-kit";
-import { definePlugin, type El, type PluginContext } from "../types";
+import {
+  definePlugin,
+  type El,
+  type PluginContext,
+  type TokenView,
+  type WidgetEl,
+} from "../types";
 import { LINK_FILTER_OPERATORS } from "./filter-operators";
 import {
   openLinkCreatePopover,
@@ -103,6 +109,7 @@ function foldedLinkEl(
   url: string,
   tok: string,
   plain = false,
+  labelElements: (El | WidgetEl)[] = [label],
 ): El {
   const host = plain ? null : linkHost(url);
   const start = label.match(/^\s*\S/u)?.[0] ?? label;
@@ -128,16 +135,19 @@ function foldedLinkEl(
           target: "_blank",
           rel: "noopener noreferrer",
         },
-        children: host
-          ? [
-              {
-                tag: "span",
-                attrs: { class: "link-start" },
-                children: [faviconImgEl(host), start],
-              },
-              label.slice(start.length),
-            ]
-          : [label],
+        children:
+          host && labelElements.length > 1
+            ? [faviconImgEl(host), ...labelElements]
+            : host
+              ? [
+                  {
+                    tag: "span",
+                    attrs: { class: "link-start" },
+                    children: [faviconImgEl(host), start],
+                  },
+                  label.slice(start.length),
+                ]
+              : labelElements,
       },
       editButtonEl(),
     ],
@@ -153,13 +163,17 @@ function foldedLinkEl(
 // between `]` and `(` breaks the token match -- the link splits open to raw
 // text. Clicking the chip opens the Edit Link popover. Everything except the
 // chip stays 1:1 with its slice of the source.
-function revealedLinkEl(label: string, url: string): El {
+function revealedLinkEl(label: string, url: string, view: TokenView): El {
   return {
     tag: "span",
     attrs: { class: "link-reveal", "data-link-reveal": true },
     children: [
       mdPunct("["),
-      { tag: "span", attrs: { class: "link-label" }, children: [label] },
+      {
+        tag: "span",
+        attrs: { class: "link-label" },
+        children: view.renderInline(label, view.start + 1, true),
+      },
       mdPunct("]"),
       mdPunct("("),
       {
@@ -202,7 +216,8 @@ function openEditFor(el: HTMLElement, ctx: PluginContext): void {
     const chip = el.closest<HTMLElement>(".link-url-chip");
     if (!chip) return;
     const reveal = chip.closest<HTMLElement>(".link-reveal");
-    const label = reveal?.querySelector(".link-label")?.textContent ?? "";
+    const labelEl = reveal?.querySelector<HTMLElement>(".link-label");
+    const label = labelEl ? readSource(labelEl) : "";
     token = `[${label}](${chip.getAttribute("data-src") ?? ""})`;
   }
   const parts = LINK_PARTS.exec(token);
@@ -325,8 +340,14 @@ export default definePlugin({
         const label = parts?.[1] ?? "";
         const url = parts?.[2] ?? "";
         return isRevealed(view)
-          ? revealedLinkEl(label, url)
-          : foldedLinkEl(label, url, tok);
+          ? revealedLinkEl(label, url, view)
+          : foldedLinkEl(
+              label,
+              url,
+              tok,
+              false,
+              view.renderInline(label, view.start + 1, true),
+            );
       },
     },
     {

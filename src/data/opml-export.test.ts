@@ -186,6 +186,45 @@ test.each<[string, string, string[], string[]?]>([
   for (const fragment of forbidden) expect(out).not.toContain(fragment);
 });
 
+test.each([
+  [
+    "_THIS **IS** ITALIC_",
+    "*THIS **IS** ITALIC*",
+    "&lt;i&gt;THIS &lt;b&gt;IS&lt;/b&gt; ITALIC&lt;/i&gt;",
+  ],
+  ["***both***", "***both***", "&lt;i&gt;&lt;b&gt;both&lt;/b&gt;&lt;/i&gt;"],
+  ["__bold__", "**bold**", "&lt;b&gt;bold&lt;/b&gt;"],
+  [
+    "~~done **bold**~~",
+    "~~done **bold**~~",
+    "&lt;s&gt;done &lt;b&gt;bold&lt;/b&gt;&lt;/s&gt;",
+  ],
+  [
+    "==**bright**==",
+    "==**bright**==",
+    "&lt;mark class=&quot;colored bc-sky&quot;&gt;&lt;b&gt;bright&lt;/b&gt;&lt;/mark&gt;",
+  ],
+  [
+    "[**bold** _italic_](https://e.test)",
+    "[**bold** *italic*](https://e.test)",
+    "&lt;a href=&quot;https://e.test&quot;&gt;&lt;b&gt;bold&lt;/b&gt; &lt;i&gt;italic&lt;/i&gt;&lt;/a&gt;",
+  ],
+  [
+    "`***literal*** __literal__`",
+    "`***literal*** __literal__`",
+    "&lt;code&gt;***literal*** __literal__&lt;/code&gt;",
+  ],
+])(
+  "nested formatting exports and round-trips: %s",
+  (source, canonical, html) => {
+    const out = exportNodes([createNode({ id: "a", text: source })]);
+    expect(out).toContain(html);
+    const { forest, report } = reimport(out);
+    expect(forest[0]!.text).toBe(canonical);
+    expect(report.degradedTotal).toBe(0);
+  },
+);
+
 test("inline projection: node links become app URLs labeled with flattened target text", () => {
   const targetId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
   const out = exportNodes([

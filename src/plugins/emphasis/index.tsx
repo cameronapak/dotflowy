@@ -10,13 +10,11 @@
 // so `readSource` and the source-offset caret math in inline-code.ts already
 // handle it with ZERO new machinery (they key on `data-src`).
 //
-// v1 is FLAT: no nesting, no `***bold+italic***`. Italic accepts BOTH `*x*` and
-// `_x_` -- the underscore form is a render-only token folding to the SAME `<em>`
-// (creation via /italic + Cmd+I still emits `*`); it is intraword-guarded so
-// `snake_case` stays literal. An unmatched or nested attempt renders as literal
-// text. See ADR 0025.
+// Balanced delimiters support recursive styles, underscore aliases, and
+// shared bold/italic fences. Intraword underscores and unmatched syntax stay
+// literal. Commands keep canonical spellings. See ADR 0025.
 //
-// Pure logic (patterns, strip, marker length) lives in src/data/emphasis.ts.
+// Pure delimiter scanning and reading-text stripping live in data/emphasis.ts.
 //
 // Seams contributed: A (folding tokens), C (slash commands), D (keymap).
 
@@ -28,20 +26,14 @@ import {
 } from "@/lib/icons";
 
 import { type MarkerPair, toggleWrapSelection } from "../../components/wrap";
-import {
-  BOLD_PATTERN,
-  emphasisMarkerLen,
-  ITALIC_PATTERN,
-  ITALIC_UNDERSCORE_PATTERN,
-  STRIKETHROUGH_PATTERN,
-  UNDERLINE_PATTERN,
-} from "../../data/emphasis";
+import { EMPHASIS_PATTERN, emphasisAt } from "../../data/emphasis";
 import { isRevealed, mdPunct } from "../token-kit";
 import {
   definePlugin,
   type El,
   type PluginContext,
   type TokenView,
+  type WidgetEl,
 } from "../types";
 
 /** The four marker pairs. Keys match the slash-command ids and the keymap
@@ -62,10 +54,6 @@ type Kind = keyof typeof MARKERS;
 interface EmphasisKind {
   kind: Kind;
   id: string;
-  pattern: string;
-  // Lower precedence wins the alternation on overlap. `**` must beat `*`, `~~`
-  // must beat `~`, so bold/strike are < italic/underline.
-  precedence: number;
   tag: "em" | "strong" | "del" | "u";
   /** Semantic hook class (`md-bold` …), kept stable for selectors. */
   class: string;
@@ -84,8 +72,6 @@ const KINDS: readonly EmphasisKind[] = [
   {
     kind: "bold",
     id: "emphasis-bold",
-    pattern: BOLD_PATTERN,
-    precedence: 30,
     tag: "strong",
     class: "md-bold",
     util: "font-bold",
@@ -97,11 +83,9 @@ const KINDS: readonly EmphasisKind[] = [
   {
     kind: "strike",
     id: "emphasis-strike",
-    pattern: STRIKETHROUGH_PATTERN,
-    precedence: 31,
     tag: "del",
     class: "md-strike",
-    util: "line-through",
+    util: "line-through [--inline-strike:line-through]",
     label: "Strikethrough",
     description: "Wrap in ~~strikethrough~~",
     icon: StrikethroughIcon,
@@ -110,8 +94,6 @@ const KINDS: readonly EmphasisKind[] = [
   {
     kind: "italic",
     id: "emphasis-italic",
-    pattern: ITALIC_PATTERN,
-    precedence: 32,
     tag: "em",
     class: "md-italic",
     util: "italic",
@@ -123,11 +105,9 @@ const KINDS: readonly EmphasisKind[] = [
   {
     kind: "underline",
     id: "emphasis-underline",
-    pattern: UNDERLINE_PATTERN,
-    precedence: 33,
     tag: "u",
     class: "md-underline",
-    util: "underline",
+    util: "underline [--inline-underline:underline]",
     label: "Underline",
     description: "Wrap in ~underline~ (Bear-style)",
     icon: UnderlineIcon,
@@ -143,7 +123,7 @@ const KINDS: readonly EmphasisKind[] = [
 // the caret touches an edge and the token reveals.
 function foldedEmphasisEl(
   kind: EmphasisKind,
-  interior: string,
+  interior: (El | WidgetEl)[],
   tok: string,
 ): El {
   return {
@@ -158,7 +138,7 @@ function foldedEmphasisEl(
       "data-src": tok,
       "data-src-len": tok.length,
     },
-    children: [interior],
+    children: interior,
   };
 }
 
@@ -171,7 +151,7 @@ function foldedEmphasisEl(
 // syntax scaffolding, not slanted/bold content.
 function revealedEmphasisEl(
   kind: EmphasisKind,
-  interior: string,
+  interior: (El | WidgetEl)[],
   marker: string,
 ): El {
   return {
@@ -182,68 +162,40 @@ function revealedEmphasisEl(
       {
         tag: kind.tag,
         attrs: { class: `${kind.class} ${kind.util}` },
-        children: [interior],
+        children: interior,
       },
       mdPunct(marker),
     ],
   };
 }
 
-// Split a matched run into its marker char-run and interior. Every pattern uses
-// the same marker char on both edges with equal length (1 for italic/underline,
-// 2 for bold/strike), so the leading run of `tok[0]` IS the marker.
-function partsOf(tok: string) {
-  const len = emphasisMarkerLen(tok);
-  return {
-    marker: tok.slice(0, len),
-    interior: tok.slice(len, tok.length - len),
-  };
-}
-
-// Render one emphasis run of `kind` to its folded or revealed El. Shared by the
-// four canonical `*`/`~` tokens and the render-only `_x_` italic variant (which
-// reuses the italic kind), so the fold/reveal rule lives in exactly one place.
-// Reveal iff the caret sits within or adjacent to the run (offset in
-// `[start, end]`, boundaries inclusive so you can arrow/click in from either
-// edge) -- mirrors the link reveal rule verbatim.
-function renderEmphasis(kind: EmphasisKind, tok: string, view: TokenView): El {
-  const { marker, interior } = partsOf(tok);
+// Balanced delimiters choose the outer kind; its smaller interior reuses the
+// registry, so inner formatting keeps its own absolute source/caret offsets.
+function renderEmphasis(tok: string, view: TokenView): El {
+  const run = emphasisAt(tok, 0)!;
+  const kind = KINDS.find((entry) => entry.kind === run.kind)!;
+  const width = run.marker.length;
+  const interior = view.renderInline(
+    tok.slice(width, -width),
+    view.start + width,
+  );
   return isRevealed(view)
-    ? revealedEmphasisEl(kind, interior, marker)
+    ? revealedEmphasisEl(kind, interior, run.marker)
     : foldedEmphasisEl(kind, interior, tok);
 }
-
-// The italic kind, reused by the underscore-italic token (same `<em>`, class,
-// util) -- there is no separate underscore semantic.
-const ITALIC_KIND = KINDS.find((k) => k.kind === "italic")!;
 
 export default definePlugin({
   id: "emphasis",
 
-  // Seam A: four FOLDING tokens, composed into the one combined regex. `folds`
-  // opts them into the core's caret-reveal fast path (hasFoldingToken), so the
-  // per-line watcher re-decorates as the caret crosses a run's edge -- the same
-  // mechanism the rich link uses.
   tokens: [
-    ...KINDS.map((kind) => ({
-      id: kind.id,
-      pattern: kind.pattern,
-      precedence: kind.precedence,
-      folds: true,
-      render: (tok: string, view: TokenView) => renderEmphasis(kind, tok, view),
-    })),
-    // The underscore italic form (`_x_`) -- a render-only token folding to the
-    // SAME `<em>` as `*x*` (reuses ITALIC_KIND). No leading-char overlap with
-    // the `*`/`~` runs, so its precedence only needs to be distinct (34, after
-    // underline). No slash command / keymap: `_` is an alternative INPUT syntax,
-    // not a second italic semantic (creation stays `*` via /italic + Cmd+I).
     {
-      id: "emphasis-italic-underscore",
-      pattern: ITALIC_UNDERSCORE_PATTERN,
-      precedence: 34,
+      id: "emphasis",
+      pattern: EMPHASIS_PATTERN,
+      matchEnd: (source, start) => emphasisAt(source, start)?.end ?? null,
+      precedence: 30,
       folds: true,
-      render: (tok: string, view: TokenView) =>
-        renderEmphasis(ITALIC_KIND, tok, view),
+      formatting: true,
+      render: renderEmphasis,
     },
   ],
 

@@ -28,34 +28,43 @@ import {
   type HighlightColor,
 } from "../../data/highlight";
 import { isRevealed, mdPunct, resolveNodeId } from "../token-kit";
-import { definePlugin, type El, type PluginContext } from "../types";
+import {
+  definePlugin,
+  type El,
+  type PluginContext,
+  type TokenView,
+} from "../types";
 import { HIGHLIGHT_FILTER_OPERATORS } from "./filter-operators";
 import { openHighlightColorMenu } from "./highlight-color-menu";
 
 const HIGHLIGHT_MARKER = { pre: "==", post: "==" };
 
-// Literal per-color Tailwind utilities (arbitrary values over the tag palette
-// vars) so the content scan emits every class. `text-inherit` neutralizes the
-// UA's `color: marktext` (which could go black-on-dark); the pastel/dark
-// `--tag-*` pair already carries the light/dark split.
+// Literal per-color utilities so the content scan emits every class. Share
+// the fill with inner chips and its matching ink with concealed spoilers.
+// `text-inherit` neutralizes the UA's `color: marktext` (black-on-dark);
+// the `--tag-*` palette already carries the light/dark split.
 const COLOR_CLASS = {
-  red: "bg-[var(--tag-red)]",
-  orange: "bg-[var(--tag-orange)]",
-  yellow: "bg-[var(--tag-yellow)]",
-  green: "bg-[var(--tag-green)]",
-  blue: "bg-[var(--tag-blue)]",
-  purple: "bg-[var(--tag-purple)]",
+  red: "[--highlight-bg:var(--tag-red)] [--highlight-fg:var(--tag-red-fg)]",
+  orange:
+    "[--highlight-bg:var(--tag-orange)] [--highlight-fg:var(--tag-orange-fg)]",
+  yellow:
+    "[--highlight-bg:var(--tag-yellow)] [--highlight-fg:var(--tag-yellow-fg)]",
+  green:
+    "[--highlight-bg:var(--tag-green)] [--highlight-fg:var(--tag-green-fg)]",
+  blue: "[--highlight-bg:var(--tag-blue)] [--highlight-fg:var(--tag-blue-fg)]",
+  purple:
+    "[--highlight-bg:var(--tag-purple)] [--highlight-fg:var(--tag-purple-fg)]",
 } satisfies Record<HighlightColor, string>;
 
 const MARK_CLASS =
-  "md-highlight text-inherit rounded-[0.25em] px-[0.2em] box-decoration-clone";
+  "md-highlight [--tag-ink-lightness:var(--highlight-tag-ink-lightness)] bg-(--highlight-bg) text-inherit rounded-[0.25em] px-[0.2em] box-decoration-clone";
 
 // A folded run: one ATOMIC `<mark>` -- fences and color emoji hidden, the full
 // source in `data-src`/`data-src-len` (the generic atom shape of ADR 0005, so
 // the core's readSource and caret helpers handle it unchanged). `data-highlight`
 // carries the color name for the Seam-B recolor selector and e2e.
-function foldedHighlightEl(tok: string): El {
-  const { color, interior } = parseHighlight(tok);
+function foldedHighlightEl(tok: string, view: TokenView): El {
+  const { color, emoji, interior } = parseHighlight(tok);
   return {
     tag: "mark",
     attrs: {
@@ -65,7 +74,10 @@ function foldedHighlightEl(tok: string): El {
       "data-src": tok,
       "data-src-len": tok.length,
     },
-    children: [interior],
+    children: view.renderInline(
+      interior,
+      view.start + 2 + (emoji?.length ?? 0),
+    ),
   };
 }
 
@@ -79,7 +91,7 @@ function foldedHighlightEl(tok: string): El {
 // yields `==🔴urgent==` while the editor shows only `==urgent==` behind a
 // pen. Backspacing the pen atom deletes the emoji -> de-colors the run. On a
 // bare (default-color) run the pen carries no source and is caret-invisible.
-function revealedHighlightEl(tok: string): El {
+function revealedHighlightEl(tok: string, view: TokenView): El {
   const { color, emoji, interior } = parseHighlight(tok);
   const pen: El = {
     tag: "span",
@@ -99,24 +111,31 @@ function revealedHighlightEl(tok: string): El {
       "data-highlight": color,
       "data-highlight-reveal": true,
     },
-    children: [mdPunct("=="), pen, interior, mdPunct("==")],
+    children: [
+      mdPunct("=="),
+      pen,
+      ...view.renderInline(interior, view.start + 2 + (emoji?.length ?? 0)),
+      mdPunct("=="),
+    ],
   };
 }
 
 export default definePlugin({
   id: "highlight",
 
-  // Seam A: one folding token. Precedence 35 sits after the emphasis block
-  // (30-34, incl. underscore-italic at 34); `=` shares a leading char with
-  // nothing, so there's no double-vs-single coupling to order around.
+  // Seam A: one folding token. Precedence 35 follows balanced emphasis (30).
+  // `=` shares a leading char with no other token.
   tokens: [
     {
       id: "highlight",
       pattern: HIGHLIGHT_PATTERN,
       precedence: 35,
       folds: true,
+      formatting: true,
       render: (tok, view) =>
-        isRevealed(view) ? revealedHighlightEl(tok) : foldedHighlightEl(tok),
+        isRevealed(view)
+          ? revealedHighlightEl(tok, view)
+          : foldedHighlightEl(tok, view),
     },
   ],
 
@@ -125,9 +144,8 @@ export default definePlugin({
   // the run itself; its mousedown blocks the caret so the tap doesn't move
   // the selection. Right-click anywhere on a highlight (folded atom OR
   // revealed run) opens the same menu. The folded atom carries the run in
-  // `data-src`; a revealed mark's textContent IS the source slice (fences +
-  // emoji + interior are all real text inside it; the pen contributes
-  // nothing), so both resolve to the same verbatim token.
+  // `data-src`; readSource reconstructs a revealed mark from its fences,
+  // the pen's hidden emoji, and any folded inner tokens.
   interactions: [
     {
       selector: ".highlight-pen-icon",

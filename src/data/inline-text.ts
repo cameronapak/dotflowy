@@ -7,9 +7,7 @@
 // < spoiler 40, ADR 0025) -- search/display must read a run exactly as the
 // editor draws it:
 //
-//   1. Dates + links flatten across the WHOLE string first (they outrank code):
-//      `[[2026-07-08]]` -> its label, `[label](url)` -> `label`.
-//   2. Code runs then SHIELD their interior (`stripCodeShielded`): the emphasis,
+//   1. Code runs SHIELD their interior (`stripCodeShielded`): the emphasis,
 //      highlight and spoiler strips run over the text with every code interior
 //      masked out, so a code chip reading `` `**x**` `` flattens to `**x**`, NOT
 //      `x`. An emphasis run WRAPPING code is still stripped (`` **`code`** `` ->
@@ -44,8 +42,7 @@ function stripMarkup(text: string): string {
  *  the markers -- see the module header). Markup-free text passes through
  *  untouched. */
 export function flattenInline(text: string, today?: string): string {
-  return stripCodeShielded(
-    stripLinks(flattenDateLinks(stripQuoteMarker(text), today)),
-    stripMarkup,
+  return stripCodeShielded(stripQuoteMarker(text), (masked) =>
+    stripMarkup(stripLinks(flattenDateLinks(masked, today))),
   );
 }

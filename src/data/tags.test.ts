@@ -31,6 +31,24 @@ test("parseTags bails without a # and deduplicates tagged text", () => {
   expect(parseTags("#alpha #beta #alpha")).toEqual(["#alpha", "#beta"]);
 });
 
+test.each([
+  ["**#discipleship**", ["#discipleship"]],
+  ["==#discipleship==", ["#discipleship"]],
+  ["==🔴#discipleship==", ["#discipleship"]],
+  ["__#discipleship__", ["#discipleship"]],
+  ["_#discipleship_", ["#discipleship"]],
+  ["~~#discipleship~~", ["#discipleship"]],
+  ["~#discipleship~", ["#discipleship"]],
+  ["||**#discipleship**||", ["#discipleship"]],
+  ["word==#discipleship==", ["#discipleship"]],
+  ["word**#discipleship**", []],
+  ["**#foo_bar** #foo_bar", ["#foo_bar"]],
+  ["word#not-a-tag", []],
+  ["`#literal` [#label](https://example.com/#fragment)", []],
+] as const)("format-aware tags in %s", (source, expected) => {
+  expect(parseTags(source)).toEqual([...expected]);
+});
+
 test("tagCorpus collects distinct case-folded tags, counting tagged nodes", () => {
   const tree = index([
     createNode({ id: "1", text: "#alpha #beta" }),

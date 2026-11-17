@@ -1,6 +1,6 @@
 # Highlights: color lives in the text, as an emoji
 
-A highlight -- `==text==` -- is parsed from `node.text` (no schema field, no migration) and rendered as the fifth **folding token**, reusing the emphasis model ([ADR 0025](./0025-inline-emphasis.md)) verbatim: folded, the fences hide and the run is one atomic `<mark data-src="==text==">`; revealed (caret within/adjacent), the `==` fences are real, dimmed `.md-punct` walk-through text rendered INSIDE the still-painted `<mark>` -- the inline-code model (ADR 0025: fences live within the box when a token has a visible container), not emphasis's flanking markers. `==` is the de facto markdown highlight markup (Bear, Obsidian, Typora -- not CommonMark, but the form that round-trips), and `=` shares a leading char with no other token, so it slots in at precedence 35 (after emphasis's 30-34, which now includes the underscore-italic alias at 34) with no `**`/`*`-style coupling.
+A highlight -- `==text==` -- is parsed from `node.text` (no schema field, no migration) and rendered as the fifth **folding token**, reusing the emphasis model ([ADR 0025](./0025-inline-emphasis.md)) verbatim: folded, the fences hide and the run is one atomic `<mark data-src="==text==">`; revealed (caret within/adjacent), the `==` fences are real, dimmed `.md-punct` walk-through text rendered INSIDE the still-painted `<mark>` -- the inline-code model (ADR 0025: fences live within the box when a token has a visible container), not emphasis's flanking markers. `==` is the de facto markdown highlight markup (Bear, Obsidian, Typora -- not CommonMark, but the form that round-trips), and `=` shares a leading char with no other token, so it slots in at precedence 35 (after balanced emphasis at 30) with no `**`/`*`-style coupling.
 
 **The decision: color is encoded IN the source, as a leading circle emoji.** `==🔴urgent==` is a red highlight; the palette is the six tag colors that have a circle emoji (🔴 red, 🟠 orange, 🟡 yellow, 🟢 green, 🔵 blue, 🟣 purple), and a bare run defaults to **blue** (Cam's call). The emoji is **never displayed** -- it's an export/interchange encoding, not editor chrome. Folded, the interior renders without it while `data-src` carries the full run, so `readSource` and the caret math need zero new machinery. Revealed, the **pen affordance is the emoji's atom** (`data-src` = the emoji -- the revealed link's url-chip pattern, ADR 0005): the editor shows `==urgent==` behind a pen while copy/export still round-trips `==🔴urgent==`, and backspacing the pen atom deletes the emoji, de-coloring the run. This is Lettera/Bear's trick, chosen for one reason: **the markdown is self-describing when pasted anywhere.** Obsidian shows a highlight with a visible color dot; plain text still says which color it was. The color travels with the text -- across apps, across copy/paste, across the MCP surface -- with no sidecar to lose.
 
@@ -13,8 +13,34 @@ A highlight -- `==text==` -- is parsed from `node.text` (no schema field, no mig
 **Don't:**
 
 - Store highlight color anywhere but the source text. No side-collection, no `Node` field.
-- Put `data-src` on the revealed mark -- `readSource` keys on it and would treat the revealed run as an atom, breaking the walk-through caret. The revealed state must stay pure real text (the recolor menu reconstructs the token from the revealed mark's `textContent`, which IS the source slice).
+- Put `data-src` on the revealed mark -- `readSource` keys on it and would treat the revealed run as an atom, breaking the walk-through caret. Read its contents through `readSource`, not `textContent`: the pen and folded inner tokens carry hidden source.
 - Add an emoji outside the fixed map to the color slot -- `==🎉party==` is a default-color highlight of "🎉party", by design (the pattern's class is the palette, nothing else).
 - "Complete" the palette with heart/square emojis without accepting the mixed-glyph cost consciously.
+
+## November 17 amendment: inline formatting inside highlights
+
+Highlights opt into recursive inline decoration of their interior through
+`TokenView.renderInline(text, start)`. The core reuses the same combined token
+scan on that smaller source slice and keeps escaping and serialization.
+The later mixed-formatting amendment in [ADR 0025](./0025-inline-emphasis.md)
+extends this to emphasis, revealed spoilers, and formatting-only link labels.
+Code interiors and concealed spoilers remain opaque.
+
+Both folded and revealed highlights render inner emphasis, code, links, and
+other registered inline tokens. A folded highlight remains one source atom;
+revealing it lets inner tokens fold and reveal at their own absolute source
+positions. The interior starts after the opening fence and optional color
+emoji, counted in UTF-16 units. Selection endpoints use the same absolute
+positions, so an inner endpoint stays editable. Recoloring reads `readSource`,
+not visible text, preserving hidden inner markers and the color emoji.
+No stored text or caret-math format changes. Code interiors remain literal.
+The mark exposes its palette fill as `--highlight-bg` so an inner Bible chip
+can paint its whole pill with the same color, including on hover. It also
+exposes the matching palette ink as `--highlight-fg` for folded spoilers.
+Node-anchored syntax still uses absolute positions: `> ` inside a highlight
+is literal text, not a quote marker. Decoration comparison treats nested
+widget hosts as opaque leaves, preserving mounted chips when their containing
+highlight is unchanged by an edit elsewhere in the node.
+Regression coverage lives in `e2e/highlight.spec.ts`.
 
 The interior rule mirrors emphasis (`[^=\n]+`, no `=`; liberal edge spaces -- `a == b == c` highlights `== b ==`, the same over-match class `**` already accepts). Search + display flatten through `flattenInline`, now `stripEmphasis ∘ stripHighlights ∘ stripLinks`. Covered by `src/data/highlight.test.ts` (pattern/parse/build/strip) and `e2e/highlight.spec.ts` (fold, emoji hiding, reveal, creation, recolor).

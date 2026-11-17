@@ -28,23 +28,125 @@ async function caretAtSource(page: Page, id: string, target: number) {
   await placeCaret(text(page, id), target);
 }
 
-test("a bare highlight folds, reveals at the caret, and refolds on blur", async ({
+test("a bare highlight keeps inner > literal while folding and revealing", async ({
   page,
 }) => {
   await load(page, [
-    { id: "n", parentId: null, prevSiblingId: null, text: "a ==hi== b" },
+    { id: "n", parentId: null, prevSiblingId: null, text: "a ==> hi== b" },
     { id: "plain", parentId: null, prevSiblingId: "n", text: "plain" },
   ]);
-  await expect(mark(page, "n")).toHaveText("hi");
+  await expect(mark(page, "n")).toHaveText("> hi");
   await expect(mark(page, "n")).toHaveAttribute("data-highlight", "blue");
-  await expect(mark(page, "n")).toHaveAttribute("data-src", "==hi==");
+  await expect(mark(page, "n")).toHaveAttribute("data-src", "==> hi==");
   await expect(mark(page, "n")).toHaveAttribute("contenteditable", "false");
-  await expect.poll(() => text(page, "n").textContent()).toBe("a hi b");
+  await expect.poll(() => text(page, "n").textContent()).toBe("a > hi b");
 
-  await caretAtSource(page, "n", 8);
-  await expect.poll(() => text(page, "n").textContent()).toBe("a ==hi== b");
+  await caretAtSource(page, "n", 10);
+  await expect.poll(() => text(page, "n").textContent()).toBe("a ==> hi== b");
   await text(page, "plain").click();
-  await expect.poll(() => text(page, "n").textContent()).toBe("a hi b");
+  await expect.poll(() => text(page, "n").textContent()).toBe("a > hi b");
+});
+
+test("formatting inside a highlight survives editing, recoloring, and reload", async ({
+  page,
+}) => {
+  const source =
+    "before ==🔴More mature Christian *(Closer towards God)* **bold** ~~strike~~ ~underline~ _italic_ `*literal*` [link](https://example.com) #discipleship John 3:16 ||hidden text||== after";
+  await load(page, [
+    {
+      id: "n",
+      parentId: null,
+      prevSiblingId: null,
+      text: source,
+    },
+    { id: "plain", parentId: null, prevSiblingId: "n", text: "plain" },
+  ]);
+  const highlight = mark(page, "n");
+  await expect(highlight.locator("em")).toHaveText([
+    "(Closer towards God)",
+    "italic",
+  ]);
+  await expect(highlight.locator("strong")).toHaveText("bold");
+  await expect(highlight.locator("del")).toHaveText("strike");
+  await expect(highlight.locator("u")).toHaveText("underline");
+  await expect(highlight.locator("code")).toHaveText("*literal*");
+  await expect(highlight.locator("code em")).toHaveCount(0);
+  await expect(highlight.locator("a")).toHaveText("link");
+  await expect(highlight.locator('[data-tag="discipleship"]')).toHaveText(
+    "#discipleship",
+  );
+  const bibleChip = highlight.locator("[data-bible-ref]");
+  await expect(bibleChip).toHaveText("John 3:16");
+  await expect(bibleChip.locator("svg")).toHaveCount(2);
+  await expect(bibleChip).toHaveAttribute(
+    "data-href",
+    "https://route.bible/jhn.3.16?src=dotflowy",
+  );
+
+  // Typing outside the highlight must not remount its unchanged React chip.
+  const mountedChip = await bibleChip.elementHandle();
+  await caretAtSource(page, "n", source.length);
+  await page.keyboard.type("!");
+  await expect(text(page, "n")).toHaveAttribute("aria-label", `${source}!`);
+  expect(await mountedChip!.evaluate((el) => el.isConnected)).toBe(true);
+
+  // Enter from the atom's edge, then put the caret inside the italic run.
+  await caretAtSource(page, "n", 7);
+  await expect(highlight).toHaveAttribute("data-highlight-reveal", "");
+  await caretAtSource(page, "n", 35);
+  await expect(highlight.locator("em").first()).not.toHaveAttribute(
+    "data-src",
+    /.*/,
+  );
+  await caretAtSource(page, "n", 35);
+  await page.keyboard.type("nearer ");
+  await text(page, "plain").click();
+  await expect(highlight.locator("em").first()).toHaveText(
+    "(nearer Closer towards God)",
+  );
+
+  // Recolor through the revealed pen while inner tokens are folded. Reading
+  // visible text here would lose their markers.
+  await caretAtSource(page, "n", 7);
+  await highlight.locator(".highlight-pen-icon").click();
+  await page
+    .locator("[data-highlight-menu]")
+    .getByRole("menuitemradio", { name: "green" })
+    .click();
+  await expect(highlight).toHaveAttribute("data-highlight", "green");
+  await expect(highlight).toHaveAttribute(
+    "data-src",
+    "==🟢More mature Christian *(nearer Closer towards God)* **bold** ~~strike~~ ~underline~ _italic_ `*literal*` [link](https://example.com) #discipleship John 3:16 ||hidden text||==",
+  );
+  await page.reload();
+  await expect(text(page, "plain")).toBeVisible();
+  await expect(highlight.locator("em").first()).toHaveText(
+    "(nearer Closer towards God)",
+  );
+  await expect(highlight).toHaveAttribute("data-highlight", "green");
+  await expect(highlight.locator("[data-spoiler]")).toHaveText(
+    "||hidden text||",
+  );
+  await caretAtSource(page, "n", 7);
+  // The earlier edit inserted seven source characters before the spoiler.
+  const spoilerOffset = source.indexOf("||hidden text||") + 7 + 2;
+  await caretAtSource(page, "n", spoilerOffset);
+  await expect(highlight.locator("[data-spoiler-reveal]")).toHaveText(
+    "||hidden text||",
+  );
+  await text(page, "plain").click();
+  await expect(highlight.locator("[data-spoiler]")).toHaveText(
+    "||hidden text||",
+  );
+  await expect(bibleChip.locator("svg")).toHaveCount(2);
+  await bibleChip.click({ button: "right" });
+  await expect(page.getByRole("combobox", { name: "Passage" })).toHaveValue(
+    "John 3:16",
+  );
+  await page.keyboard.press("Escape");
+  await highlight.locator('[data-tag="discipleship"]').click();
+  await expect(page).toHaveURL(/q=%23discipleship/);
+  await expect(text(page, "n")).toBeVisible();
 });
 
 test("a colored highlight folds, reveals, preserves its color through edits, and re-folds", async ({

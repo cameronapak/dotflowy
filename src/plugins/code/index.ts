@@ -12,8 +12,10 @@ import { definePlugin, type El } from "../types";
 // (`src/data/code.ts`) so display-only flatteners share it; this plugin owns
 // precedence + render (the `emphasis.ts` split).
 
+// A translucent ink tint keeps code legible on the page or on a highlight,
+// without inserting an opaque page-colored box into the highlighted run.
 const CODE_CLASS =
-  "rounded-[4px] border border-border/60 bg-muted px-0.5 py-0.5 font-mono text-[0.85em] text-foreground";
+  "rounded-[0.25em] bg-current/5 px-[0.3em] py-[0.1em] font-mono text-[0.9em] text-(--inline-ink) box-decoration-clone";
 
 // A folded code run: one ATOMIC <code> box with the backticks hidden. `data-src`
 // carries the full source (including the backticks) so the core's readSource
@@ -57,6 +59,7 @@ export default definePlugin({
       // Between links (0) and tags (20): a `#tag` inside a code run stays code.
       precedence: 10,
       folds: true,
+      formatting: true,
       render: (tok, view) => {
         const interior = tok.slice(1, tok.length - 1);
         // Reveal iff the caret sits within or adjacent to the run (offset in

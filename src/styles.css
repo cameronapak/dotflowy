@@ -96,11 +96,17 @@
   --ink: var(--accent-foreground);
   --primary-ink: var(--primary);
   --spoiler: var(--muted-foreground);
+  /* Inline tokens add an ink tint over their actual surface, which may be a
+     highlight. Keep their ink on the readable side even in soft-ink themes. */
+  --inline-ink: oklch(from var(--foreground) min(l, 0.42) c h);
+  --highlight-tag-ink-lightness: 0.35;
 }
 
 .dark {
   --background: oklch(0.205 0 0);
   --foreground: oklch(0.92 0 0);
+  --inline-ink: oklch(from var(--foreground) max(l, 0.9) c h);
+  --highlight-tag-ink-lightness: 0.95;
   --card: oklch(0.25 0 0);
   --card-foreground: oklch(0.92 0 0);
   --popover: oklch(0.25 0 0);
@@ -341,8 +347,8 @@
     var(--popover)
   );
   --accent-foreground: var(--foreground);
-  /* Secondary is a quiet chip and pulse surface in Dotflowy (Bible-ref chips,
-     date chips, the breadcrumb "…", the moved-node flash). Registry themes
+  /* Secondary is a quiet chip and pulse surface in Dotflowy (date chips,
+     the breadcrumb "…", the moved-node flash). Registry themes
      ship it near-white in dark mode (Claude) or near-black in light (Twitter). */
   --secondary: color-mix(in oklab, var(--foreground) 8%, var(--background));
   --secondary-foreground: var(--foreground);
@@ -370,7 +376,7 @@
       clamp(var(--spoiler-l-min), l, var(--spoiler-l-max)) c h
   );
   --spoiler-l-min: 0;
-  --spoiler-l-max: 0.58;
+  --spoiler-l-max: 0.5;
   /* Registry muted text is often too faint (Claude light 3.65:1), so it is
      the theme's own foreground faded toward the page, clamped like tag ink. */
   --muted-foreground: oklch(
@@ -391,7 +397,7 @@
 
 :root.themed.themed.dark {
   --popover: color-mix(in oklab, var(--background), white 7%);
-  --spoiler-l-min: 0.62;
+  --spoiler-l-min: 0.72;
   --spoiler-l-max: 1;
   --muted-l-min: 0.74;
   --muted-l-max: 1;
@@ -1254,9 +1260,9 @@ h2 span.protection-indicator {
  * `||interior||`; the container wears the SAME theme-aware 10%-primary fill as
  * the multi-selection slab above, so an open spoiler reads clearly in both
  * themes (a near-white `bg-muted` washed out on the light page). The rest of the
- * revealed skin (muted text, radius, box-decoration) rides Tailwind on the token
- * `El`; only this exact from-color + alpha lives here, beside the rule it
- * mirrors. The folded bar is a solid grey (`bg-muted-foreground`), not this tint.
+ * revealed skin (readable inline ink, radius, box-decoration) rides Tailwind
+ * on the token `El`; only this exact from-color + alpha lives here, beside the
+ * rule it mirrors. The folded bar is opaque themed `--spoiler`, not this tint.
  */
 .md-spoiler-reveal {
   background-color: oklch(from var(--primary) l c h / 0.1);

@@ -8,9 +8,7 @@ test("tagColorsCss emits one keyed rule per valid colored tag", () => {
   expect(tagColorsCss([])).toBe("");
   const css = tagColorsCss([row("work", "blue")]);
   expect(css.split("\n")).toHaveLength(1);
-  expect(css).toContain(
-    '[data-tag="work" i][data-tag]{background:var(--tag-blue)',
-  );
+  expect(css).toContain('[data-tag="work" i][data-tag]{background:');
   // Hyphen, underscore, and unicode tag names are allowed.
   expect(tagColorsCss([row("work-q3", "red")])).toContain(
     '[data-tag="work-q3" i]',

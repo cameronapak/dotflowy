@@ -19,4 +19,7 @@ it's the CSS-injection guard.
 **November 2026:** the `--tag-*` palette moved from `tag-colors.ts` into `styles.css` and is now
 blended from the active color theme's background and foreground, in every theme including the
 default ([ADR 0082](./0082-color-themes.md)). Names, storage, and the `data-tag` stylesheet are
-unchanged.
+unchanged. Inside a highlight, the generated rule blends the chosen hue toward
+inherited `--highlight-bg` rather than the page background, preserving its
+palette mix ratio and foreground hue. Text lightness strengthens only inside
+highlights so the compounded fill remains readable in both Modes.

@@ -13,7 +13,7 @@ import type { WidgetProps } from "../types";
 
 export function BibleChip({ source }: WidgetProps) {
   return (
-    <span className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-border bg-secondary px-1.5 py-0.5 align-baseline text-[0.85em] font-medium whitespace-nowrap text-secondary-foreground transition-transform select-none hover:brightness-[0.97] active:translate-y-px dark:hover:brightness-110">
+    <span className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-current/15 bg-current/5 px-1.5 py-[0.2em] align-middle text-[0.85em] leading-none font-medium whitespace-nowrap text-(--inline-ink) [text-decoration-line:var(--inline-strike,)_var(--inline-underline,)] transition-[background-color,border-color] select-none hover:bg-current/10 active:translate-y-px [.md-bold_&]:font-bold [.md-highlight_&]:bg-(--highlight-bg) [.md-highlight_&]:hover:border-current/30 [.md-highlight_&]:hover:bg-(--highlight-bg)">
       <BookOpenIcon className="size-[1em] shrink-0" aria-hidden="true" />
       {source}
       <ExternalLinkIcon

@@ -45,6 +45,16 @@ Both live in a dependency-free `src/data/spoiler.ts` (the `highlight.ts` / `date
 
 **Creation: the shared wrap path, three entries.** `/spoiler` (Seam C), `Mod+Shift+S` (Seam D -- free; emphasis owns `Mod+Shift+X`, highlight `Mod+Shift+H`), and an **`Eye`** button in the desktop selection formatting toolbar ([ADR 0036](./0036-desktop-selection-formatting-toolbar.md)), all through `toggleWrapSelection` (`src/components/wrap.ts`). Unlike highlight and link (special-cased in that toolbar), `||` is a plain marker toggle, so it drops straight into the clean `detectMarkerWrap`/`planMarkerToggle` path; the button lights when the selection sits inside a spoiler.
 
+## November 17 amendment: highlighted spoilers
+
+Inside a highlight, the folded bar blends 90% palette foreground through
+`--highlight-fg` with 10% surrounding highlight fill, rather than the standalone
+grey/themed bar. This gives a stronger color-matched bar, dark in light Mode
+and light in dark Mode, softened toward the highlight rather than the page.
+It replaces the earlier 50/50 highlight/page blend after visual review.
+The text stays fully transparent until the caret reveals it. The source,
+copy/export, and MCP redaction rules are unchanged.
+
 ## Consequences
 
 - **Write-back drops the spoiler, by design.** `update_node` takes a whole new text string. An agent that reads a spoiler-bearing node (gets `... [spoiler]`) and rewrites it writes the _redacted_ text back -- the real interior is destroyed. This is inherent to read-redaction + blind rewrite; you cannot hide content _and_ let a blind agent rewrite the node losslessly. **Accepted for v1 and documented loudly**: the `update_node` tool description warns that spoiler content is redacted and editing a spoiler-bearing node drops the spoiler. Round-trip preservation (the DO remembering the original and splicing it back) is real machinery deferred until someone hits it -- consistent with the leaky-but-honest framing.

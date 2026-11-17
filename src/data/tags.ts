@@ -1,4 +1,9 @@
+import { CODE_RUN_PATTERN } from "./code";
 import { isValidDateKey } from "./date-links";
+import { EMPHASIS_PATTERN, emphasisAt } from "./emphasis";
+import { HIGHLIGHT_PATTERN, parseHighlight } from "./highlight";
+import { LINK_PATTERN } from "./links";
+import { SPOILER_PATTERN, spoilerInterior } from "./spoiler";
 import { type TreeIndex } from "./tree";
 
 /**
@@ -11,11 +16,26 @@ import { type TreeIndex } from "./tree";
  * A tag is `#` preceded by start-of-text or whitespace, then one or more
  * letters / numbers / underscore / hyphen, ending at the next space or
  * punctuation. So `#work-q3` and `#важно` match; `foo#bar` and a bare `#` do
- * not. `@`-mentions are deferred (v1 is `#` only).
+ * not. Complete formatting containers parse their interiors with the same
+ * boundary rule, including tags immediately after a fence. Code and link
+ * labels are opaque. `@`-mentions are deferred (v1 is `#` only).
  */
 export const TAG_PATTERN = "(?<=^|\\s)#[\\p{L}\\p{N}_-]+";
 
-const TAG_RE = new RegExp(TAG_PATTERN, "gu");
+// Match containers before their contents, as the editor does. A tag at an
+// interior boundary is a real tag even without whitespace after the fence.
+// Parsing containers also prevents closing underscores becoming part of a tag.
+const TAG_RE = new RegExp(
+  [
+    LINK_PATTERN,
+    CODE_RUN_PATTERN,
+    EMPHASIS_PATTERN,
+    HIGHLIGHT_PATTERN,
+    SPOILER_PATTERN,
+    TAG_PATTERN,
+  ].join("|"),
+  "gu",
+);
 
 const EMPTY_TAGS: string[] = [];
 
@@ -29,12 +49,35 @@ export function parseTags(text: string): string[] {
   if (!text.includes("#")) return EMPTY_TAGS;
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const m of text.matchAll(TAG_RE)) {
-    if (!seen.has(m[0])) {
-      seen.add(m[0]);
-      out.push(m[0]);
+  function collect(source: string) {
+    const re = new RegExp(TAG_RE.source, TAG_RE.flags);
+    for (let m = re.exec(source); m; m = re.exec(source)) {
+      const token = m[0];
+      if (token.startsWith("#")) {
+        if (!seen.has(token)) {
+          seen.add(token);
+          out.push(token);
+        }
+      } else if (/^[*_~]/.test(token)) {
+        const run = emphasisAt(source, m.index);
+        if (!run) continue;
+        collect(
+          source.slice(
+            run.start + run.marker.length,
+            run.end - run.marker.length,
+          ),
+        );
+        re.lastIndex = run.end;
+      } else if (token.startsWith("==")) {
+        collect(parseHighlight(token).interior);
+      } else if (token.startsWith("||")) {
+        // Human tag filters may find your own concealed text, like Find.
+        collect(spoilerInterior(token));
+      }
+      // Code and link labels stay opaque, just like their renderers.
     }
   }
+  collect(text);
   return out;
 }
 

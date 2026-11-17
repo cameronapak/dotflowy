@@ -49,7 +49,42 @@ test("a #tag chip filters to matches; Clear restores the view and closes the sub
   await expect(subheader).toBeHidden();
 });
 
-test("inline tags fit their text in zoomed titles and regular nodes at every reading size", async ({
+test("tags at formatting boundaries keep their own nodes when clicked", async ({
+  page,
+}) => {
+  const sources = [
+    "**#discipleship**",
+    "==#discipleship==",
+    "__#discipleship__",
+    "_#discipleship_",
+    "~~#discipleship~~",
+    "~#discipleship~",
+    "word==#discipleship==",
+    "plain #discipleship",
+    "no tag",
+  ];
+  await seedOutline(
+    page,
+    sources.map((source, i) => ({
+      id: `boundary-${i}`,
+      parentId: null,
+      prevSiblingId: i ? `boundary-${i - 1}` : null,
+      text: source,
+    })),
+  );
+  await openSeededOutline(page, { anchorId: "boundary-0" });
+  for (let i = 0; i < sources.length - 1; i++)
+    await expect(
+      row(page, `boundary-${i}`).locator('[data-tag="discipleship"]'),
+    ).toHaveCount(1);
+  await row(page, "boundary-0").locator('[data-tag="discipleship"]').click();
+  await expect(page).toHaveURL(/q=%23discipleship/);
+  for (let i = 0; i < sources.length - 1; i++)
+    await expect(row(page, `boundary-${i}`)).toBeVisible();
+  await expect(row(page, "boundary-8")).toHaveCount(0);
+});
+
+test("inline tags and Bible chips fit their text at matching heights at every reading size", async ({
   page,
 }) => {
   await seedOutline(page, [
@@ -57,18 +92,20 @@ test("inline tags fit their text in zoomed titles and regular nodes at every rea
       id: "project",
       parentId: null,
       prevSiblingId: null,
-      text: "Project #important",
+      text: "Project #important John 3:16",
     },
     {
       id: "child",
       parentId: "project",
       prevSiblingId: null,
-      text: "A regular node #important",
+      text: "A regular node #important John 3:16",
     },
   ]);
   await openSeededOutline(page, { path: "/project", anchorId: "child" });
-  const chips = page.locator('.node-text .tag[data-tag="important"]');
-  await expect(chips).toHaveCount(2);
+  const chips = page.locator(
+    '.node-text .tag[data-tag="important"], .node-text [data-bible-ref] > span',
+  );
+  await expect(chips).toHaveCount(4);
   await page.evaluate(() => document.fonts.ready);
 
   for (const size of ["small", "default", "large"]) {
@@ -83,6 +120,7 @@ test("inline tags fit their text in zoomed titles and regular nodes at every rea
         const text = range.getBoundingClientRect();
         return {
           title: !!el.closest(".zoomed-title"),
+          top: pill.top,
           height: pill.height,
           topSpace: text.top - pill.top,
           bottomSpace: pill.bottom - text.bottom,
@@ -99,6 +137,17 @@ test("inline tags fit their text in zoomed titles and regular nodes at every rea
         box.bottomSpace,
         `${size}: space below tag text`,
       ).toBeGreaterThanOrEqual(0);
+    }
+    for (const title of [false, true]) {
+      const [tag, bible] = boxes.filter((box) => box.title === title);
+      expect(bible!.top, `${size}: Bible chip aligns with tag`).toBeCloseTo(
+        tag!.top,
+        1,
+      );
+      expect(
+        bible!.height,
+        `${size}: Bible chip matches tag height`,
+      ).toBeCloseTo(tag!.height, 1);
     }
     expect(boxes.find((box) => box.title)!.height).toBeGreaterThan(
       boxes.find((box) => !box.title)!.height,
