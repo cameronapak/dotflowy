@@ -28,6 +28,11 @@ test.each<
   // A doubled marker is not the single one, whole or inner.
   ["**b**", 0, 5, ITALIC, null],
   ["**b**", 2, 3, ITALIC, null],
+  ["__bold__", 2, 6, BOLD, "outside"],
+  ["_italic_", 0, 8, ITALIC, "inside"],
+  ["***x***", 3, 4, ITALIC, "outside"],
+  ["***x***", 3, 4, BOLD, "outside"],
+  ["_a_b", 1, 2, ITALIC, null],
 ])(
   "detectMarkerWrap(%p, %d, %d, %o) -> %p",
   (text, start, end, marker, expected) => {
@@ -49,6 +54,22 @@ test("wraps and unwraps a selection without changing surrounding text or selecti
     range: { start: 4, end: 8 },
   });
 });
+
+test.each([
+  ["__bold__", 2, 6, BOLD, "bold", 0, 4],
+  ["_italic_", 0, 8, ITALIC, "italic", 0, 6],
+  ["***x***", 3, 4, ITALIC, "**x**", 2, 3],
+  ["***x***", 3, 4, BOLD, "*x*", 1, 2],
+] as const)(
+  "toggles aliases and shared fences off: %s",
+  (source, start, end, marker, next, from, to) => {
+    expect(planMarkerToggle(source, start, end, marker)).toEqual({
+      removed: true,
+      next,
+      range: { start: from, end: to },
+    });
+  },
+);
 
 test("inserts an empty pair with a collapsed caret when nothing is selected", () => {
   const plan = planMarkerToggle("", 0, 0, BOLD);

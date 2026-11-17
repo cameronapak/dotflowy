@@ -18,14 +18,7 @@
 
 import { bibleRefsToMarkdownLinks } from "../plugins/route-bible/bible";
 import { DATE_LINK_PATTERN, parseDateLink } from "./date-links";
-import {
-  BOLD_PATTERN,
-  ITALIC_PATTERN,
-  ITALIC_UNDERSCORE_PATTERN,
-  STRIKETHROUGH_PATTERN,
-  UNDERLINE_PATTERN,
-  emphasisMarkerLen,
-} from "./emphasis";
+import { EMPHASIS_PATTERN, emphasisAt } from "./emphasis";
 import {
   HIGHLIGHT_PATTERN,
   parseHighlight,
@@ -90,8 +83,8 @@ function escapeXmlText(s: string): string {
 const CODE_RUN_PATTERN = "`[^`\\n]+`";
 
 /** Alternation in ascending registry precedence: links 0 < node-links 5 <
- *  date 6 < code 10 < bold 30 < strike 31 < italic 32 < underline 33 <
- *  underscore-italic 34 < highlight 35. (Bible refs, precedence 15, are
+ *  date 6 < code 10 < balanced emphasis 30 < highlight 35.
+ *  (Bible refs, precedence 15, are
  *  pre-projected to markdown links before this scan — the markdown.ts
  *  precedent — so the LINK branch handles them.) Built per call: a `g` regex
  *  carries `lastIndex`. */
@@ -102,11 +95,7 @@ function tokenRegex(): RegExp {
       NODE_LINK_PATTERN,
       DATE_LINK_PATTERN,
       CODE_RUN_PATTERN,
-      BOLD_PATTERN,
-      STRIKETHROUGH_PATTERN,
-      ITALIC_PATTERN,
-      UNDERLINE_PATTERN,
-      ITALIC_UNDERSCORE_PATTERN,
+      EMPHASIS_PATTERN,
       HIGHLIGHT_PATTERN,
     ].join("|"),
     "gu",
@@ -193,7 +182,12 @@ function dateTokenToTime(tok: string): string | null {
   return `<time${attrs}>${escapeHtml(formatTimeDisplay(parsed.key, parsed.time))}</time>`;
 }
 
-function tokenToHtml(tok: string, index: TreeIndex, appOrigin: string): string {
+function tokenToHtml(
+  tok: string,
+  index: TreeIndex,
+  appOrigin: string,
+  formattingOnly: boolean,
+): string {
   // `[[…]]` family first: date-shaped and id-shaped interiors are disjoint.
   if (tok.startsWith("[[")) {
     const asTime = dateTokenToTime(tok);
@@ -210,25 +204,26 @@ function tokenToHtml(tok: string, index: TreeIndex, appOrigin: string): string {
   if (tok.startsWith("[")) {
     const m = MD_LINK_RE.exec(tok);
     if (!m) return escapeHtml(tok);
-    return `<a href="${escapeHtml(m[2] ?? "")}">${escapeHtml(m[1] ?? "")}</a>`;
+    return `<a href="${escapeHtml(m[2] ?? "")}">${projectText(m[1] ?? "", index, appOrigin, true)}</a>`;
   }
   if (tok.startsWith("==")) {
     const { color, interior } = parseHighlight(tok);
-    return `<mark class="colored ${HIGHLIGHT_CLASS[color]}">${escapeHtml(interior)}</mark>`;
+    return `<mark class="colored ${HIGHLIGHT_CLASS[color]}">${projectText(interior, index, appOrigin, formattingOnly)}</mark>`;
   }
   if (tok.startsWith("`")) {
     return `<code>${escapeHtml(tok.slice(1, -1))}</code>`;
   }
-  // Emphasis: same marker char both edges, length 1 or 2.
-  const markerLen = emphasisMarkerLen(tok);
-  if (markerLen === 0) return escapeHtml(tok); // defensive — patterns always match
-  const interior = escapeHtml(tok.slice(markerLen, tok.length - markerLen));
-  const marker = tok.slice(0, markerLen);
-  if (marker === "**") return `<b>${interior}</b>`;
-  if (marker === "~~") return `<s>${interior}</s>`;
-  if (marker === "~") return `<u>${interior}</u>`;
-  // `*` and the render-only `_` alias both export as italic (#114).
-  return `<i>${interior}</i>`;
+  const run = emphasisAt(tok, 0);
+  if (!run) return escapeHtml(tok);
+  const width = run.marker.length;
+  const interior = projectText(
+    tok.slice(width, -width),
+    index,
+    appOrigin,
+    formattingOnly,
+  );
+  const tag = { bold: "b", italic: "i", strike: "s", underline: "u" }[run.kind];
+  return `<${tag}>${interior}</${tag}>`;
 }
 
 /** One node's `text` -> the composed inline-HTML string (NOT yet
@@ -237,16 +232,24 @@ function projectText(
   text: string,
   index: TreeIndex,
   appOrigin: string,
+  formattingOnly = false,
 ): string {
   // Bible refs become ordinary markdown links first (resolve-or-literal with
   // link/code ranges protected — reuses the shipped markdown-export path).
-  const source = bibleRefsToMarkdownLinks(text);
+  const source = formattingOnly ? text : bibleRefsToMarkdownLinks(text);
   const re = tokenRegex();
   let out = "";
   let last = 0;
   for (let m = re.exec(source); m; m = re.exec(source)) {
+    if (formattingOnly && m[0].startsWith("[")) continue;
+    if (/^[*_~]/.test(m[0])) {
+      const run = emphasisAt(source, m.index);
+      if (!run) continue;
+      m[0] = source.slice(m.index, run.end);
+      re.lastIndex = run.end;
+    }
     if (m.index > last) out += escapeHtml(source.slice(last, m.index));
-    out += tokenToHtml(m[0], index, appOrigin);
+    out += tokenToHtml(m[0], index, appOrigin, formattingOnly);
     last = re.lastIndex;
   }
   if (last < source.length) out += escapeHtml(source.slice(last));

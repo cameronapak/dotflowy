@@ -27,6 +27,12 @@ test.each([
   // An unclosed backtick is safe: markup around it still flattens.
   ["a `stray tick with **bold**", "a `stray tick with bold"],
   ["`*a*` `*b*`", "*a* *b*"],
+  ["`[literal](https://example.com)`", "[literal](https://example.com)"],
+  ["`[[2026-07-08]]`", "[[2026-07-08]]"],
+  ["_THIS **IS** ITALIC_", "THIS IS ITALIC"],
+  ["**foo*bar**", "foo*bar"],
+  ["*foo**bar*", "foo**bar"],
+  ["*foo**bar**baz*", "foobarbaz"],
   // Only a leading `> ` (with its space) is a quote marker.
   ["> **said** it", "said it"],
   [">5 and -> stay", ">5 and -> stay"],

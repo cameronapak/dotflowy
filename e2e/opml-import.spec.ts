@@ -59,9 +59,7 @@ test("crafted sample: summary discloses degradations; import lands one collapsed
   await expect(summary).toContainText("23 bullets");
   const disclosures = page.getByTestId("opml-disclosures");
   await expect(disclosures).toContainText("1 note became 2 child bullets");
-  await expect(disclosures).toContainText(
-    "2× nested <mark> dropped (outermost wins)",
-  );
+  await expect(disclosures).not.toContainText("nested <mark> dropped");
   await expect(disclosures).toContainText(
     "1× <mention> -> @mention(id) (name unrecoverable)",
   );
@@ -81,6 +79,12 @@ test("crafted sample: summary discloses degradations; import lands one collapsed
     hasText: "dotflowy OPML sample (safe to delete)",
   });
   await expect(sampleRoot.first()).toBeVisible();
+  // Mixed highlights survive inside strikethrough instead of being dropped.
+  const strike = page.locator(".node-text .md-strike", {
+    hasText: "strikethrough and colored text",
+  });
+  await expect(strike.locator("mark")).toHaveText(["colored", "text"]);
+
   // Inline mapping applied (folded bold token renders its interior) and the
   // _note became child bullets.
   await expect(

@@ -19,8 +19,10 @@ rides the sync path).
   churn, orphan fields on uninstall). Plugin data is a side-collection — this is also why
   "protected node" is a _composed predicate_, not a `protected:` column.
 - Give each token its own regex/scan — N plugins must not mean N passes. The core composes one
-  alternation, one `matchAll`, and owns escaping (tokens return structured `El`/`WidgetEl`, never
-  raw HTML).
+  alternation, one `matchAll` per source slice, and owns escaping (tokens return
+  structured `El`/`WidgetEl`, never raw HTML). Formatting containers opt into a
+  smaller slice through `TokenView.renderInline`; balanced tokens can resolve
+  their candidate extent with `TokenSpec.matchEnd` ([ADR 0025](./0025-inline-emphasis.md)).
 - Run arbitrary per-keystroke plugin code in the decorator, or reach for runtime/after-install
   plugin loading (deferred — a module loader + sandbox + capability model this project doesn't
   need).

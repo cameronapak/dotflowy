@@ -21,6 +21,7 @@ import { Data, Effect } from "effect";
 import type { ChangeOp } from "./wire-schema";
 
 import { isValidDateKey } from "./date-links";
+import { emphasisAt } from "./emphasis";
 import { buildHighlightRun, type HighlightColor } from "./highlight";
 import { encodeUrlForMarkdown, sanitizeLinkLabel } from "./links";
 import { createNode, type NodeKind } from "./tree";
@@ -289,18 +290,11 @@ function flattenText(nodes: HtmlNode[]): string {
   return out;
 }
 
-function containsTag(nodes: HtmlNode[], tag: string): boolean {
-  return nodes.some(
-    (n) => n.kind === "el" && (n.tag === tag || containsTag(n.children, tag)),
-  );
-}
-
 // --- HTML tree -> dotflowy token string ---------------------------------------------
-// The locked #114 mapping. Interiors that would break a token pattern (the
-// marker char, `=`/newline in a highlight) drop the formatting and keep the
-// text; nesting flattens to outermost-wins with links trumping everything; a
-// `<time>` with canonical attrs becomes the date token (ADR 0038 — adopted,
-// not degraded); unknown tags strip to inner text. Every drop is counted.
+// Nested representable formatting is retained (ADR 0025). Code stays literal;
+// nested anchors/highlights and unrepresentable marker runs degrade with a
+// counted disclosure. Canonical <time> attrs become date tokens outside link
+// labels; unknown tags strip to inner text.
 
 interface MarkerSpec {
   open: string;
@@ -343,8 +337,11 @@ const MARK_COLOR: MarkColorMap = {
 
 interface ConvertState {
   degraded: Tally;
-  /** Already inside a formatting tag — dotflowy emphasis is FLAT (ADR 0025). */
-  insideFormat: boolean;
+  /** The highlight grammar cannot represent another highlight inside it. */
+  insideHighlight: boolean;
+  insideLink?: boolean;
+  /** Repeating an active HTML style is redundant, not another marker layer. */
+  formats?: readonly string[];
 }
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
@@ -386,19 +383,11 @@ function convertEl(
   const { degraded } = state;
   switch (el.tag) {
     case "a": {
-      const rawLabel = flattenText(el.children);
-      // Formatting INSIDE a link is dropped — a working link beats any styling
-      // (in the combined token regex `**[l](u)**` would tokenize as bold and
-      // kill the link).
-      const walkInner = (nodes: HtmlNode[]): void => {
-        for (const n of nodes) {
-          if (n.kind === "el") {
-            degraded.bump(`styling inside <a> dropped (<${n.tag}>)`);
-            walkInner(n.children);
-          }
-        }
-      };
-      walkInner(el.children);
+      if (state.insideLink) {
+        degraded.bump("nested <a> dropped");
+        return convert(el.children, state);
+      }
+      const rawLabel = convert(el.children, { ...state, insideLink: true });
       const url = encodeUrlForMarkdown(el.attrs["href"] ?? "");
       const label = sanitizeLinkLabel(rawLabel);
       if (label !== rawLabel.trim() || rawLabel.includes("]")) {
@@ -409,12 +398,11 @@ function convertEl(
       return `[${label}](${url})`;
     }
     case "time": {
-      // Adopted, not degraded (ADR 0038) — but only where the token can
-      // actually render: inside a formatting run the interior is plain text,
-      // so the display text is the honest fallback there.
+      // Adopted, not degraded (ADR 0038), except inside a link label where
+      // nested interactive tokens are deliberately disabled.
       const display = flattenText(el.children);
-      if (state.insideFormat) {
-        degraded.bump("<time> inside formatting -> display text kept");
+      if (state.insideLink) {
+        degraded.bump("<time> inside link -> display text kept");
         return display;
       }
       const token = timeToDateToken(el.attrs);
@@ -437,35 +425,42 @@ function convertEl(
     case "s":
     case "code": {
       const spec = FORMAT_MARKERS[el.tag]!;
-      if (containsTag(el.children, "a")) {
-        degraded.bump(`<${el.tag}> dropped: contains a link (link wins)`);
+      if (el.tag !== "code" && state.formats?.includes(el.tag))
         return convert(el.children, state);
-      }
-      if (state.insideFormat) {
-        degraded.bump(`nested <${el.tag}> dropped (outermost wins)`);
-        return convert(el.children, state);
-      }
-      const interior = convert(el.children, { ...state, insideFormat: true });
+      // Code stays literal. Other formatting composes recursively, without
+      // turning redundant <i><i> or <u><u> into a different doubled style.
+      const interior =
+        el.tag === "code"
+          ? flattenText(el.children)
+          : convert(el.children, {
+              ...state,
+              formats: [...(state.formats ?? []), el.tag],
+            });
       if (interior.length === 0) {
         degraded.bump(`empty <${el.tag}> dropped`);
         return "";
       }
-      if (spec.forbid.test(interior)) {
+      const wrapped = spec.open + interior + spec.close;
+      const emphasis = el.tag === "code" ? null : emphasisAt(wrapped, 0);
+      if (
+        el.tag === "code"
+          ? spec.forbid.test(interior)
+          : emphasis?.end !== wrapped.length
+      ) {
         degraded.bump(`<${el.tag}> dropped: marker char in interior`);
         return interior;
       }
       return spec.open + interior + spec.close;
     }
     case "mark": {
-      if (containsTag(el.children, "a")) {
-        degraded.bump("<mark> dropped: contains a link (link wins)");
-        return convert(el.children, state);
-      }
-      if (state.insideFormat) {
+      if (state.insideHighlight) {
         degraded.bump("nested <mark> dropped (outermost wins)");
         return convert(el.children, state);
       }
-      const interior = convert(el.children, { ...state, insideFormat: true });
+      const interior = convert(el.children, {
+        ...state,
+        insideHighlight: true,
+      });
       if (interior.length === 0) {
         degraded.bump("empty <mark> dropped");
         return "";
@@ -533,7 +528,7 @@ function convertValue(raw: string, state: MapState) {
   const tree = parseInlineHtml(raw, state.anomalies);
   const converted = convert(tree, {
     degraded: state.degraded,
-    insideFormat: false,
+    insideHighlight: false,
   });
   const lines = converted.split("\n");
   return { text: lines[0] ?? "", extraLines: lines.slice(1) };

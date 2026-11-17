@@ -28,7 +28,11 @@ import { useEffect, type RefObject } from "react";
 import type { El, WidgetEl } from "../plugins/types";
 
 import { useEditorFeatures } from "../data/editor-features";
-import { hasFoldingToken, renderToken, tokenRegex } from "../plugins/registry";
+import {
+  hasFoldingToken,
+  renderToken,
+  inlineTokenMatches,
+} from "../plugins/registry";
 import { WIDGET_TAG } from "./plugin-widget";
 
 /** Repaint optional tokens without replacing local text or moving the caret.
@@ -77,18 +81,21 @@ const renderCache = new WeakMap<HTMLElement, string>();
 // A selection also keeps tokens containing either interior endpoint revealed,
 // so restoring the range cannot snap that endpoint to an atom's edge.
 // See ADR 0005 (per-link reveal) and ADR 0025 (emphasis/code folding).
-function inlineMarkupHtml(
+function inlineMarkupElements(
   text: string,
   revealOffset: number | null,
   selection: { start: number; end: number } | null,
-): string {
-  let html = "";
+  sourceStart = 0,
+  formattingOnly = false,
+): (El | WidgetEl)[] {
+  const children: (El | WidgetEl)[] = [];
   let last = 0;
-  for (const m of text.matchAll(tokenRegex)) {
-    const start = m.index ?? 0;
+  for (const m of inlineTokenMatches(text, formattingOnly)) {
+    const localStart = m.index ?? 0;
+    const start = sourceStart + localStart;
     const tok = m[0];
     const end = start + tok.length;
-    html += escapeHtml(text.slice(last, start));
+    children.push(text.slice(last, localStart));
     // The plugin that owns this token returns a declarative descriptor; the
     // core escapes + serializes it, so a plugin never hands us raw HTML (D6).
     // Keep an interior selection endpoint addressable as real text. Endpoints
@@ -99,13 +106,29 @@ function inlineMarkupHtml(
             (offset) => offset > start && offset < end,
           )
         : undefined;
-    html += serializeEl(
-      renderToken(m, { revealOffset: endpoint ?? revealOffset, start, end }),
+    children.push(
+      renderToken(m, {
+        revealOffset: endpoint ?? revealOffset,
+        start,
+        end,
+        renderInline: (
+          interior,
+          interiorStart,
+          onlyFormatting = formattingOnly,
+        ) =>
+          inlineMarkupElements(
+            interior,
+            revealOffset,
+            selection,
+            interiorStart,
+            onlyFormatting,
+          ),
+      }),
     );
-    last = end;
+    last = localStart + tok.length;
   }
-  html += escapeHtml(text.slice(last));
-  return html;
+  children.push(text.slice(last));
+  return children;
 }
 
 // Serialize a plugin's element descriptor (El) into the contentEditable HTML
@@ -217,12 +240,18 @@ export function readSource(el: HTMLElement): string {
 }
 
 // React owns a widget's children, not the serializer's raw-source fallback.
-// Compare its host contract only, so a mounted chip is not a false change.
+// Compare its host contract only, including widgets nested inside a highlight.
 function sameDecoration(current: Node, next: Node): boolean {
-  if (current.nodeName === WIDGET_TAG.toUpperCase()) {
-    return current.cloneNode(false).isEqualNode(next.cloneNode(false));
+  if (current.isEqualNode(next)) return true;
+  if (!current.cloneNode(false).isEqualNode(next.cloneNode(false)))
+    return false;
+  if (current.nodeName === WIDGET_TAG.toUpperCase()) return true;
+  if (current.childNodes.length !== next.childNodes.length) return false;
+  for (let i = 0; i < current.childNodes.length; i++) {
+    if (!sameDecoration(current.childNodes[i]!, next.childNodes[i]!))
+      return false;
   }
-  return current.isEqualNode(next);
+  return true;
 }
 
 // Re-render `el` as formatted HTML, optionally keeping the selection put. A DOM
@@ -233,7 +262,7 @@ function sameDecoration(current: Node, next: Node): boolean {
 // images on every keystroke. Native edits often already match the desired DOM,
 // in which case this leaves every child in place.
 //
-// `revealOffset` decides which link, if any, shows raw; see inlineMarkupHtml.
+// `revealOffset` decides which token shows raw; see inlineMarkupElements.
 export function decorate(
   el: HTMLElement,
   text: string,
@@ -241,7 +270,9 @@ export function decorate(
   preserveCaret: boolean,
 ): void {
   const selection = preserveCaret ? getSelectionRange(el) : null;
-  const html = inlineMarkupHtml(text, revealOffset, selection);
+  const html = inlineMarkupElements(text, revealOffset, selection)
+    .map(serializeEl)
+    .join("");
   if (renderCache.get(el) === html) return;
   const template = document.createElement("template");
   template.innerHTML = html;

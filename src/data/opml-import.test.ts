@@ -87,10 +87,9 @@ test("the crafted Workflowy sample imports with the fidelity probe's exact count
   expect(report.textNewlineSplits).toBe(0);
   // Degradation keys are byte-compatible with the probe report (ADR 0037).
   expect(report.degraded).toEqual({
-    "nested <mark> dropped (outermost wins)": 2,
     "<mention> -> @mention(id) (name unrecoverable)": 1,
   });
-  expect(report.degradedTotal).toBe(3);
+  expect(report.degradedTotal).toBe(1);
   // 1 note -> 2 bullets, 1 blank dropped.
   expect(report.notes).toBe(1);
   expect(report.noteLines).toBe(2);
@@ -107,7 +106,7 @@ test("the crafted Workflowy sample imports with the fidelity probe's exact count
   expect(texts[1]).toBe("**bold text**");
   expect(texts[2]).toBe("*italic text*");
   expect(texts[3]).toBe("~underline text~");
-  expect(texts[4]).toBe("~~strikethrough and colored text~~"); // nested marks dropped
+  expect(texts[4]).toBe("~~strikethrough and ==🔴colored== ==🟢text==~~");
   expect(texts[5]).toBe("`inline code text`");
   expect(texts[6]).toBe("[a labeled link](https://example.com/path?q=1&r=2)");
   expect(texts[7]).toBe(
@@ -164,16 +163,34 @@ const time = (attrs: string, display: string) =>
 
 test.each<[string, string, string, number]>([
   [
-    "a marker-char clash drops formatting, keeps text",
+    "an unmatched inner marker stays literal inside formatting",
     "&lt;b&gt;a*b&lt;/b&gt;",
-    "a*b",
-    1,
+    "**a*b**",
+    0,
   ],
   [
-    "a link wins over formatting",
+    "formatting wraps a working link",
     "&lt;b&gt;&lt;a href=&quot;https://e.com&quot;&gt;go&lt;/a&gt;&lt;/b&gt;",
-    "[go](https://e.com)",
-    1,
+    "**[go](https://e.com)**",
+    0,
+  ],
+  [
+    "redundant italic nesting stays italic",
+    "&lt;i&gt;&lt;i&gt;x&lt;/i&gt;&lt;/i&gt;",
+    "*x*",
+    0,
+  ],
+  [
+    "redundant underline nesting stays underlined",
+    "&lt;u&gt;&lt;u&gt;x&lt;/u&gt;&lt;/u&gt;",
+    "~x~",
+    0,
+  ],
+  [
+    "partly redundant nesting keeps mixed styles",
+    "&lt;i&gt;a &lt;b&gt;&lt;i&gt;b&lt;/i&gt;&lt;/b&gt;&lt;/i&gt;",
+    "*a **b***",
+    0,
   ],
   [
     "an unknown tag strips to its inner text",

@@ -162,8 +162,8 @@ test("folded emphasis preserves each delimiter, flat precedence, and literal nea
   await expect(run(page, "bold", "strong")).toHaveText("bold");
   await expect(run(page, "bold", "em")).toHaveCount(0);
   await expect(run(page, "triple", "strong")).toHaveText("x");
-  // The visible text is "*x*" (one literal `*` on each side of the bold run).
-  await expect.poll(() => text(page, "triple").textContent()).toBe("*x*");
+  await expect(run(page, "triple", "em").locator("strong")).toHaveText("x");
+  await expect.poll(() => text(page, "triple").textContent()).toBe("x");
   await expect(run(page, "unclosed", "em")).toHaveCount(0);
   await expect
     .poll(() => text(page, "unclosed").textContent())

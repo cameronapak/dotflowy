@@ -8,7 +8,12 @@ import {
   MIN_CHROMA,
   type CustomThemeSeed,
 } from "../src/data/custom-theme";
-import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  type SeedNode,
+} from "./fixtures";
 
 // Color themes (ADR 0082). Every themed surface keeps WCAG contrast in every
 // theme and Mode, measured from the real stylesheet; and the choice is the
@@ -157,7 +162,7 @@ test("Free previews never save, and leaving Settings restores the saved theme", 
 /** Every check below its minimum for the theme and Mode now on <html>. */
 async function contrastFailures(
   page: Page,
-  surface: "outline" | "settings" | "trial" = "outline",
+  surface: "outline" | "inline" | "settings" | "trial" = "outline",
 ) {
   const hovered = [];
   const hoverTargets = [
@@ -219,24 +224,24 @@ async function contrastFailures(
       const value = ratio(paint([...bg, fg]), paint(bg));
       if (value < min) failures.push(`${label} ${value.toFixed(2)} < ${min}`);
     };
+    // Composite actual ancestor backgrounds, including highlights and chip
+    // tints. Token pairs alone miss text on layered or translucent surfaces.
+    const backgrounds = (el: Element, banner?: Element) => {
+      const layers = ["white"];
+      for (let p: Element | null = el; p; p = p.parentElement)
+        layers.splice(
+          1,
+          0,
+          getComputedStyle(p).backgroundColor,
+          // Conservatively check the strongest point of the decorative tint,
+          // even though most text sits on a weaker part of the gradient.
+          ...(p === banner
+            ? ["color-mix(in oklab, var(--primary) 10%, transparent)"]
+            : []),
+        );
+      return layers;
+    };
     if (surface === "settings" || surface === "trial") {
-      // Composite actual ancestor backgrounds, including the card and badge
-      // tint. Token pairs alone miss primary used as ink and translucent tracks.
-      const backgrounds = (el: Element, banner?: Element) => {
-        const layers = ["white"];
-        for (let p: Element | null = el; p; p = p.parentElement)
-          layers.splice(
-            1,
-            0,
-            getComputedStyle(p).backgroundColor,
-            // Conservatively check the strongest point of the decorative tint,
-            // even though most text sits on a weaker part of the gradient.
-            ...(p === banner
-              ? ["color-mix(in oklab, var(--primary) 10%, transparent)"]
-              : []),
-          );
-        return layers;
-      };
       if (surface === "trial") {
         const banner = document
           .querySelector("#billing h3")!
@@ -338,6 +343,37 @@ async function contrastFailures(
         4.5,
       );
     }
+    for (const el of document.querySelectorAll(
+      ".node-text code, .node-text .tag, .node-text [data-bible-ref] > span, .node-text .md-spoiler-reveal",
+    )) {
+      check(
+        `inline ${el.textContent}`,
+        getComputedStyle(el).color,
+        backgrounds(el),
+        4.5,
+      );
+    }
+    // The matching palette ink keeps highlighted spoiler bars distinct.
+    // Concealment also requires opaque paint and fully transparent letters.
+    for (const el of document.querySelectorAll(".node-text [data-spoiler]")) {
+      const style = getComputedStyle(el);
+      check(
+        "spoiler bar",
+        style.backgroundColor,
+        backgrounds(el.parentElement!),
+        3,
+      );
+      for (const [label, color, alpha] of [
+        ["spoiler bar", style.backgroundColor, 255],
+        ["spoiler text", style.color, 0],
+      ] as const) {
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, 1, 1);
+        if (ctx.getImageData(0, 0, 1, 1).data[3] !== alpha)
+          failures.push(`${label} has incorrect opacity`);
+      }
+    }
     for (const { label, fg, bg, min } of hovered)
       check(label, fg, [page, bg], min);
     probe.remove();
@@ -409,23 +445,75 @@ test("settings badges and on/off switches stay readable in every theme and Mode"
 test("every theme and Mode keeps themed surfaces readable", async ({
   page,
 }) => {
-  await seedOutline(page, [
-    ...TREE,
-    { id: "b", parentId: "a", prevSiblingId: null, text: "Beta" },
-    { id: "c", parentId: "b", prevSiblingId: null, text: "Gamma" },
-    { id: "d", parentId: "c", prevSiblingId: null, text: "Delta" },
-    { id: "e", parentId: "d", prevSiblingId: null, text: "Epsilon" },
-    { id: "f", parentId: "e", prevSiblingId: null, text: "Zeta" },
-  ]);
+  const inlineText = [
+    "`pray()` #study #colored John 3:16",
+    ...["🔴", "🟠", "🟡", "🟢", "🔵", "🟣"].map(
+      (color) => `==${color}\`pray()\` #study #colored John 3:16 ||hidden||==`,
+    ),
+  ].join(" ");
+  await seedOutline(
+    page,
+    [
+      ...TREE,
+      { id: "b", parentId: "a", prevSiblingId: null, text: "Beta" },
+      { id: "c", parentId: "b", prevSiblingId: null, text: "Gamma" },
+      { id: "d", parentId: "c", prevSiblingId: null, text: "Delta" },
+      { id: "e", parentId: "d", prevSiblingId: null, text: "Epsilon" },
+      {
+        id: "f",
+        parentId: "e",
+        prevSiblingId: null,
+        text: inlineText,
+      },
+    ],
+    {
+      kv: {
+        "tag-colors": [
+          { key: "colored", value: { tag: "colored", color: "blue" } },
+        ],
+      },
+    },
+  );
   await openSeededOutline(page, { path: "/e", anchorId: "f" });
+  await expect(page.locator(".node-text [data-bible-ref] svg")).toHaveCount(14);
+  // Reveal a spoiler on yellow while the other highlight colors stay folded.
+  const editor = page.locator('li[data-node-id="f"] .node-text');
+  const spoilerOffset =
+    inlineText.indexOf("||hidden||", inlineText.indexOf("==🟡")) + 2;
+  await placeCaret(editor, spoilerOffset);
+  await expect(editor.locator('mark[data-highlight="yellow"]')).toHaveAttribute(
+    "data-highlight-reveal",
+    "",
+  );
+  await placeCaret(editor, spoilerOffset);
+  await expect(editor.locator("[data-spoiler-reveal]")).toBeVisible();
   // Measure settled hover colors, not a frame midway through a transition.
   await page.addStyleTag({ content: "* { transition: none !important; }" });
   const failures: string[] = [];
   for (const theme of THEME_CASES)
     for (const dark of [false, true]) {
       await paintTheme(page, theme, dark);
+      // A chosen tag hue blends against its actual surface: the page plus
+      // six different highlights must produce seven distinct fills.
+      const coloredFills = await editor
+        .locator('[data-tag="colored"]')
+        .evaluateAll((els) =>
+          els.map((el) => getComputedStyle(el).backgroundColor),
+        );
+      expect(new Set(coloredFills).size, `${theme[0]} ${dark}`).toBe(7);
       for (const f of await contrastFailures(page))
         failures.push(`${theme[0]} ${dark ? "dark" : "light"}: ${f}`);
+      // Yellow is the brightest highlight; its dark-mode hover is the tight
+      // contrast boundary for an ink-tinted neutral chip.
+      for (const selector of [
+        '[data-tag="study"]',
+        '[data-tag="colored"]',
+        "[data-bible-ref] > span",
+      ]) {
+        await page.locator(`mark[data-highlight="yellow"] ${selector}`).hover();
+        for (const f of await contrastFailures(page, "inline"))
+          failures.push(`${theme[0]} ${dark ? "dark" : "light"} hover: ${f}`);
+      }
     }
   expect(failures).toEqual([]);
 });

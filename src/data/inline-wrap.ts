@@ -7,6 +7,8 @@
 // the interesting cases (single-vs-double marker disambiguation, the two ways a
 // selection can already be wrapped) are unit-testable under `bun test`.
 
+import { emphasisAt } from "./emphasis";
+
 /** One marker pair. `pre`/`post` are equal-length for every current consumer
  *  but kept separate so a future asymmetry doesn't force an API change.
  *  Lives here (the pure leaf) and is re-exported from `wrap.ts` for the plugins
@@ -14,6 +16,20 @@
 export interface MarkerPair {
   pre: string;
   post: string;
+}
+
+function runLength(
+  text: string,
+  at: number,
+  step: number,
+  char: string | undefined,
+) {
+  let count = 0;
+  while (at >= 0 && at < text.length && text[at] === char) {
+    count++;
+    at += step;
+  }
+  return count;
 }
 
 /** How the selection `[start, end)` of `source` is already wrapped by `m`:
@@ -28,7 +44,7 @@ export interface MarkerPair {
  *  italic too. The guards below reject a match when the neighbouring char just
  *  repeats the marker char. Double-char markers can't over-match a single, so
  *  they need no guard. */
-export function detectMarkerWrap(
+function detectExactWrap(
   source: string,
   start: number,
   end: number,
@@ -44,9 +60,9 @@ export function detectMarkerWrap(
     sel.startsWith(m.pre) &&
     sel.endsWith(m.post)
   ) {
-    const preOk = m.pre.length > 1 || sel[m.pre.length] !== preC;
+    const preOk = m.pre.length > 1 || runLength(sel, 0, 1, preC) % 2 === 1;
     const postOk =
-      m.post.length > 1 || sel[sel.length - m.post.length - 1] !== postC;
+      m.post.length > 1 || runLength(sel, sel.length - 1, -1, postC) % 2 === 1;
     if (preOk && postOk) return "inside";
   }
 
@@ -57,12 +73,47 @@ export function detectMarkerWrap(
     source.slice(start - m.pre.length, start) === m.pre &&
     source.slice(end, end + m.post.length) === m.post
   ) {
-    const preOk = m.pre.length > 1 || source[start - m.pre.length - 1] !== preC;
-    const postOk = m.post.length > 1 || source[end + m.post.length] !== postC;
+    const preOk =
+      m.pre.length > 1 || runLength(source, start - 1, -1, preC) % 2 === 1;
+    const postOk =
+      m.post.length > 1 || runLength(source, end, 1, postC) % 2 === 1;
     if (preOk && postOk) return "outside";
   }
 
   return null;
+}
+
+// Underscore spellings are aliases, not separate toolbar styles. Keep the
+// actual matched pair so toggle-off removes the spelling the author used.
+function matchingWrap(
+  source: string,
+  start: number,
+  end: number,
+  marker: MarkerPair,
+) {
+  const alias = marker.pre === "*" ? "_" : marker.pre === "**" ? "__" : null;
+  for (const pair of alias ? [marker, { pre: alias, post: alias }] : [marker]) {
+    const mode = detectExactWrap(source, start, end, pair);
+    if (mode) {
+      if (pair.pre.startsWith("_")) {
+        const from = mode === "inside" ? start : start - pair.pre.length;
+        const to = mode === "inside" ? end : end + pair.post.length;
+        const run = emphasisAt(source, from);
+        if (run?.end !== to) continue;
+      }
+      return { marker: pair, mode };
+    }
+  }
+  return null;
+}
+
+export function detectMarkerWrap(
+  source: string,
+  start: number,
+  end: number,
+  marker: MarkerPair,
+) {
+  return matchingWrap(source, start, end, marker)?.mode ?? null;
 }
 
 /** The result of planning a toggle: the new source, the selection to restore in
@@ -85,7 +136,9 @@ export function planMarkerToggle(
   end: number,
   m: MarkerPair,
 ): WrapPlan {
-  const mode = detectMarkerWrap(source, start, end, m);
+  const wrap = matchingWrap(source, start, end, m);
+  const mode = wrap?.mode;
+  m = wrap?.marker ?? m;
 
   if (mode === "inside") {
     const sel = source.slice(start, end);
