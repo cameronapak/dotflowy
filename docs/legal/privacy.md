@@ -1,6 +1,6 @@
 # Dotflowy Privacy Policy
 
-**Effective date:** July 11, 2026 · **Last updated:** November 13, 2026
+**Effective date:** July 11, 2026 · **Last updated:** November 18, 2026
 
 Dotflowy is operated by **FAITH TOOLS SOFTWARE SOLUTIONS, LLC**, an Oklahoma limited liability company. This policy says exactly what data we handle, where it lives, who can see it, and what we will never do with it. We'd rather over-disclose than hide anything.
 

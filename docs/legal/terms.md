@@ -1,6 +1,6 @@
 # Dotflowy Terms of Service
 
-**Effective date:** July 11, 2026 · **Last updated:** October 15, 2026
+**Effective date:** July 11, 2026 · **Last updated:** November 18, 2026
 
 Dotflowy is operated by **FAITH TOOLS SOFTWARE SOLUTIONS, LLC**, an Oklahoma limited liability company ("we," "us"). These terms are an agreement between you and FAITH TOOLS SOFTWARE SOLUTIONS, LLC covering your use of Dotflowy (the app at app.dotflowy.com, the dotflowy.com website, and the Dotflowy API and MCP endpoints — together, "the Service").
 
