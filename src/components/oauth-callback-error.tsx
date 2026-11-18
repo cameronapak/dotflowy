@@ -18,15 +18,14 @@ interface OAuthErrorMessages {
 }
 
 const MESSAGES: OAuthErrorMessages = {
-  // A Google identity with no Dotflowy account hit the server-side signup
-  // gate (worker/auth.ts `disableSignUp` — the OAuth face of the invite gate).
+  // Google account creation is disabled while signup is invite-only.
   signup_disabled:
-    "That Google account isn't connected to a Dotflowy account yet. Sign up with your email first, then connect Google from the More menu.",
+    "Google signup isn't open right now. Sign up with your email and an invite code, confirm your email, then continue with Google.",
   // An email+password account exists at this address but isn't linked, and
   // implicit linking refused (unverified local email). The fix is the
   // explicit, authenticated path.
   account_not_linked:
-    "That email already has a Dotflowy password account. Sign in with your password, then connect Google from the More menu.",
+    "That email already has a Dotflowy account. Confirm your email first, then continue with Google, or sign in with your password.",
   account_already_linked_to_different_user:
     "That Google account is already connected to a different Dotflowy account.",
   // The user backed out at Google's consent screen.

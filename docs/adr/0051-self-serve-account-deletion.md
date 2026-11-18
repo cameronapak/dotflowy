@@ -4,7 +4,7 @@ The privacy policy (ticket #161) commits to "You can delete your account yoursel
 
 ## The flow
 
-"Delete account" in the header More menu opens a password-gated confirmation (`delete-account-dialog.tsx`). Confirmation is **re-entering the password** — `authClient.deleteUser({ password })` — not an email round-trip: email verification is off for beta (ADR 0011), and email+password is the only signup path so every account (including Google-linked ones) has a password to prove ownership with. On success the client `hardReset("/")`s, the same auth-boundary teardown sign-out uses (a full navigation destroys every data-layer singleton and the sync socket), landing on the signed-out screen.
+"Delete account" in Settings opens a password-gated confirmation (`delete-account-dialog.tsx`). Confirmation is **re-entering the password**, `authClient.deleteUser({ password })`. Google-only signup is now supported while signup is open (ADR 0011); those users first set a password through the existing emailed Forgot password flow, as the dialog explains. This preserves password confirmation rather than adding a weaker social-account exception. On success the client `hardReset("/")`s, the same auth-boundary teardown sign-out uses (a full navigation destroys every data-layer singleton and the sync socket), landing on the signed-out screen.
 
 Server-side, Better Auth's built-in `user.deleteUser` owns the lifecycle; we hang the extra teardown off its hooks (`worker/auth.ts`, with the guard + Stripe logic factored into `worker/account-deletion.ts`):
 
@@ -31,7 +31,7 @@ Two places the implementation deliberately goes **beyond** it:
 Two grilled items consciously **not built**:
 
 - **Type-to-confirm.** Password re-entry already forces a deliberate, identity-proving act — the mis-click and the shared-machine cases are both covered by one field; a second ritual adds friction without adding proof.
-- **Email-token confirmation for Google-only accounts.** Impossible today — email+password is the only signup path, so every account has a password. Revisit if Google-only signup ever exists.
+- **Email-token deletion confirmation for Google-only accounts.** Google-only signup now exists, but deletion retains password confirmation. The existing emailed password-reset flow can create that credential before deletion.
 
 ## Consequences / rejected
 

@@ -16,7 +16,7 @@ Keep this file brief. Put task-specific guidance behind a pointer.
 - **Key the DO through `resolveUserId`**, never the email. The one exception is the owner-continuity bridge to `'default'`.
 - **The `/api` session check trusts the server session.**
 - **The SSRF guard in `worker/unfurl.ts` revalidates every redirect hop.**
-- **Google is `disableSignUp: true`**, never `disableImplicitSignUp`. Signup gates fail closed: `SIGNUP_OPEN` must be the exact literal `"true"`. Admin routes return 404.
+- **Google uses `disableSignUp: !isSignupOpen(env)`**, never `disableImplicitSignUp`. Signup gates fail closed: `SIGNUP_OPEN` must be the exact literal `"true"`. Invite redemption stays on email signup. Admin routes return 404.
 - **Send all transactional email through `worker/email.ts`.** Park sends on `ctx.waitUntil`.
 - **Decode request bodies against Effect Schema.**
 - **The app is a pure static SPA.** Code that touches `nodesCollection` stays off the server and render pass.

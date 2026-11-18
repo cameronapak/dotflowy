@@ -19,9 +19,8 @@ import { Input } from "./ui/input";
  * header More menu. Deletion is PERMANENT and IMMEDIATE: it cancels any active
  * subscription, erases the outline (the per-user Durable Object), removes the
  * account, and signs out. We confirm by re-entering the password — the same
- * proof-of-ownership Better Auth's `deleteUser({ password })` requires (every
- * account has one; email+password is the only signup path, so this works even
- * for Google-linked accounts).
+ * proof-of-ownership Better Auth's `deleteUser({ password })` requires.
+ * Google-only users first set a password through the emailed reset flow.
  *
  * On success we hard-navigate to "/" via `hardReset` — the auth-boundary
  * teardown rule (a full navigation destroys every data-layer singleton and the
@@ -105,6 +104,10 @@ export function DeleteAccountDialog({
         </p>
 
         <form onSubmit={onConfirm} className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">
+            Signed up with Google and don't have a password? Sign out and use
+            Forgot password on the sign-in screen to set one first.
+          </p>
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="font-medium">Enter your password to confirm</span>
             <Input

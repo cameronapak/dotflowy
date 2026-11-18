@@ -413,7 +413,7 @@ export const handleCaptureKeys = Effect.fn("Capture.keys")(
             fail(
               403,
               "credential_required",
-              "Sign in to your account before creating an API key.",
+              "Set a password before creating an API key. Sign out and use Forgot password on the sign-in screen, then sign in again.",
             ),
           );
         return json(created, 201);

@@ -477,10 +477,9 @@ export function AuthScreen() {
           </p>
         )}
 
-        {/* Sign-in mode only: Google can't create an account (the server-side
-            invite gate covers OAuth too — worker/auth.ts), so offering it on
-            the signup form would only manufacture signup_disabled errors. */}
-        {mode === "signin" && (
+        {/* Existing accounts can always sign in. Google signup is offered only
+            when open; invite redemption stays on the email signup form. */}
+        {(mode === "signin" || (isSignup && signupOpen)) && (
           <>
             <div className="my-4 flex items-center gap-3">
               <div className="h-px flex-1 bg-border" />

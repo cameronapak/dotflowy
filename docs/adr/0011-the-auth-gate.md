@@ -1,7 +1,7 @@
 # The auth gate
 
-Identity is **Better Auth** (`worker/auth.ts`): email + password signup, sessions in D1. Signup has
-**three states**, all decided server-side on `/sign-up/email` (hiding UI wouldn't stop a direct POST):
+Identity is **Better Auth** (`worker/auth.ts`): email + password and Google signup, sessions in D1. Signup has
+**three states**, decided server-side (hiding UI wouldn't stop a direct POST):
 
 - **CLOSED** — `INVITE_CODES` unset/empty and no per-email invite matches: nobody can create an
   account. Fail-closed default.
@@ -11,8 +11,9 @@ Identity is **Better Auth** (`worker/auth.ts`): email + password signup, session
   who want one.
 - **OPEN** (#293) — `SIGNUP_OPEN === "true"` (fail-closed: only that exact literal opens it; the
   pure gate is `isSignupOpen` in `worker/identity.ts`) skips the invite requirement. Signup is then
-  gated by **Cloudflare Turnstile** instead of a code. `SIGNUP_OPEN` ships **unset** — opening
-  signup is a deliberate runbook flip, not a deploy side effect. `INVITE_CODES` and per-email
+  gated by **Cloudflare Turnstile** on the email path when configured. Google signup uses Google's
+  OAuth flow, not the email captcha endpoint. `wrangler.jsonc` currently sets `SIGNUP_OPEN` to `"true"`;
+  the local `.dev.vars.example` keeps it unset. `INVITE_CODES` and per-email
   invites stay working as permanent backdoors regardless of state.
 
 **Turnstile** (#293) is Better Auth's `captcha` plugin, provider `cloudflare-turnstile`, registered
@@ -45,11 +46,16 @@ to `'default'`, carrying their existing data over with **zero copy** — everyon
 own `user.id` DO. `ensureSeeded` (the legacy D1 import) therefore runs only for the `'default'` DO;
 new users start empty. Removable once that data is wherever it belongs.
 
-**Google sign-in (sign-IN only, explicit linking).** `socialProviders.google` is registered when the
-`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` secrets exist, with **`disableSignUp: true`** — the OAuth
-face of the invite gate. It must be `disableSignUp` (hard), not `disableImplicitSignUp`, which a
-client-supplied `requestSignUp: true` waives — that would be an invite bypass. A Google identity
-with no account gets `?error=signup_disabled` back on the AuthScreen. **Linking an existing
+**Google sign-in and open signup.** `socialProviders.google` is registered when the
+`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` secrets exist, with **`disableSignUp: !isSignupOpen(env)`**.
+When signup is open, a first Google sign-in creates an account and session; Google's verified-email
+claim supplies the account's verification state. There is no password or separate Dotflowy email
+confirmation for a Google-verified address. The Google button appears on both sign-in and open-signup
+screens. When signup is not open, Google can only sign in or link existing accounts: new users get
+`?error=signup_disabled`, with instructions to redeem an invite through email signup and verify first.
+Invite codes are not transported through OAuth. It must be `disableSignUp` (hard), not
+`disableImplicitSignUp`, which a client-supplied `requestSignUp: true` waives. Turning signup off
+does not lock out existing Google accounts. **Linking an existing
 email+password account to Google:** the EXPLICIT path (`linkSocial` behind the More menu's "Connect
 Google", while signed in) always works. IMPLICIT linking on a signed-out Google sign-in stays at
 Better Auth's default, which refuses when the local email is **unverified** — because an attacker who
@@ -65,11 +71,19 @@ still-unverified brand-new signup stays refused until it confirms. Don't reach f
 `requireLocalEmailVerified: false`: deprecated upstream, and the gate becomes unconditional next
 minor. `allowDifferentEmails: true` loosens only the authenticated explicit-link path (the session
 proves ownership); the signed-out lookup is email-keyed, so a different-address Google sign-in
-finds no account and hits the signup gate. Linking preserves `user.id`, so the outline DO routing
+finds no account and either creates a separate account while signup is open or hits the signup gate.
+Linking preserves `user.id`, so the outline DO routing
 never changes. The whole flow is navigation-based (redirects, fresh page loads), which satisfies
 the hardReset teardown rule by construction; on an MCP OAuth hop the AuthScreen passes
 `/api/auth/mcp/authorize?<query>` as the `callbackURL`, so the Google callback itself resumes the
 authorize flow top-level.
+
+Google-only users can set a password through the existing emailed Forgot password flow. Account
+deletion still requires password confirmation, and API keys still bind to a password version;
+their UI/error guidance points Google-only users to this flow rather than weakening those guards.
+`worker/auth-real.test.ts` exercises the real Better Auth handler, D1 and session cookies with only
+Google's token-exchange transport replaced: open signup, closed/malformed-mode refusal despite
+`requestSignUp`, email invites, repeat Google sign-in after closure, and verified-only linking.
 
 **node:crypto** — Better Auth needs it, so wrangler sets `compatibility_flags: ["nodejs_compat"]`.
 

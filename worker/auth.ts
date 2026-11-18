@@ -240,13 +240,9 @@ export function createAuth(
       // needing a separate resend button.
       sendOnSignIn: true,
     },
-    // Self-serve account deletion (ticket #224 / docs/adr/0051). Confirmed
-    // client-side by re-entering the password (`authClient.deleteUser({password})`)
-    // — every account has one (email+password is the only signup path), so the
-    // password path always works even for Google-linked accounts. Email
-    // verification is deliberately NOT wired (`sendDeleteAccountVerification`
-    // absent): verification is off for beta (ADR 0011), and the fresh-password
-    // check already proves it's the account owner at the keyboard.
+    // Self-serve account deletion (ADR 0051) keeps password confirmation.
+    // Google-only users can first set a password through the existing emailed
+    // password-reset flow. No weaker confirmation for social accounts.
     user: {
       deleteUser: {
         enabled: true,
@@ -297,21 +293,17 @@ export function createAuth(
         },
       },
     },
-    // "Sign in with Google" — sign-IN only. `disableSignUp: true` is the same
-    // invite gate as the /sign-up/email hook, expressed for OAuth: a Google
-    // callback with no matching account is rejected server-side instead of
-    // creating a user, so the social path can't bypass INVITE_CODES. It must
-    // be `disableSignUp` (hard), NOT `disableImplicitSignUp` — the latter is
-    // waived by a client-supplied `requestSignUp: true`, which would reopen
-    // the bypass. Registered only when both secrets exist so a bare local dev
-    // env still constructs auth cleanly.
+    // Google can create accounts only while signup is open. Keep the hard
+    // disableSignUp gate otherwise: disableImplicitSignUp can be bypassed with
+    // requestSignUp. Invited users redeem their code through email signup first.
+    // Existing-account sign-in and linking are unaffected by this signup gate.
     socialProviders:
       env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
         ? {
             google: {
               clientId: env.GOOGLE_CLIENT_ID,
               clientSecret: env.GOOGLE_CLIENT_SECRET,
-              disableSignUp: true,
+              disableSignUp: !isSignupOpen(env),
               prompt: "select_account",
             },
           }
@@ -341,8 +333,8 @@ export function createAuth(
         // Explicit link only: the live session already proves account
         // ownership, so the connected Google identity may use a different
         // address. Does NOT loosen the signed-out path (that lookup is
-        // email-keyed, so a different-address Google sign-in just finds no
-        // account and hits disableSignUp).
+        // email-keyed, so a different-address Google sign-in creates a separate
+        // account only when signup is open, never links to the wrong account).
         allowDifferentEmails: true,
         // Copy Google's name/image after a successful link, not its email or
         // verification state. Linking and signup gates stay unchanged.
@@ -354,10 +346,9 @@ export function createAuth(
     // the local dev origins explicitly; prod is covered by baseURL. e2e (:3210)
     // mocks /api/auth, so it never reaches this, but trusting it costs nothing.
     trustedOrigins: ["http://localhost:3000", "http://localhost:3210"],
-    // Signup gate: /sign-up/email is the ONLY account-creation path (the mcp
-    // plugin's dynamic registration creates OAuth clients, not users), so gating
-    // it here controls signup entirely. Server-side on purpose — hiding the
-    // signup UI wouldn't stop a direct POST to the endpoint.
+    // Email signup gate. Google applies the same open/closed switch above;
+    // invite redemption stays on this email path. MCP dynamic registration
+    // creates OAuth clients, not users. Hiding UI alone is not a signup gate.
     //
     // Three states (#293), all decided here except the captcha:
     //  - OPEN (SIGNUP_OPEN === "true"): the invite requirement is SKIPPED. The

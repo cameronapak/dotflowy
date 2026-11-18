@@ -56,11 +56,9 @@
     // Optional owner-only feedback: leave BOTH unset until separately approved
     // setup. Pin a Better Auth user.id, never an email; the client ID is public.
     // AMP_FEEDBACK_USER_ID and AMP_FEEDBACK_CLIENT_ID: docs/feedback-widget.md.
-    // Open-signup switch (#293). UNSET on purpose — signup stays invite-only on
-    // deploy. Flipping self-serve signup on is a deliberate runbook step: set
-    // this to the literal "true" (only that value opens it; fail-closed) once
-    // Turnstile is configured below. The Turnstile SECRET is a `wrangler secret
-    // put TURNSTILE_SECRET_KEY`, not a var.
+    // Open signup for email and Google. Only the literal "true" opens it;
+    // unset or any other value keeps Google sign-in-only and email invite-gated.
+    // Turnstile protects email signup when its secret is configured below.
     "SIGNUP_OPEN": "true",
     // Cloudflare Turnstile SITE key (#293) — PUBLIC (ships to the browser), so a
     // var, not a secret. Surfaced to the SPA via GET /api/auth-config. Set it to
