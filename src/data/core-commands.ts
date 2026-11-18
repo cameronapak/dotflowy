@@ -1,8 +1,13 @@
 import {
   AlignLeftIcon,
+  ArrowDownIcon,
+  ArrowUpIcon,
+  CollapseIcon,
   CopyPlusIcon,
+  ExpandIcon,
   ForwardIcon,
   LockIcon,
+  MaximizeIcon,
   NumberedIcon,
   TrashIcon,
   UnlockIcon,
@@ -14,7 +19,12 @@ import { waitForPendingWrites } from "./api";
 import { isMirrorsEnabled } from "./flags";
 import { setLocked } from "./mutations";
 import { runStructural } from "./structural";
-import { isNodeInheritedLocked, isNodeLocked, trueSourceOf } from "./tree";
+import {
+  childrenOf,
+  isNodeInheritedLocked,
+  isNodeLocked,
+  trueSourceOf,
+} from "./tree";
 
 /**
  * `/paragraph` is CORE, not a plugin (ADR 0045): the paragraph glyph is core's
@@ -151,6 +161,58 @@ export const CORE_COMMANDS: CommandSpec[] = [
     keywords: ["mirror", "synced", "instance", "alias", "reference", "clone"],
     available: () => isMirrorsEnabled(),
     run: (id, ctx) => ctx.mutations.onRequestMirror(id),
+  },
+  // The row verbs the phone's ⋯ menu used to hold (#192): `/` is the phone's
+  // one per-bullet menu, so these sit here too. They trail Move and Mirror so
+  // `/move` still lands on the picker first. Move up/down re-resolve the
+  // focused instance (ADR 0022), as their Mod+Shift+arrow keys do. Collapse
+  // and Expand are two specs, like Lock/Unlock, because a spec's label is fixed.
+  {
+    id: "move-up",
+    label: "Move up",
+    description: "Reorder above the previous sibling",
+    icon: ArrowUpIcon,
+    keywords: ["move", "up", "reorder"],
+    available: () => true,
+    run: (id, ctx) => ctx.mutations.onMoveUp(id),
+  },
+  {
+    id: "move-down",
+    label: "Move down",
+    description: "Reorder below the next sibling",
+    icon: ArrowDownIcon,
+    keywords: ["move", "down", "reorder"],
+    available: () => true,
+    run: (id, ctx) => ctx.mutations.onMoveDown(id),
+  },
+  {
+    id: "collapse",
+    label: "Collapse",
+    description: "Hide this bullet's children",
+    icon: CollapseIcon,
+    keywords: ["collapse", "fold", "hide", "children"],
+    available: (node, ctx) =>
+      !node.collapsed && !!ctx && childrenOf(ctx.tree, node.id).length > 0,
+    run: (id, ctx) => ctx.mutations.onToggleCollapsed(id, true),
+  },
+  {
+    id: "expand",
+    label: "Expand",
+    description: "Show this bullet's children",
+    icon: ExpandIcon,
+    keywords: ["expand", "unfold", "show", "children"],
+    available: (node, ctx) =>
+      !!node.collapsed && !!ctx && childrenOf(ctx.tree, node.id).length > 0,
+    run: (id, ctx) => ctx.mutations.onToggleCollapsed(id, false),
+  },
+  {
+    id: "zoom",
+    label: "Zoom in",
+    description: "Make this bullet the temporary root",
+    icon: MaximizeIcon,
+    keywords: ["zoom", "focus", "root", "open"],
+    available: () => true,
+    run: (id, ctx) => ctx.mutations.onZoom(id),
   },
   // Delete is the fourth surface for removing a node -- the bullet keymap
   // (Backspace), the Cmd+K `node:delete` verb, and the selection menu already

@@ -167,13 +167,19 @@ interface PickTarget {
 
 // --- The curated slash palette (ADR 0049) ----------------------------------
 //
-// Text-authoring only: the structural verbs (core Move/Mirror/Delete, daily's
+// Text-authoring only: the structural verbs (core Move/Mirror/Delete and the
+// row verbs Move up/down, Collapse/Expand, Zoom in, daily's
 // Send/Mirror to Today) are filtered out so the capture surface can never
 // relocate itself mid-compose. Everything else -- /paragraph, /todo, /bullet,
 // the emphasis/highlight/spoiler wraps -- stays.
 const STRUCTURAL_COMMAND_IDS = new Set([
   "move",
   "mirror",
+  "move-up",
+  "move-down",
+  "collapse",
+  "expand",
+  "zoom",
   "delete",
   "send-to-today",
   "mirror-to-today",

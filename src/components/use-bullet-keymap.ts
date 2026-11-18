@@ -506,12 +506,13 @@ export function useBulletKeymap({
               const el = textRef.current;
               const key = el?.dataset.historyKey;
               if (!el || !key) return;
+              // Narrow screens hide the row button, so anchor to the text.
+              const trigger = el
+                .closest(".outline-row")
+                ?.querySelector<HTMLElement>(".node-actions-trigger");
               openNodeActionsMenu({
                 key,
-                anchor:
-                  el
-                    .closest(".outline-row")
-                    ?.querySelector<HTMLElement>(".node-actions-trigger") ?? el,
+                anchor: trigger?.offsetParent ? trigger : el,
                 keyboard: true,
                 returnFocus: el,
               });

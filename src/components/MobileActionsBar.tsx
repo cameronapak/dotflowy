@@ -11,7 +11,6 @@ import {
 
 import {
   IndentIcon,
-  MoreIcon,
   OutdentIcon,
   RedoIcon,
   SquareCheckIcon,
@@ -58,8 +57,6 @@ export interface MobileBarActions {
   /** Insert a literal "/" at the caret so the row's own detectSlash opens the
    *  command palette (insert-and-open, not a toggle). */
   insertSlash: () => void;
-  /** Open the focused bullet's actions sheet (#192). */
-  openActions: () => void;
 }
 
 /**
@@ -552,9 +549,6 @@ export function MobileActionsBar({
               </BarButton>
               <BarButton label="Command menu" onRun={actions.insertSlash}>
                 <SquareSlashIcon className="size-5" />
-              </BarButton>
-              <BarButton label="Bullet actions" onRun={actions.openActions}>
-                <MoreIcon className="size-5" />
               </BarButton>
             </>
           )}

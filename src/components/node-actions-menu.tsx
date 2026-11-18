@@ -1,13 +1,6 @@
 import { Menu } from "@base-ui/react/menu";
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type RefObject,
-} from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 
-import { useIsMobile } from "@/hooks/use-mobile";
 import { MoreIcon } from "@/lib/icons";
 
 import type { CommandCenterAction } from "../data/command-center-types";
@@ -16,16 +9,13 @@ import { getNodeActionBridge } from "../data/command-bridge";
 import { buildNodeActions } from "../data/command-center";
 import { getTreeIndex } from "../data/tree-store";
 import { instanceIdForKey } from "../data/visible-order";
-import { MenuList } from "./menu-list";
-import { TypingSuggestions } from "./typing-suggestions";
 import { Kbd, KbdGroup } from "./ui/kbd";
 
 /**
  * The bullet actions menu (issue #192). One menu per editor; a row's More
- * button, the mobile actions bar, and Mod+Shift+. open it for one row KEY.
- * Its rows are the Cmd+K "Acting on" actions (ADR 0034), so the two surfaces
- * share one action list. Wide screens anchor a Base UI menu to the trigger;
- * below 768px it is a Liquidglass sheet (ADR 0066).
+ * button and Mod+Shift+. open it for one row KEY. Its rows are the Cmd+K
+ * "Acting on" actions (ADR 0034), so the two surfaces share one action list.
+ * Phones have no row button: the `/` palette carries these verbs there.
  */
 interface Request {
   /** The row key: mirror instances keep their own address (ADR 0022). */
@@ -80,7 +70,6 @@ export function NodeActionsButton({
 }
 
 export function NodeActionsMenu() {
-  const mobile = useIsMobile();
   const [request, setRequest] = useState<Request | null>(null);
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<(() => void) | null>(null);
@@ -124,20 +113,6 @@ export function NodeActionsMenu() {
     setRequest(null);
   };
 
-  // The accessory never takes focus, so Escape arrives at the editor first.
-  useEffect(() => {
-    if (!mobile || !open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(false);
-      setRequest(null);
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [mobile, open]);
-
   // A plain trigger, not a Base UI one, so keep its expanded state here.
   useLayoutEffect(() => {
     const trigger = request?.anchor;
@@ -147,46 +122,6 @@ export function NodeActionsMenu() {
   }, [request, open]);
 
   if (!request) return null;
-
-  // Narrow screens: a keyboard accessory, like the `/` results (ADR 0066).
-  // It never takes focus, so the caret and software keyboard stay put.
-  if (mobile) {
-    const entries = remove ? [...actions, remove] : actions;
-    return open ? (
-      <TypingSuggestions
-        getEditor={() => request.returnFocus}
-        onDismiss={() => setOpen(false)}
-      >
-        <MenuList
-          inDock
-          label="Bullet actions"
-          activeIndex={-1}
-          onHover={() => {}}
-          onSelect={(i) => {
-            const action = entries[i];
-            setOpen(false);
-            setRequest(null);
-            action?.run();
-          }}
-          entries={entries.map((action) => ({
-            key: action.id,
-            render: () => (
-              <span
-                className={
-                  action === remove
-                    ? "flex items-center gap-2 text-destructive"
-                    : "flex items-center gap-2"
-                }
-              >
-                <action.icon className="size-4 shrink-0 opacity-70" />
-                {action.label}
-              </span>
-            ),
-          }))}
-        />
-      </TypingSuggestions>
-    ) : null;
-  }
 
   return (
     <Menu.Root

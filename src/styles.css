@@ -1476,7 +1476,7 @@ h2 span.protection-indicator {
  * reveals like the chevron (hover, focus, or while its menu is open) and keeps
  * its box when hidden, so the reveal never reflows the text. Not a Tab stop:
  * Tab indents, and Mod+Shift+. opens the same menu from the keyboard. Coarse
- * pointers use the actions bar instead, because the chevron owns the row's
+ * pointers use the `/` palette instead, because the chevron owns the row's
  * right edge there (ADR 0029).
  */
 .node-actions-trigger {
@@ -1509,7 +1509,7 @@ h2 span.protection-indicator {
   opacity: 1;
 }
 
-/* Coarse pointers use the actions bar (the chevron owns this edge), and
+/* Coarse pointers use the `/` palette (the chevron owns this edge), and
    narrow canvases keep the width for text and embeds. */
 @media (pointer: coarse), (width < 768px) {
   .node-actions-trigger {

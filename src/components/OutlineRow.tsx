@@ -657,7 +657,7 @@ function RowChrome({
           getCtx={pluginCtx}
         />
         {/* Bullet actions (#192): hover and editing reveal it; coarse pointers
-            use the actions bar instead, since the chevron owns this edge. */}
+            use the `/` palette instead, since the chevron owns this edge. */}
         <NodeActionsButton
           rowKey={rowKey}
           label={stripQuoteMarker(content.text).trim() || "empty bullet"}

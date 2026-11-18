@@ -195,7 +195,7 @@ import { MirrorBadge } from "./mirror-chrome";
 import { MobileBreadcrumb } from "./mobile-breadcrumb";
 import { MobileActionsBar, type MobileBarActions } from "./MobileActionsBar";
 import { openMoveDialog } from "./move-dialog-opener";
-import { NodeActionsMenu, openNodeActionsMenu } from "./node-actions-menu";
+import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeBody } from "./node-body";
 import { BackToFind } from "./node-switcher";
 import { NodeDecorations } from "./NodeDecorations";
@@ -2725,19 +2725,6 @@ function useMobileBarActions({
       insertSlash: () => {
         if (!focusedEl()) return;
         document.execCommand("insertText", false, "/");
-      },
-      // The bullet actions sheet (#192). The bar's tap keeps the caret, so the
-      // focused span is both the target and where focus returns.
-      openActions: () => {
-        const key = findFocusedId();
-        const el = focusedEl();
-        if (key && el)
-          openNodeActionsMenu({
-            key,
-            anchor: el,
-            keyboard: false,
-            returnFocus: el,
-          });
       },
     };
   }, [refs, findFocusedId, pendingFocus, commands]);

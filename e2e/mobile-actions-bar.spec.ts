@@ -590,20 +590,19 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(page.locator('[role="listbox"]')).toBeVisible();
   });
 
-  test("the actions button lists the bullet's actions above the keyboard", async ({
+  test("the slash menu carries the row verbs the phone has no other way to reach", async ({
     page,
   }) => {
     await load(page);
-    await text(page, "alpha").click();
-    await btn(page, "Bullet actions").click();
-    // A keyboard accessory, not a modal: the caret (and so the software
-    // keyboard) stays in the bullet while the actions are open and after.
-    const list = page.getByRole("listbox", { name: "Bullet actions" });
-    await expect(list.getByRole("option").last()).toHaveText("Delete");
-    await expect(text(page, "alpha")).toBeFocused();
-    await list.getByRole("option", { name: "Complete" }).click();
-    await expect(list).toHaveCount(0);
-    await expect(text(page, "alpha")).toHaveAttribute("data-completed", "true");
+    await caretAt(page, "alpha", 0);
+    await btn(page, "Command menu").click();
+    // Phones get no row ⋯ button (#192), so `/` holds the bullet's row verbs.
+    const list = page.locator('[role="listbox"]');
+    for (const name of ["Move up", "Move down", "Zoom in", "Delete"])
+      await expect(list.getByRole("option", { name })).toHaveCount(1);
+    await list.getByRole("option", { name: "Collapse" }).click();
+    await expect(text(page, "alpha-1")).toHaveCount(0);
+    await expect(text(page, "alpha")).toHaveText("Alpha");
     await expect(text(page, "alpha")).toBeFocused();
   });
 

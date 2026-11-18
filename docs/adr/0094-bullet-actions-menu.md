@@ -12,9 +12,8 @@ chose the ⋯ button.
 
 ## Decisions
 
-1. **One menu, three ways in.** A ⋯ button at the row's end, `Mod+Shift+.`
-   while a bullet holds the caret, and a ⋯ button in the mobile actions bar
-   (0030) all open the same per-editor `NodeActionsMenu`.
+1. **One menu, two ways in.** A ⋯ button at the row's end and `Mod+Shift+.`
+   while a bullet holds the caret open the same per-editor `NodeActionsMenu`.
 2. **Cmd+K's action list, not a new registry.** The menu renders
    `buildNodeActions`, the "Acting on" list, for the row's instance id, the
    id Cmd+K's ambient target reads from `data-node-id`. Plugin `CommandSpec`s
@@ -34,13 +33,17 @@ chose the ⋯ button.
    the hotkey library's raw form, so the physical Period key still matches
    where Shift+. types `>` or `:`. `Mod+/` was rejected because Safari uses
    it for the status bar and it needs Shift on many non-US layouts.
-6. **Touch uses the editing bar, and the keyboard stays up.** On coarse
-   pointers the row's right edge belongs to the chevron (0029), and below
-   768px the canvas keeps its width for text and embeds, so the row button is
-   hidden there and the bar holds ⋯. The list opens as a keyboard accessory,
-   the same nonmodal panel as the `/` results (0066), not a Liquidglass sheet:
-   a modal sheet takes focus and dismisses the software keyboard mid-edit.
-   Escape or an outside tap closes it; choosing an action keeps the caret.
+6. **Phones use `/`, not a second menu.** On coarse pointers the row's right
+   edge belongs to the chevron (0029), and below 768px the canvas keeps its
+   width for text and embeds, so the row button is hidden there. A ⋯ button
+   in the mobile actions bar (0030) was tried and dropped: its list nearly
+   matched the bar's `/` palette, which already held Move, Mirror, Delete,
+   and the plugin commands, and Indent, Outdent, and Complete have their own
+   bar buttons. The rest became core `/` commands: Move up, Move down,
+   Collapse or Expand (two specs, like Lock and Unlock, since a label is
+   fixed), and Zoom in. They trail Move and Mirror so `/move` still lands on
+   the picker, and quick-add filters them out (0049). `/` is a nonmodal
+   keyboard accessory (0066), so the software keyboard stays up.
 7. **Desktop actions run after close.** An action runs when the menu finishes
    closing, so the Move and Mirror pickers and each action's own caret
    handoff are not undone by focus restoration.
