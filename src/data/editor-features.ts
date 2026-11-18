@@ -29,8 +29,11 @@ const KEYS = {
   focus: "focus:settings",
   colorTheme: "appearance:color-theme",
   aiAppIcons: "appearance:ai-app-icons",
+  indentGuides: "appearance:indent-guides",
 } as const;
 export type EditorFeature = "bible" | "daily" | "embeds" | "focusSessions";
+/** An Appearance on/off switch; a missing row means on. */
+export type AppearanceToggle = "aiAppIcons" | "indentGuides";
 /** A Daily notes option that is a plain on/off switch (ADR 0070). */
 export type DailyToggle = "dayStream" | "weekStrip";
 export const EMPTY_DAYS_MODES = ["show", "fold", "skip"] as const;
@@ -45,6 +48,7 @@ const featureRowSchema = Schema.Struct({
     KEYS.focusSessions,
     KEYS.externalEmbeds,
     KEYS.aiAppIcons,
+    KEYS.indentGuides,
   ]),
   enabled: Schema.Boolean,
 });
@@ -82,6 +86,7 @@ const isPreferenceKey = Schema.is(
       KEYS.focusSessions,
       KEYS.externalEmbeds,
       KEYS.aiAppIcons,
+      KEYS.indentGuides,
       KEYS.weekStart,
       KEYS.dayStream,
       KEYS.weekStrip,
@@ -137,6 +142,7 @@ interface FeatureSnapshot {
   /** The synced color theme id, or null when the account has none (ADR 0082). */
   colorTheme: string | null;
   aiAppIcons: boolean;
+  indentGuides: boolean;
   ready: boolean;
   error: boolean;
 }
@@ -155,6 +161,7 @@ const INITIAL: FeatureSnapshot = {
   focus: DEFAULT_FOCUS_SETTINGS,
   colorTheme: null,
   aiAppIcons: true,
+  indentGuides: true,
   ready: false,
   error: false,
 };
@@ -185,6 +192,9 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
   const aiAppIconsRow = rows.find((r) => r.key === KEYS.aiAppIcons);
   const aiAppIcons =
     aiAppIconsRow?.key === KEYS.aiAppIcons ? aiAppIconsRow.enabled : true;
+  const indentGuidesRow = rows.find((r) => r.key === KEYS.indentGuides);
+  const indentGuides =
+    indentGuidesRow?.key === KEYS.indentGuides ? indentGuidesRow.enabled : true;
   const focus =
     focusRow?.key === KEYS.focus ? focusRow.settings : DEFAULT_FOCUS_SETTINGS;
   // Temporarily suspend the stream, including saved opt-ins, without changing
@@ -232,6 +242,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     snapshot.focus === focus &&
     snapshot.colorTheme === colorTheme &&
     snapshot.aiAppIcons === aiAppIcons &&
+    snapshot.indentGuides === indentGuides &&
     snapshot.ready === ready &&
     snapshot.error === error
   )
@@ -251,6 +262,7 @@ function rebuild(ready = snapshot.ready, error = snapshot.error) {
     focus,
     colorTheme,
     aiAppIcons,
+    indentGuides,
     ready,
     error,
   };
@@ -418,10 +430,14 @@ export async function setColorThemePreference(theme: string): Promise<void> {
   await transaction.isPersisted.promise;
 }
 
-/** Choose source logos or a generic AI mark without changing attribution. */
-export async function setAiAppIcons(enabled: boolean): Promise<void> {
+/** Persist an Appearance switch, such as source logos (ADR 0081) or indent
+ *  guides (ADR 0093). Optimistic: a failed save rolls back. */
+export async function setAppearanceToggle(
+  toggle: AppearanceToggle,
+  enabled: boolean,
+): Promise<void> {
   await loadEditorFeatures();
-  const key = KEYS.aiAppIcons;
+  const key = KEYS[toggle];
   const transaction = collection.has(key)
     ? collection.update(key, (draft) => {
         if ("enabled" in draft) draft.enabled = enabled;

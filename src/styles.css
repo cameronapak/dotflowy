@@ -1006,6 +1006,69 @@ body:has(.outline-shell) {
 }
 
 /*
+ * Indent guides (ADR 0093). Every ancestor of a row is an expanded parent in
+ * view, so a row at depth d paints one faint line per ancestor level in its own
+ * indent gutter. Rows stack flush, so a level's segments join into one line
+ * that runs exactly as long as that ancestor's visible subtree, and breaks at
+ * its next sibling. Each line sits on its ancestor's bullet axis: 16px into the
+ * row on both pointer types (see `.outline-row` below). Decorative only:
+ * indentation still carries the hierarchy, so the line may vanish in Forced
+ * Colors Mode, which drops gradient backgrounds.
+ */
+.outline-list[data-indent-guides] {
+  /* Derived from a theme token, so every color theme and mode follows. */
+  --indent-guide: oklch(from var(--muted-foreground) l c h / 0.25);
+}
+
+@media (prefers-contrast: more) {
+  .outline-list[data-indent-guides] {
+    --indent-guide: var(--muted-foreground);
+  }
+}
+
+.outline-list[data-indent-guides] .outline-node::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: calc(var(--depth, 0) * var(--indent-step));
+  pointer-events: none;
+  background-image: linear-gradient(
+    to right,
+    transparent 15.5px,
+    var(--indent-guide) 15.5px 16.5px,
+    transparent 16.5px
+  );
+  background-size: var(--indent-step) 100%;
+}
+
+/*
+ * A fine pointer keeps the chevron in the left gutter, right on the parent's
+ * guide. While the chevron shows, cut the guide behind its 14px glyph (plus 1px
+ * each side) so the two never cross. The glyph centers in the 24px
+ * `.collapse-toggle` box; keep the box top in step with that rule.
+ */
+@media not (pointer: coarse) {
+  .outline-list[data-indent-guides]
+    .outline-node:has(
+      > .outline-row:is(:hover, :focus-within)
+        > .collapse-toggle[data-has-children="true"],
+      > .outline-row > .collapse-toggle[data-collapsed="true"]
+    )::before {
+    --chevron-top: calc(var(--reading-line-box) / 2 - 6.25px);
+    mask:
+      linear-gradient(#000 0 0) 0 0 / calc(100% - var(--indent-step)) 100%
+        no-repeat,
+      linear-gradient(
+          #000 calc(var(--chevron-top) + 4px),
+          transparent 0 calc(var(--chevron-top) + 20px),
+          #000 0
+        )
+        100% 0 / var(--indent-step) 100% no-repeat;
+  }
+}
+
+/*
  * The leading padding centers the 16px bullet on the breadcrumb Home button's
  * axis (a 32px icon button flush with the same content column, so its icon
  * centers 16px in): 8px padding + half the bullet = 16px. Coarse re-declares
@@ -1347,7 +1410,9 @@ h2 span.protection-indicator {
  */
 .collapse-toggle {
   position: absolute;
-  left: -15px;
+  /* Centers the 16px box 8px left of the row, on the parent's bullet axis, so
+     the chevron sits on its indent guide (ADR 0093). */
+  left: -16px;
   /* Absolutely positioned, so it aligns via `top` (not margin) -- but to the
      same text optical center as the bullet, scaling with the reading size. The
      24px box centers the chevron, so top = optical center - half the box
@@ -1490,7 +1555,7 @@ h2 span.protection-indicator {
 
   .outline-row:has(.bullet-number) .collapse-toggle {
     font-size: var(--reading-font-size);
-    left: calc(-15px + 16px - var(--number-width));
+    left: calc(-16px + 16px - var(--number-width));
   }
 }
 
@@ -1679,7 +1744,7 @@ h2 span.protection-indicator {
   /*
    * Right-edge chevron (ADR 0029, Workflowy-mobile parity). CSS-only relocation:
    * the same absolutely-positioned .collapse-toggle flips from the left gutter
-   * (left:-15px) to the row's right edge. Because <li> is width:100% with depth
+   * (left:-16px) to the row's right edge. Because <li> is width:100% with depth
    * as paddingInlineStart, right:0 lands on the viewport edge at every depth --
    * one clean chevron column. Its touch-hitbox ::before (right:0, 44px, growing
    * leftward) now grows into the reserved right padding below, not the margin.

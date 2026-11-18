@@ -74,13 +74,14 @@ import { Switch } from "../components/ui/switch";
 import { parseCustomTheme, seedColor } from "../data/custom-theme";
 import {
   retryEditorFeatures,
-  setAiAppIcons,
+  setAppearanceToggle,
   setDailyToggle,
   setEditorFeature,
   setEmptyDaysMode,
   setExternalEmbeds,
   setWeekStart,
   useEditorFeatures,
+  type AppearanceToggle,
   type DailyToggle,
   type EditorFeature,
   type EmptyDaysMode,
@@ -1229,19 +1230,23 @@ function AppearanceSection() {
     !(membership.legacyLeaf && id === "leaf");
   const { textSize, setTextSize } = useTextSize();
   const preferences = useEditorFeatures();
-  const [savingAiAppIcons, setSavingAiAppIcons] = useState(false);
-  const toggleAiAppIcons = (enabled: boolean) => {
-    setSavingAiAppIcons(true);
+  const [saving, setSaving] = useState<
+    Partial<Record<AppearanceToggle, boolean>>
+  >({});
+  const toggle = (name: AppearanceToggle, label: string, enabled: boolean) => {
+    setSaving((s) => ({ ...s, [name]: true }));
     void Effect.runPromise(
-      Effect.tryPromise(() => setAiAppIcons(enabled)).pipe(
+      Effect.tryPromise(() => setAppearanceToggle(name, enabled)).pipe(
         Effect.catch(() =>
           Effect.sync(() =>
             toast.error(
-              "Couldn't save AI app icons. Your previous setting was restored.",
+              `Couldn't save ${label}. Your previous setting was restored.`,
             ),
           ),
         ),
-        Effect.ensuring(Effect.sync(() => setSavingAiAppIcons(false))),
+        Effect.ensuring(
+          Effect.sync(() => setSaving((s) => ({ ...s, [name]: false }))),
+        ),
       ),
     );
   };
@@ -1392,8 +1397,32 @@ function AppearanceSection() {
                   aria-label="Show AI app icons"
                   aria-describedby="ai-app-icons-description"
                   checked={preferences.aiAppIcons}
-                  disabled={!preferences.ready || savingAiAppIcons}
-                  onCheckedChange={toggleAiAppIcons}
+                  disabled={!preferences.ready || saving.aiAppIcons}
+                  onCheckedChange={(on) =>
+                    toggle("aiAppIcons", "AI app icons", on)
+                  }
+                />
+              </SettingsSwitchTarget>
+            }
+          />
+          <SettingRow
+            title="Show indent guides"
+            description={
+              <span id="indent-guides-description">
+                Draw a faint line beside nested items, so you can trace each one
+                back to its parent.
+              </span>
+            }
+            action={
+              <SettingsSwitchTarget>
+                <Switch
+                  aria-label="Show indent guides"
+                  aria-describedby="indent-guides-description"
+                  checked={preferences.indentGuides}
+                  disabled={!preferences.ready || saving.indentGuides}
+                  onCheckedChange={(on) =>
+                    toggle("indentGuides", "indent guides", on)
+                  }
                 />
               </SettingsSwitchTarget>
             }

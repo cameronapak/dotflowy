@@ -66,6 +66,24 @@ import { useBulletKeymap } from "./use-bullet-keymap";
 // the drag projection reads too (use-drag-reorder.ts INDENT_FALLBACK).
 export const INDENT_PX = 24;
 
+/** A windowed row's position: depth-driven indent, virtualizer offset, and the
+ *  `--depth` the indent guides read (styles.css). */
+function rowPosition(
+  depth: number,
+  start: number,
+  scrollMargin: number,
+): CSSProperties & { "--depth": number } {
+  return {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: `max(100cqw, calc(${depth * INDENT_PX}px + min(100cqw, var(--outline-node-min-width))))`,
+    transform: `translateY(${start - scrollMargin}px)`,
+    paddingInlineStart: depth * INDENT_PX,
+    "--depth": depth,
+  };
+}
+
 /**
  * One flat, windowed outline row (ADR 0019) -- THE outline row (the recursive
  * fallback path was deleted once dogfooded). It is a LEAF (no children
@@ -404,14 +422,7 @@ function RowChrome({
       data-selected={selectionFill ?? undefined}
       data-index={index}
       ref={measureRef}
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: `max(100cqw, calc(${depth * INDENT_PX}px + min(100cqw, var(--outline-node-min-width))))`,
-        transform: `translateY(${start - scrollMargin}px)`,
-        paddingInlineStart: depth * INDENT_PX,
-      }}
+      style={rowPosition(depth, start, scrollMargin)}
     >
       <div
         className="outline-row"
@@ -681,14 +692,7 @@ function MirrorMissingRow({
       data-mirror="broken"
       data-index={index}
       ref={measureRef}
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: `max(100cqw, calc(${depth * INDENT_PX}px + min(100cqw, var(--outline-node-min-width))))`,
-        transform: `translateY(${start - scrollMargin}px)`,
-        paddingInlineStart: depth * INDENT_PX,
-      }}
+      style={rowPosition(depth, start, scrollMargin)}
     >
       <div className="outline-row" data-faded={true}>
         <span className="collapse-toggle touch-hitbox" aria-hidden="true" />
