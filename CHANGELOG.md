@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.12.0
+
+### Minor Changes
+
+- 5d10718: Nested items now show faint indent guides under each parent's bullet, so you can trace deep outlines at a glance. Turn them off in Settings, Appearance.
+
 ## 3.11.1
 
 ### Patch Changes
