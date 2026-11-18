@@ -18,6 +18,7 @@ import {
   setCaretOffset,
 } from "./inline-code";
 import { openInlineTargetAtCaret } from "./link-keymap";
+import { openNodeActionsMenu } from "./node-actions-menu";
 import { nodeZoomShortcuts } from "./node-zoom-shortcut";
 import {
   exitEmptyQuoteOnEnter,
@@ -493,6 +494,28 @@ export function useBulletKeymap({
             // Cmd/Ctrl+.: zoom this node to become the temporary root.
             hotkey: "Mod+.",
             callback: () => commands.onZoom(node.id),
+          },
+          {
+            // Cmd/Ctrl+Shift+.: open this bullet's actions menu (#192),
+            // anchored to the row's More button. The row key is the text's
+            // history key, so a mirror instance keeps its own address. The
+            // raw form is the library's typed path for Shift+punctuation; the
+            // physical Period key matches on layouts where it types > or :.
+            hotkey: { key: ".", mod: true, shift: true },
+            callback: () => {
+              const el = textRef.current;
+              const key = el?.dataset.historyKey;
+              if (!el || !key) return;
+              openNodeActionsMenu({
+                key,
+                anchor:
+                  el
+                    .closest(".outline-row")
+                    ?.querySelector<HTMLElement>(".node-actions-trigger") ?? el,
+                keyboard: true,
+                returnFocus: el,
+              });
+            },
           },
         ]
       : EMPTY_KEYMAP,

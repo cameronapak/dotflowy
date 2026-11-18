@@ -590,6 +590,18 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(page.locator('[role="listbox"]')).toBeVisible();
   });
 
+  test("the actions button opens the focused bullet's actions sheet", async ({
+    page,
+  }) => {
+    await load(page);
+    await text(page, "alpha").click();
+    await btn(page, "Bullet actions").click();
+    const sheet = page.getByRole("menu", { name: "Bullet actions" });
+    await sheet.getByRole("menuitem", { name: "Complete" }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect(text(page, "alpha")).toHaveAttribute("data-completed", "true");
+  });
+
   test("a text selection swaps in the format buttons; collapsing swaps back", async ({
     page,
   }) => {

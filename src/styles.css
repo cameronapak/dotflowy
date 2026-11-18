@@ -1471,6 +1471,51 @@ h2 span.protection-indicator {
 }
 
 /*
+ * Bullet actions trigger (#192). A trailing flex sibling of `.row-body`, so
+ * it sits at the row's end at every depth and never crowds the chevron. It
+ * reveals like the chevron (hover, focus, or while its menu is open) and keeps
+ * its box when hidden, so the reveal never reflows the text. Not a Tab stop:
+ * Tab indents, and Mod+Shift+. opens the same menu from the keyboard. Coarse
+ * pointers use the actions bar instead, because the chevron owns the row's
+ * right edge there (ADR 0029).
+ */
+.node-actions-trigger {
+  flex: none;
+  align-self: flex-start;
+  width: 24px;
+  height: 24px;
+  margin-top: calc(var(--reading-line-box) / 2 - 9px);
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  @apply text-muted-foreground;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.node-actions-trigger:hover,
+.node-actions-trigger[aria-expanded="true"] {
+  @apply bg-accent text-foreground;
+}
+
+.outline-row:hover .node-actions-trigger,
+.outline-row:focus-within .node-actions-trigger,
+.node-actions-trigger[aria-expanded="true"] {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .node-actions-trigger {
+    display: none;
+  }
+}
+
+/*
  * Touch devices have no hover, so the reveal-on-hover chevron would be an
  * invisible (if tappable) target. Keep it visible for any parent row so the
  * collapse affordance is discoverable. Childless rows still render no glyph.

@@ -480,6 +480,7 @@ const RESERVED_KEYS = new Set([
   "Mod+ArrowUp",
   "Mod+ArrowDown",
   "Mod+.",
+  "Mod+Shift+.",
 ]);
 for (const k of keymapSpecs) {
   if (RESERVED_KEYS.has(k.hotkey)) {
