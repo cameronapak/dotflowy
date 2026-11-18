@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.10.9
+
+### Patch Changes
+
+- f1952bb: Allow first-time Google signup while signup is open, preserving invite-only restrictions and verified-account linking.
+
 ## 3.10.8
 
 ### Patch Changes
