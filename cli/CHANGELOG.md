@@ -1,5 +1,11 @@
 # dotflowy
 
+## 0.3.2
+
+### Patch Changes
+
+- 43d1bc9: Reduce CLI startup work by loading Node services directly instead of also loading unused platform integrations.
+
 ## 0.3.1
 
 ### Patch Changes
