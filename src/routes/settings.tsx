@@ -1428,7 +1428,7 @@ function SettingsPage() {
       {/* Minimal page header: back to the outline + title. The outline's own
           header (Header.tsx) doesn't render on this route, so /settings carries
           its own chrome. */}
-      <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
+      <header className="sticky top-[env(titlebar-area-height,0px)] z-10 border-b bg-background/80 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center gap-2 px-4 py-3 sm:px-6">
           <Button
             variant="ghost"

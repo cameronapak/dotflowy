@@ -18,8 +18,8 @@ const MobileGlassHeader = lazy(() => import("./MobileGlassHeader"));
  * the View and App menus). Below 768px the glass toolbar and the dock replace
  * this row (ADR 0076); desktop keeps it.
  *
- * Horizontal padding matches the outline content's `p-6` so the row aligns
- * with the bullets below it.
+ * In a browser tab the row aligns with the outline. Installed desktop PWAs
+ * can share the native title-bar row, using its safe area (ADR 0092).
  *
  * `getCtx` is OutlineEditor's PluginContext factory, threaded down so plugin
  * header slots (Seam F-header) can act on the tree/nav -- the daily "Today"
@@ -51,10 +51,10 @@ export function Header({
           {getCtx && <MobileNavigation slots={headerSlots} getCtx={getCtx} />}
         </Suspense>
       ) : (
-        <header className="outline-header border-b bg-background">
+        <header className="outline-header outline-header-desktop border-b bg-background">
           {/* Border spans the full viewport; inner row is centered to match the
             720px outline content below. */}
-          <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 px-6 py-3">
+          <div className="outline-header-row mx-auto flex max-w-[720px] items-center justify-between gap-3 px-6 py-3">
             <div className="min-w-0 flex-1">{children}</div>
             <div className="flex shrink-0 items-center gap-1">
               <SpotlightIndicator />
