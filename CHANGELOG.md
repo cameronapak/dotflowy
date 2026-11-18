@@ -1,5 +1,15 @@
 # dotflowy
 
+## 3.13.0
+
+### Minor Changes
+
+- 75121cf: Open a bullet's actions from the mouse or keyboard. Hover a row and click the ⋯ at its end, or press `Cmd/Ctrl+Shift+.` while editing. The menu lists the same actions as Find's "Acting on" list: move, mirror, complete, zoom, delete, and plugin commands. The `/` menu also gains Move up, Move down, Collapse, Expand, and Zoom in, so phones reach them from the editing bar's `/` button.
+
+### Patch Changes
+
+- 75121cf: On iPhone, the editing bar now appears when you tap a bullet near the bottom of the screen, such as the last one in a list. Safari's scroll to reveal it no longer hides the bar or scrolls the outline out of view.
+
 ## 3.12.0
 
 ### Minor Changes
