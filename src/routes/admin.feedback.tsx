@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { AdminNav } from "../components/admin-nav";
 import { FeedbackReply } from "../components/feedback-reply";
+import { AdminProReward } from "../components/pro-reward";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
@@ -155,6 +156,18 @@ function FeedbackCard({
           )}
         </div>
         <Separator />
+        {entry.kind === "bug" &&
+          entry.completedAt !== null &&
+          entry.emailVerified && (
+            <>
+              <AdminProReward
+                reportId={entry.id}
+                reference={entry.requestId}
+                email={entry.email}
+              />
+              <Separator />
+            </>
+          )}
         <FeedbackReply
           entry={entry}
           mode={mode}

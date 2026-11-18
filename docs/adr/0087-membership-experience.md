@@ -82,6 +82,147 @@ Checkout verification: before release, separately approve and exercise a Stripe
 test-mode cardless completion, missing-payment-method cancellation and paid
 conversion. Live configuration, migrations and deployment need separate approval.
 
+## Bug-reporter rewards: 30 days of Pro
+
+Rewards are time, never money, coupons, or invoice/customer-balance credits.
+Migration 0022 adds a separate reward ledger. `getPlan` unions
+currently effective gifts with plugin-owned active/trialing subscriptions;
+Founding still wins. All server gates, including MCP and private feedback,
+use this query. Gift expiry is checked against server time, without a cron or
+a fabricated Better Auth subscription. Outline data is never removed on expiry.
+
+For a completed bug from a verified account, the private inbox offers **Give
+30 days of Pro** with confirmation. The fixed bug reference deduplicates
+duplicate reports for one account; the report itself also has a unique reward.
+A second report using that account's already-rewarded bug reference returns
+409 and directs the admin to the original report, rather than retrying an outage.
+
+The separate `/admin/pro-codes` page generates standalone codes without a
+recipient or in-app report. An internal reason is required, such as a GitHub
+issue reference. Admin history shows the truncated code label, reason,
+creation/claim-by dates, unused/used/expired/revoked status, redeemer and claim
+time, with delivery status separate from code use. History uses 50-row keyset
+pages, including an ID tie-breaker. A stable client-generated creation ID
+makes uncertain creation retries return the same record, without a second code.
+
+Codes combine two random UUIDs and must be claimed within 90 days. Only a
+SHA-256 hash and truncated label are stored; the full code is shown once and
+never appears in a URL. The first verified signed-in account to redeem one
+claims it through an atomic conditional write, after which it is bound to that
+account. Account leases alone cannot serialize two different accounts, so this
+database predicate is authoritative. Replacement invalidates the old unclaimed
+code and restarts its claim window; revocation is limited to unclaimed codes.
+No email is sent automatically. **Copy link and code** prepares a thank-you
+message with the current app host's `/redeem` link and the code on a separate
+line. Send codes privately because anyone holding
+one can claim it first. This deliberately supports GitHub reporters without
+matching their GitHub identity to a Dotflowy account. Separate codes may stack;
+the admin reason is an audit note, not a duplicate-bug restriction.
+
+Redemption lives at `https://app.dotflowy.com/redeem`, with a quiet **Redeem
+code** link in Plan & billing, not a public free-Pro promotion. This public
+page explains the gift before sign-in and reuses the existing auth form.
+Email signup and sign-in pass a fixed `/redeem` verification callback;
+confirmation returns there without automatically signing in. Signup gates,
+Google and MCP authorization behavior stay unchanged. Switching accounts
+signs out and hard-reloads `/redeem`, never reusing outline singletons.
+Codes remain in component memory, not URLs or browser storage, so recipients
+paste their code after signing in.
+
+Review names the claiming account and shows plan-specific estimated dates
+from the membership projection. It neither checks code validity nor claims
+the code. Only **Claim 30 days of Pro** posts to the server, which recomputes
+coverage and confirms delivered dates or holds the reward for review. The
+request includes the reviewed account ID; the server rejects a session/account
+mismatch before claiming. Unavailable, expired and already-claimed errors stay
+combined. Timeouts and rate limits never promise that a code is still unclaimed;
+retry the same code for the same account. No resolution email is promised.
+
+Redemption requires same-origin session-owned JSON and explicit consent,
+and permits ten attempts per account per hour. A claim
+is recorded before delivery. Billing review does not release it for somebody
+else to take. Retry the same reward; do not issue another code to repair it.
+Retries return the same reward, not another month.
+
+- A Free account receives exactly 30 × 24 hours, starting now or after its
+  existing gifted time. No Stripe customer/subscription, card, or automatic
+  renewal is created by a gift.
+- A renewing monthly/yearly Pro subscription retains its Price and interval.
+  Verify its current paid invoice and matching non-proration subscription item,
+  then set `trial_end` to paid coverage end plus 30 days with
+  `proration_behavior: none`. Existing trials extend from their end instead.
+  Stripe labels this a trial and may generate a zero invoice. Settings explains
+  the new date, existing renewal agreement, and the unchanged plan. Preserve
+  missing-payment-method cancellation settings for cardless trials.
+- An already-canceling subscription is not updated. Reserve 30 days after its
+  current access, then activate the app gift from the actual `ended_at` on a
+  verified lifecycle event. It stays canceled. An early termination requires
+  review rather than silently inventing paid coverage. If cancellation is
+  reversed before the end, reconcile the same reward as a renewal extension.
+  A failed admin check preserves the scheduled cancellation reservation so a
+  later lifecycle retry can still deliver it. Delayed reconciliation stacks
+  against historical gifts on that subscription, even after those gifts expire.
+  A new Free gift waits for any unresolved scheduled cancellation reward, so
+  delayed webhook recovery cannot backdate one reward over another.
+- Distinct fixed bugs can stack. An unresolved target-bearing reward prevents
+  another award until its outcome is known. Founding, indefinite comps,
+  multiple subscriptions, debts/open/draft invoices, subscription or item discounts, pending invoice
+  items, schedules, paused or changing subscriptions and renewal within 24
+  hours require review, not a guessed mutation or forgiveness of debt.
+
+Before the first possible Stripe write, persist the subscription, original
+coverage, Price, fixed target, time, and idempotency key. A lost response stays
+pending. A retry reads current Stripe state before deciding whether the fixed
+target was delivered; it never adds 30 to a newly observed end. After 23 hours,
+an unconfirmed write requires manual Stripe review rather than relying on an
+expired provider idempotency key. Unclaimed code revocation never shortens
+delivered subscription time. Review messages and a same-reward retry are
+available in the admin inbox.
+
+An account-scoped D1 lease serializes app grants, redemptions, reconciliation
+and checkout reservations. Ordinary Checkout reserves a fixed one-hour session;
+an uncertain/open checkout blocks grants until it settles or expires. An
+incomplete local placeholder without a Stripe subscription is not a paid comp.
+Opening or abandoning Checkout never consumes gifted access. Deliberate Pro
+checkout carries remaining gifted time in `trial_end` and transfers ownership
+only after a verified subscription lifecycle/completion event. Founding
+conversion and checkout during the last 48 gift hours are refused with an
+explanation rather than charging over a gift or violating Stripe's minimum
+trial duration. Acquisition trials cannot overlap gifts or reserved ordinary
+checkout; ordinary checkout also rejects an unused, unexpired acquisition-trial
+reservation under the same account lease.
+Checkout session and subscription metadata carry the reservation attempt ID.
+Verified completion matches that ID, the account and current Stripe state under
+the lease before transferring gifted access or deleting that exact reservation.
+An old completion cannot clear a newer checkout, including a newer gift handoff.
+A known cancellation before the carried gift deadline holds the handoff for
+review, preserving the app gift and leaving Stripe's cancellation unchanged.
+
+Reward I/O composes typed Effects through the Worker and client, with runtime
+bridges only at Better Auth and React boundaries. Invalid input remains 400 and
+membership contention remains 409; storage or billing unavailability returns
+503 without discarding the durable claim or delivery target. Expected billing
+constraints can hold a reward for review with a successful state response;
+unexpected defects are not relabeled as client errors. The atomic code claim
+checks the presented hash as well as the reward ID, so replacement invalidates
+an old secret even when it races a redemption already in progress.
+
+Reward-linked verified webhooks fetch current Stripe state after taking the
+account lease and repair the Better Auth mirror, so duplicate and old snapshots
+converge rather than adding time. Persistence failure or contention returns a
+non-2xx so Stripe can retry. This is not a transaction across Stripe and D1 or
+the Stripe Dashboard: recheck before writing, verify afterward, and retain
+uncertain outcomes for review. Do not promise that external concurrent plan or
+cancellation changes are atomically excluded. Do not automatically refund,
+void invoices, retry a pending reward as a new one, or undo a cancellation.
+Normal subscription expiry still depends on Stripe webhook delivery; Free
+gift expiry does not.
+
+Deployment requires approval to apply migration 0022 before deploying code.
+Issuing a live reward is a separate deliberate admin action, not a deployment
+side effect. Sandbox test clocks and intercepted signed fixture webhooks cover
+different boundaries; neither authorizes live billing changes.
+
 ## Welcome and feedback
 
 The Stripe plugin's verified `onEvent` callback queues one welcome per Stripe
@@ -181,7 +322,7 @@ name should be renamed in place to Dotflowy Pro with separate approval; do not
 replace its Prices or run the setup script to rename it. That script only
 creates missing objects and does not rename existing ones.
 
-Apply migrations 0017 through 0021 before deploying this code. This change does not
+Apply migrations 0017 through 0022 before deploying this code. This change does not
 itself authorize a production migration, deployment, or modifying saved themes.
 Local verification can seed subscription/receipt fixtures; that is not a real
 Stripe payment. A Stripe test-mode checkout and signed webhook remain the

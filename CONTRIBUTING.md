@@ -243,9 +243,31 @@ Before release, separately verify cardless completion, expiry, billing-portal
 conversion and first paid invoice in Stripe test mode. These fixtures do not
 authorize test-mode or live Stripe writes, production migration or deployment.
 
+Earned rewards use **Give 30 days of Pro** on completed bugs in
+`/admin/feedback`, or the standalone **Pro codes** page linked from `/admin`.
+Code generation needs only an internal reason/comment, not an account or
+in-app report. History shows creation/expiry dates, use status, redeemer and
+redemption time. Codes are single-use, claimable for 90 days, shown once and
+stored hash-only. Send them privately: the first verified account to redeem
+one in Settings, Plan & billing claims it. No email is sent implicitly.
+Free gifts never create a subscription or renew; ordinary
+monthly/yearly Pro subscriptions retain their plan with renewal moved beyond
+verified coverage, and existing cancellations stay canceled. Apply migration
+0022 before code deployment, with separate approval for production. See
+[ADR 0087](./docs/adr/0087-membership-experience.md#bug-reporter-rewards-30-days-of-pro)
+for stacking, safeguards, checkout handoff, and manual review.
+
+If a reward is pending, check/retry that same reward, never create a replacement
+to repair uncertain billing. Confirm its Stripe metadata, Price, trial end,
+billing anchor, invoices and cancellation before manual intervention. Do not
+delete its ledger row or forgive an invoice to make the action succeed. After
+23 hours an unconfirmed Stripe write is not retried automatically. Unclaimed
+codes can be replaced or revoked; delivered time requires manual review.
+
 Entitlement reads never call Stripe. `getPlan(userId, env)` is one D1 query on
-`referenceId = user.id`, `status IN ('active','trialing')`. Free tier is no
-row. An operator-comped user is a hand-inserted active row with no Stripe ids.
+`referenceId = user.id`, `status IN ('active','trialing')`, unioned with effective,
+unexpired `pro_reward` gifts. Free is neither an entitled subscription nor a
+current gift. An operator-comped user is a hand-inserted active row with no Stripe ids.
 Keep the founding seat cap in `getCheckoutSessionParams` at checkout-creation
 time. Webhooks and `subscription.list()` resolve plans from that same list.
 

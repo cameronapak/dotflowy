@@ -4,6 +4,8 @@ import { Effect, Schema } from "effect";
 
 import type { Auth } from "./auth";
 
+import { withMembershipLock } from "./pro-reward";
+
 /** A trial is a deliberate, once-per-account subscription setup, not a signup
  * side effect. Incomplete abandoned Checkouts are not completed subscriptions. */
 export async function isTrialEligible(db: D1Database, userId: string) {
@@ -15,15 +17,17 @@ export async function isTrialEligible(db: D1Database, userId: string) {
       OR (stripeSubscriptionId IS NOT NULL AND status IN ('past_due', 'unpaid', 'incomplete', 'paused'))
     ))
     AND NOT EXISTS (SELECT 1 FROM pro_trial_checkout WHERE userId = ?1 AND usedAt IS NOT NULL)
+    AND NOT EXISTS (SELECT 1 FROM pro_reward WHERE userId=?1 AND state='applied' AND endsAt> ?2)
+    AND NOT EXISTS (SELECT 1 FROM membership_checkout WHERE userId=?1 AND expiresAt>?2)
   `)
-    .bind(userId)
+    .bind(userId, Date.now())
     .first();
   return row !== null;
 }
 
 /** Cookie-only enrollment. A persisted attempt and lease serialize app tabs;
  * the same Stripe idempotency key repairs an interrupted/lost response. */
-export const trialCheckout = (
+const trialCheckoutUnlocked = (
   request: Request,
   db: D1Database,
   userId: string,
@@ -146,6 +150,32 @@ export const trialCheckout = (
       ),
     );
   });
+
+export const trialCheckout = (
+  request: Request,
+  db: D1Database,
+  userId: string,
+  auth: Auth,
+) =>
+  withMembershipLock(
+    db,
+    userId,
+    trialCheckoutUnlocked(request, db, userId, auth),
+  ).pipe(
+    Effect.catchTag("RewardError", (error) =>
+      Effect.succeed(
+        Response.json({ error: error.message }, { status: error.status }),
+      ),
+    ),
+    Effect.catchTag("RewardStorageError", () =>
+      Effect.succeed(
+        Response.json(
+          { error: "Membership storage is unavailable. Retry in a moment." },
+          { status: 503 },
+        ),
+      ),
+    ),
+  );
 
 /** Only a reserved explicit enrollment gets trial days. Ordinary purchases do
  * not implicitly start a trial or silently turn a rejected trial into a charge. */

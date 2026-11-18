@@ -1,6 +1,6 @@
 # Dotflowy Privacy Policy
 
-**Effective date:** July 11, 2026 · **Last updated:** November 13, 2026
+**Effective date:** July 11, 2026 · **Last updated:** November 18, 2026
 
 Dotflowy is operated by **FAITH TOOLS SOFTWARE SOLUTIONS, LLC**, an Oklahoma limited liability company. This policy says exactly what data we handle, where it lives, who can see it, and what we will never do with it. We'd rather over-disclose than hide anything.
 
@@ -20,6 +20,8 @@ Dotflowy is operated by **FAITH TOOLS SOFTWARE SOLUTIONS, LLC**, an Oklahoma lim
 **Billing data.** Handled by Stripe. We store your subscription status and plan; Stripe holds your card details. We never see your card number.
 
 **Feedback.** If you send a bug report, idea, or question in the app, we store the text you choose to send, its type, app version, time, account ID, and plan at submission in a private Cloudflare D1 inbox for support and product decisions. Browser information and a broad page category are optional. We do not automatically attach outline text, screenshots, full URLs, or node identifiers. Reports are available only to authorized administrators, not other users. Administrators can track completion and add internal support comments, which stay in the private inbox and are removed with the report. We use your account email to send an automatic receipt, identify your report in an owner notification, and contact you about your feedback from a Dotflowy support address. Automatic receipts and owner notifications include a reference, not your feedback text or technical details. If an administrator emails you from the inbox, we keep the recipient address, message, time and send status privately with the report; internal comments are never included in those emails. Replies to our support address arrive by email and do not sync into the in-app inbox. Reports and their reply history remain until you delete your account or ask us to remove them; emails may remain in their recipients' mailboxes. Public GitHub ideas are separate and follow GitHub's policies.
+
+**Thank-you rewards.** To issue and deliver rewards, maintain their history, and prevent misuse, we store a code hash and partial label, the issuing administrator, a private reason or issue reference, creation and claim-deadline dates, redemption time and account, delivery status, access dates, and any related subscription identifiers and billing dates. A reason or reference may include information from public GitHub feedback. We also keep account-linked redemption-attempt counts and timing to limit abuse. Reward records live in Cloudflare D1 and are available only to authorized administrators and, for your own reward status and dates, to you. Internal reasons are not shown to recipients. For an existing subscription, Stripe processes the related subscription change and reward identifier; we do not send Stripe the internal reason or full reward code.
 
 **Waitlist.** If you join the waitlist, we store the email you submitted, only to send you an invite.
 
@@ -77,6 +79,8 @@ Your outline database has an automatic **30-day point-in-time recovery window** 
 ## Deletion and retention
 
 You can **delete your account yourself, in the app**. Deletion removes your account record and your entire outline. Deleted data can persist in the recovery window described above for up to 30 days, after which it's gone for good. To be removed from the waitlist, email us and we'll delete your address.
+
+**Reward history.** We retain reward history indefinitely to keep a record of thank-you gifts and their delivery; code expiry or revocation does not automatically delete it. Deleting your account removes reward records linked to that account from our application database. Reward records linked to an in-app feedback report are also removed if that report is deleted. Unclaimed standalone codes and their internal reasons are not linked to a recipient account and remain in our history, including after they expire or are revoked. Contact us about personal information in these records or to exercise the rights described below. Stripe retains records under its own retention requirements.
 
 ## Your rights
 

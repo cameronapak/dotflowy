@@ -9,6 +9,8 @@ export const MembershipSchema = Schema.Struct({
   plan: Schema.Literals(["free", "unlimited", "founding"]),
   // Optional while older Workers may still serve the previous projection.
   trialEligible: Schema.optionalKey(Schema.Boolean),
+  giftEndsAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  rewardMessage: Schema.optionalKey(Schema.NullOr(Schema.String)),
   legacyLeaf: Schema.Boolean,
   subs: Schema.Array(
     Schema.Struct({
@@ -17,6 +19,10 @@ export const MembershipSchema = Schema.Struct({
       cancelAtPeriodEnd: Schema.Boolean,
       stripeSubscriptionId: Schema.optionalKey(Schema.NullOr(Schema.String)),
       trialEnd: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      cancelAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      periodEnd: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      billingInterval: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      rewarded: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   welcome: Schema.NullOr(WelcomeSchema),

@@ -15,6 +15,11 @@ const PAGES = [
     description: "Read, triage, and answer private reports.",
   },
   {
+    to: "/admin/pro-codes",
+    title: "Pro codes",
+    description: "Generate 30-day thank-you codes and see who used them.",
+  },
+  {
     to: "/admin/waitlist",
     title: "Waitlist",
     description: "See who is waiting and copy their emails.",

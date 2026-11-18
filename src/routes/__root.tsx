@@ -178,6 +178,7 @@ export const Route = createRootRoute({
  *  is no session yet); a future signed-out landing is added HERE. */
 const PUBLIC_ROUTES = new Set([
   "/reset-password",
+  "/redeem",
   "/terms",
   "/privacy",
   "/mcp-consent",

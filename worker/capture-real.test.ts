@@ -27,6 +27,17 @@ let directory: string;
 const outboundUrls: string[] = [];
 // Stripe transport is fixture-owned. No request in this suite reaches Stripe.
 const stripeSubscriptions = new Map<string, string>();
+const rewardInvoices = new Map<string, unknown[]>();
+const rewardUpdates: {
+  id: string;
+  params: URLSearchParams;
+  key: string | null;
+}[] = [];
+let loseRewardResponse = false;
+let nextRewardRead: ((id: string) => void) | undefined;
+let nextRewardWrite:
+  | ((sub: { cancel_at: number | null; cancel_at_period_end: boolean }) => void)
+  | undefined;
 const trialCheckouts = new Map<
   string,
   { id: string; url: string; params: URLSearchParams }
@@ -187,7 +198,7 @@ beforeAll(async () => {
             ADMIN_EMAILS: {
               type: "text",
               value:
-                "feedback-other@capture.test,capabilities-admin@capture.test",
+                "feedback-other@capture.test,capabilities-admin@capture.test,rewards-admin@capture.test",
             },
           },
           exports: {
@@ -201,6 +212,61 @@ beforeAll(async () => {
             async handler(request) {
               const url = new URL(request.url);
               if (url.hostname === "api.stripe.com") {
+                if (
+                  url.pathname === "/v1/invoices" ||
+                  url.pathname === "/v1/invoiceitems"
+                )
+                  return FixtureResponse.json({
+                    object: "list",
+                    has_more: false,
+                    data:
+                      url.pathname === "/v1/invoices"
+                        ? (rewardInvoices.get(
+                            url.searchParams.get("customer") ?? "",
+                          ) ?? [])
+                        : [],
+                  });
+                if (
+                  url.pathname.startsWith("/v1/subscriptions/") &&
+                  request.method === "POST"
+                ) {
+                  const id = url.pathname.split("/").pop()!;
+                  const stored = stripeSubscriptions.get(id);
+                  if (!stored)
+                    return new FixtureResponse("missing subscription", {
+                      status: 404,
+                    });
+                  const sub = JSON.parse(stored);
+                  const params = new URLSearchParams(await request.text());
+                  rewardUpdates.push({
+                    id,
+                    params,
+                    key: request.headers.get("idempotency-key"),
+                  });
+                  sub.trial_end = Number(params.get("trial_end"));
+                  sub.trial_start = Math.floor(Date.now() / 1000);
+                  sub.status = "trialing";
+                  sub.billing_cycle_anchor = sub.trial_end;
+                  sub.items.data[0].current_period_end = sub.trial_end;
+                  sub.metadata.dotflowyReward = params.get(
+                    "metadata[dotflowyReward]",
+                  );
+                  nextRewardWrite?.(sub);
+                  nextRewardWrite = undefined;
+                  stripeSubscriptions.set(id, JSON.stringify(sub));
+                  if (loseRewardResponse) {
+                    loseRewardResponse = false;
+                    return FixtureResponse.json(
+                      {
+                        error: {
+                          message: "Lost response after Stripe committed",
+                        },
+                      },
+                      { status: 500 },
+                    );
+                  }
+                  return FixtureResponse.json(sub);
+                }
                 if (
                   url.pathname === "/v1/subscriptions" ||
                   url.pathname === "/v1/customers/search" ||
@@ -219,8 +285,24 @@ beforeAll(async () => {
                                 unit_amount: 500,
                                 currency: "usd",
                               },
+                              {
+                                id: "price_trial_annual",
+                                lookup_key: "dotflowy_unlimited_annual",
+                                recurring: { interval: "year" },
+                                unit_amount: 4800,
+                                currency: "usd",
+                              },
                             ]
-                          : [],
+                          : url.pathname === "/v1/subscriptions"
+                            ? [...stripeSubscriptions.values()]
+                                .map((s) => JSON.parse(s))
+                                .filter(
+                                  (s) =>
+                                    s.customer ===
+                                    url.searchParams.get("customer"),
+                                )
+                            : [],
+                      has_more: false,
                     }),
                     { headers: { "content-type": "application/json" } },
                   );
@@ -260,9 +342,10 @@ beforeAll(async () => {
                     headers: { "content-type": "application/json" },
                   });
                 }
-                const subscription = stripeSubscriptions.get(
-                  url.pathname.split("/").pop() ?? "",
-                );
+                const requestedId = url.pathname.split("/").pop() ?? "";
+                nextRewardRead?.(requestedId);
+                nextRewardRead = undefined;
+                const subscription = stripeSubscriptions.get(requestedId);
                 return new FixtureResponse(
                   subscription ??
                     JSON.stringify({
@@ -317,6 +400,7 @@ beforeAll(async () => {
     "0019_feedback_triage.sql",
     "0020_feedback_replies.sql",
     "0021_pro_trial_checkout.sql",
+    "0022_pro_rewards.sql",
   ]) {
     const sql = await readFile(`migrations/${migration}`, "utf8");
     await db.exec(sql.replace(/--[^\n]*/g, "").replaceAll("\n", " "));
@@ -679,6 +763,867 @@ test("only a signed paid checkout queues a welcome, and webhook retries cannot r
   ).toEqual({ plan: "unlimited", seenAt: null });
 });
 
+test("standalone codes bind atomically to their first redeemer, track private history, and deliver 30 days once across billing races and webhooks", async () => {
+  const db = await mf.getD1Database("DB");
+  const origin = (await mf.ready).origin;
+  const password = "disposable-reward-password";
+  const hash = await hashPassword(password);
+  const days = 30 * 86400;
+  const accounts = new Map<string, string>();
+  async function login(id: string = randomUUID()) {
+    await fixture("seed", { userId: id, password: hash });
+    const response = await mf.dispatchFetch(
+      `http://fixture/api/auth/sign-in/email`,
+      {
+        method: "POST",
+        headers: {
+          origin: "http://fixture",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ email: `${id}@capture.test`, password }),
+      },
+    );
+    expect(response.status).toBe(200);
+    const account = {
+      id,
+      cookie: response.headers
+        .getSetCookie()
+        .map((v) => v.split(";")[0])
+        .join("; "),
+    };
+    accounts.set(account.cookie, id);
+    return account;
+  }
+  const admin = await login("rewards-admin");
+  let user = await login();
+  let stranger = await login();
+  const request = (
+    cookie: string,
+    path: string,
+    body?: Record<string, string | number | boolean>,
+    from = origin,
+  ) =>
+    mf.dispatchFetch(`${origin}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { cookie, origin: from, "content-type": "application/json" },
+      body:
+        body === undefined
+          ? undefined
+          : JSON.stringify(
+              path === "/api/membership/redeem"
+                ? { accountId: accounts.get(cookie), ...body }
+                : body,
+            ),
+    });
+  async function report(userId: string) {
+    const row = await db
+      .prepare(
+        "INSERT INTO feedback_submissions (user_id,request_id,payload_hash,plan,kind,message,app_version,created_at,completed_at) VALUES (?,?,'hash','free','bug','Fixed test bug','test',0,1) RETURNING id",
+      )
+      .bind(userId, randomUUID())
+      .first<{ id: number }>();
+    return row!.id;
+  }
+  async function grant(
+    reportId: number,
+    action = "give",
+    bug = `bug-${reportId}`,
+  ) {
+    const response = await request(admin.cookie, "/api/admin/pro-rewards", {
+      reportId,
+      action,
+      bug,
+    });
+    expect(response.status, await response.clone().text()).toBe(200);
+    // SAFETY: handler response is asserted by each workflow below.
+    return response.json() as Promise<{
+      code: string;
+      reward: {
+        id: string;
+        state: string;
+        startsAt: number;
+        endsAt: number;
+        message: string;
+      };
+    }>;
+  }
+  async function codeAction(
+    action = "create",
+    id: string = randomUUID(),
+    reason = "Thanks for GitHub issue #123",
+  ) {
+    const response = await request(
+      admin.cookie,
+      "/api/admin/pro-codes",
+      action === "create" ? { action, id, reason } : { action, id },
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    // SAFETY: the same public reward result is asserted through this workflow.
+    return response.json() as ReturnType<typeof grant>;
+  }
+  // SAFETY: this real HTTP membership projection is asserted below.
+  const member = async (cookie: string) =>
+    (await request(cookie, "/api/membership")).json() as Promise<{
+      plan: string;
+      giftEndsAt: number | null;
+      subs: {
+        status: string;
+        trialEnd: string;
+        billingInterval: string;
+        cancelAt: string | null;
+      }[];
+    }>;
+  let reportId = await report(user.id);
+  expect((await request(user.cookie, "/api/admin/pro-rewards")).status).toBe(
+    404,
+  );
+  expect((await request("", "/api/admin/pro-rewards")).status).toBe(404);
+  expect(
+    (
+      await request(
+        admin.cookie,
+        "/api/admin/pro-rewards",
+        { reportId, action: "give", bug: "fixed" },
+        "https://evil.test",
+      )
+    ).status,
+  ).toBe(403);
+  expect((await request(user.cookie, "/api/admin/pro-codes")).status).toBe(404);
+  expect((await request("", "/api/admin/pro-codes")).status).toBe(404);
+  expect(
+    (
+      await request(admin.cookie, "/api/admin/pro-codes", {
+        action: "create",
+        id: randomUUID(),
+        reason: " ",
+      })
+    ).status,
+  ).toBe(400);
+  expect(
+    (
+      await request(
+        admin.cookie,
+        "/api/admin/pro-codes",
+        { action: "create", id: randomUUID(), reason: "private" },
+        "https://evil.test",
+      )
+    ).status,
+  ).toBe(403);
+  const issued = await codeAction();
+  expect(issued.reward.state).toBe("issued");
+  expect(
+    await db
+      .prepare("SELECT userId,reportId FROM pro_reward WHERE id=?")
+      .bind(issued.reward.id)
+      .first<{ userId: string | null; reportId: number | null }>(),
+  ).toEqual({ userId: null, reportId: null });
+  const creationRetry = await codeAction("create", issued.reward.id);
+  expect(creationRetry.reward.id).toBe(issued.reward.id);
+  expect(creationRetry.code).toBeUndefined();
+  expect(
+    (
+      await request(admin.cookie, "/api/admin/pro-codes", {
+        action: "create",
+        id: issued.reward.id,
+        reason: "A different reward",
+      })
+    ).status,
+  ).toBe(409);
+  // SAFETY: admin history is checked independently from the stored hash.
+  const history = async (before?: string) =>
+    (
+      await request(
+        admin.cookie,
+        `/api/admin/pro-codes${before ? `?before=${encodeURIComponent(before)}` : ""}`,
+      )
+    ).json() as Promise<{
+      codes: {
+        id: string;
+        status: string;
+        reason: string;
+        createdAt: number;
+        claimedAt: number | null;
+        redeemedBy: string | null;
+      }[];
+      next: string | null;
+    }>;
+  const unused = (await history()).codes.find(
+    (c) => c.id === issued.reward.id,
+  )!;
+  expect(unused).toMatchObject({
+    status: "unused",
+    reason: "Thanks for GitHub issue #123",
+    claimedAt: null,
+    redeemedBy: null,
+  });
+  expect(unused.createdAt).toBeGreaterThan(0);
+  expect(JSON.stringify(await history())).not.toContain(issued.code);
+  expect(await member(user.cookie)).toMatchObject({
+    plan: "free",
+    giftEndsAt: null,
+  });
+  expect((await request(user.cookie, "/api/membership/redeem")).status).toBe(
+    405,
+  );
+  await db
+    .prepare("UPDATE user SET emailVerified=0 WHERE id=?")
+    .bind(stranger.id)
+    .run();
+  expect(
+    (
+      await request(stranger.cookie, "/api/membership/redeem", {
+        code: issued.code,
+        consent: true,
+      })
+    ).status,
+  ).toBe(403);
+  await db
+    .prepare("UPDATE user SET emailVerified=1 WHERE id=?")
+    .bind(stranger.id)
+    .run();
+  // A stale tab reviewed a different account. Reject before claiming so the
+  // subsequent race can still award the same unused code to either account.
+  expect(
+    (
+      await request(stranger.cookie, "/api/membership/redeem", {
+        code: issued.code,
+        consent: true,
+        accountId: user.id,
+      })
+    ).status,
+  ).toBe(409);
+  const firstClaims = await Promise.all(
+    [user, stranger].map((person) =>
+      request(person.cookie, "/api/membership/redeem", {
+        code: issued.code,
+        consent: true,
+      }),
+    ),
+  );
+  expect(firstClaims.map((r) => r.status).sort()).toEqual([200, 409]);
+  if (firstClaims[1]?.status === 200) {
+    [user, stranger] = [stranger, user];
+    reportId = await report(user.id);
+  }
+  expect(await member(stranger.cookie)).toMatchObject({ plan: "free" });
+  expect(
+    (await history()).codes.find((c) => c.id === issued.reward.id),
+  ).toMatchObject({ status: "used", redeemedBy: `${user.id}@capture.test` });
+  expect(
+    (
+      await request(stranger.cookie, "/api/membership/redeem", {
+        code: issued.code,
+        consent: true,
+      })
+    ).status,
+  ).toBe(409);
+  expect(
+    (
+      await request(admin.cookie, "/api/admin/pro-codes", {
+        action: "revoke",
+        id: issued.reward.id,
+      })
+    ).status,
+  ).toBe(409);
+  const claim = () =>
+    request(user.cookie, "/api/membership/redeem", {
+      code: issued.code,
+      consent: true,
+    });
+  const raced = await Promise.all([claim(), claim()]);
+  expect(raced.some((r) => r.status === 200)).toBe(true);
+  expect(raced.every((r) => [200, 409].includes(r.status))).toBe(true);
+  // SAFETY: the same issued reward is returned by the real redemption handler.
+  const repeated = (await (await claim()).json()) as typeof issued;
+  expect(repeated.reward.state).toBe("applied");
+  expect(repeated.reward.endsAt - repeated.reward.startsAt).toBe(days * 1000);
+  expect(await member(user.cookie)).toMatchObject({
+    plan: "unlimited",
+    giftEndsAt: repeated.reward.endsAt,
+  });
+  expect(
+    await db
+      .prepare("SELECT id FROM subscription WHERE referenceId=?")
+      .bind(user.id)
+      .first(),
+  ).toBeNull();
+  const direct = await grant(reportId);
+  expect(direct.reward.startsAt).toBe(repeated.reward.endsAt);
+  expect((await grant(reportId)).reward.endsAt).toBe(direct.reward.endsAt);
+  const duplicateReport = await report(user.id);
+  const duplicate = await request(admin.cookie, "/api/admin/pro-rewards", {
+    reportId: duplicateReport,
+    action: "give",
+    bug: `bug-${reportId}`,
+  });
+  expect(duplicate.status).toBe(409);
+  expect(
+    await db
+      .prepare("SELECT id FROM pro_reward WHERE reportId=?")
+      .bind(duplicateReport)
+      .first(),
+  ).toBeNull();
+  const stacked = await grant(await report(user.id));
+  expect(stacked.reward.startsAt).toBe(direct.reward.endsAt);
+  expect(stacked.reward.endsAt).toBe(direct.reward.endsAt + days * 1000);
+  const checkout = await request(
+    user.cookie,
+    "/api/auth/subscription/upgrade",
+    {
+      plan: "unlimited",
+      annual: true,
+      disableRedirect: true,
+      successUrl: "/settings",
+      cancelUrl: "/settings",
+    },
+    "http://fixture",
+  );
+  expect(checkout.status, await checkout.clone().text()).toBe(200);
+  const giftCheckout = [...trialCheckouts.values()].find(
+    (c) =>
+      c.params.get("subscription_data[metadata][dotflowyGift]") === user.id,
+  );
+  expect(Number(giftCheckout?.params.get("subscription_data[trial_end]"))).toBe(
+    Math.ceil(stacked.reward.endsAt / 1000),
+  );
+  expect(await member(user.cookie)).toMatchObject({ plan: "unlimited" }); // Abandoning Checkout keeps the gift.
+  await db
+    .prepare("UPDATE pro_reward SET startsAt=0,endsAt=1 WHERE userId=?")
+    .bind(user.id)
+    .run();
+  expect(await member(user.cookie)).toMatchObject({
+    plan: "free",
+    giftEndsAt: null,
+  });
+  expect(
+    await db
+      .prepare(
+        "SELECT id FROM subscription WHERE referenceId=? AND status IN ('active','trialing')",
+      )
+      .bind(user.id)
+      .first(),
+  ).toBeNull();
+  const afterAbandon = await report(user.id);
+  expect((await grant(afterAbandon)).reward.state).toBe("review");
+  await db
+    .prepare("UPDATE membership_checkout SET expiresAt=0 WHERE userId=?")
+    .bind(user.id)
+    .run();
+  expect((await grant(afterAbandon, "retry")).reward.state).toBe("applied");
+  expect(await member(user.cookie)).toMatchObject({ plan: "unlimited" });
+  const expired = await codeAction();
+  await db
+    .prepare("UPDATE pro_reward SET claimBy=0 WHERE id=?")
+    .bind(expired.reward.id)
+    .run();
+  expect(
+    (
+      await request(stranger.cookie, "/api/membership/redeem", {
+        code: expired.code,
+        consent: true,
+      })
+    ).status,
+  ).toBe(409);
+  expect(
+    (await history()).codes.find((c) => c.id === expired.reward.id)?.status,
+  ).toBe("expired");
+  const replacement = await codeAction("replace", expired.reward.id);
+  expect(
+    (
+      await request(stranger.cookie, "/api/membership/redeem", {
+        code: expired.code,
+        consent: true,
+      })
+    ).status,
+  ).toBe(409);
+  await codeAction("revoke", expired.reward.id);
+  expect(
+    (await history()).codes.find((c) => c.id === expired.reward.id)?.status,
+  ).toBe("revoked");
+  expect(
+    (
+      await request(stranger.cookie, "/api/membership/redeem", {
+        code: replacement.code,
+        consent: true,
+      })
+    ).status,
+  ).toBe(409);
+
+  // Deliberately subscribing carries, then hands off, remaining gifted time.
+  expect(
+    (
+      await request(
+        user.cookie,
+        "/api/auth/subscription/upgrade",
+        {
+          plan: "unlimited",
+          annual: true,
+          disableRedirect: true,
+          successUrl: "/settings",
+          cancelUrl: "/settings",
+        },
+        "http://fixture",
+      )
+    ).status,
+  ).toBe(200);
+  const conversion = [...trialCheckouts.values()].at(-1)!;
+  const conversionEnd = Number(
+    conversion.params.get("subscription_data[trial_end]"),
+  );
+  const conversionSub = {
+    id: `sub_gift_${user.id}`,
+    object: "subscription",
+    customer: `cus_${user.id}`,
+    status: "trialing",
+    trial_start: Math.floor(Date.now() / 1000),
+    trial_end: conversionEnd,
+    billing_cycle_anchor: conversionEnd,
+    cancel_at_period_end: false,
+    cancel_at: null,
+    canceled_at: null,
+    ended_at: null,
+    metadata: {
+      userId: user.id,
+      referenceId: user.id,
+      subscriptionId: conversion.params.get("metadata[subscriptionId]"),
+      dotflowyGift: user.id,
+      dotflowyCheckout: conversion.params.get("metadata[dotflowyCheckout]"),
+      dotflowyCheckoutUser: user.id,
+    },
+    items: {
+      data: [
+        {
+          id: "si_gift",
+          quantity: 1,
+          current_period_start: Math.floor(Date.now() / 1000),
+          current_period_end: conversionEnd,
+          price: {
+            id: "price_trial_annual",
+            lookup_key: "dotflowy_unlimited_annual",
+            recurring: { interval: "year" },
+          },
+        },
+      ],
+    },
+  };
+  stripeSubscriptions.set(conversionSub.id, JSON.stringify(conversionSub));
+  const conversionTime = Math.floor(Date.now() / 1000);
+  const conversionBody = JSON.stringify({
+    id: `evt_${randomUUID()}`,
+    object: "event",
+    created: conversionTime,
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        id: conversion.id,
+        object: "checkout.session",
+        mode: "subscription",
+        payment_status: "no_payment_required",
+        subscription: conversionSub.id,
+        client_reference_id: user.id,
+        metadata: conversionSub.metadata,
+      },
+    },
+  });
+  for (let i = 0; i < 2; i++)
+    expect(
+      (
+        await mf.dispatchFetch(`${origin}/api/auth/stripe/webhook`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "stripe-signature": `t=${conversionTime},v1=${createHmac("sha256", webhookSecret).update(`${conversionTime}.${conversionBody}`).digest("hex")}`,
+          },
+          body: conversionBody,
+        })
+      ).status,
+    ).toBe(200);
+  expect(await member(user.cookie)).toMatchObject({
+    plan: "unlimited",
+    giftEndsAt: null,
+    subs: [
+      {
+        status: "trialing",
+        trialEnd: new Date(conversionEnd * 1000).toISOString(),
+        billingInterval: "year",
+      },
+    ],
+  });
+  // A delayed completion from this old session cannot settle a later attempt.
+  await db
+    .prepare(
+      "INSERT INTO membership_checkout (userId,attemptId,plan,annual,expiresAt) VALUES (?,'newer-attempt','unlimited',1,?)",
+    )
+    .bind(user.id, Date.now() + 3600_000)
+    .run();
+  expect(
+    (
+      await mf.dispatchFetch(`${origin}/api/auth/stripe/webhook`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "stripe-signature": `t=${conversionTime},v1=${createHmac("sha256", webhookSecret).update(`${conversionTime}.${conversionBody}`).digest("hex")}`,
+        },
+        body: conversionBody,
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    await db
+      .prepare("SELECT attemptId FROM membership_checkout WHERE userId=?")
+      .bind(user.id)
+      .first<{ attemptId: string }>(),
+  ).toEqual({ attemptId: "newer-attempt" });
+  await db
+    .prepare("DELETE FROM membership_checkout WHERE userId=?")
+    .bind(user.id)
+    .run();
+  expect(
+    await db
+      .prepare("SELECT id FROM membership_welcome WHERE userId=?")
+      .bind(user.id)
+      .first(),
+  ).toBeNull();
+
+  for (const interval of ["month", "year"] as const) {
+    const paid = await login();
+    const now = Math.floor(Date.now() / 1000);
+    const end = now + (interval === "year" ? 230 : 17) * 86400;
+    const id = `sub_reward_${paid.id}`;
+    const rowId = randomUUID();
+    const customer = `cus_reward_${paid.id}`;
+    const itemDiscounts: string[] = [];
+    const sub = {
+      id,
+      object: "subscription",
+      customer,
+      status: "active",
+      cancel_at_period_end: false,
+      cancel_at: null,
+      canceled_at: null,
+      ended_at: null,
+      trial_start: null,
+      trial_end: null,
+      billing_cycle_anchor: end,
+      metadata: {
+        subscriptionId: rowId,
+        referenceId: paid.id,
+        keepMe: "preserved",
+      },
+      discounts: [],
+      collection_method: "charge_automatically",
+      pause_collection: null,
+      pending_update: null,
+      schedule: null,
+      pending_invoice_item_interval: null,
+      latest_invoice: `in_${paid.id}`,
+      items: {
+        data: [
+          {
+            id: `si_${paid.id}`,
+            quantity: 1,
+            current_period_start: now - 86400,
+            current_period_end: end,
+            discounts: itemDiscounts,
+            price: {
+              id: `price_reward_${interval}`,
+              lookup_key: `dotflowy_unlimited_${interval === "year" ? "annual" : "monthly"}`,
+              billing_scheme: "per_unit",
+              recurring: {
+                interval,
+                interval_count: 1,
+                usage_type: "licensed",
+              },
+            },
+          },
+        ],
+      },
+    };
+    await db
+      .prepare("UPDATE user SET stripeCustomerId=? WHERE id=?")
+      .bind(customer, paid.id)
+      .run();
+    await db
+      .prepare(
+        "INSERT INTO subscription (id,plan,referenceId,status,stripeCustomerId,stripeSubscriptionId) VALUES (?,'unlimited',?,'active',?,?)",
+      )
+      .bind(rowId, paid.id, customer, id)
+      .run();
+    stripeSubscriptions.set(id, JSON.stringify(sub));
+    rewardInvoices.set(customer, [
+      {
+        id: sub.latest_invoice,
+        status: "paid",
+        amount_paid: 500,
+        amount_remaining: 0,
+        lines: {
+          has_more: false,
+          data: [
+            {
+              period: { start: now - 86400, end },
+              parent: {
+                subscription_item_details: {
+                  proration: false,
+                  subscription: id,
+                  subscription_item: `si_${paid.id}`,
+                },
+              },
+              pricing: { price_details: { price: `price_reward_${interval}` } },
+            },
+          ],
+        },
+      },
+    ]);
+    const paidReport = await report(paid.id);
+    const settledInvoices = rewardInvoices.get(customer)!;
+    const beforeDelivery = rewardUpdates.length;
+    const discounted = structuredClone(sub);
+    discounted.items.data[0]!.discounts = ["di_item_coupon"];
+    stripeSubscriptions.set(id, JSON.stringify(discounted));
+    const heldForDiscount = await grant(paidReport);
+    expect(heldForDiscount.reward.state).toBe("review");
+    expect(rewardUpdates.length).toBe(beforeDelivery);
+    stripeSubscriptions.set(id, JSON.stringify(sub));
+    rewardInvoices.set(customer, [...settledInvoices, { status: "open" }]);
+    expect((await grant(paidReport, "retry")).reward.state).toBe("review");
+    rewardInvoices.set(customer, settledInvoices);
+    const nearRenewal = structuredClone(sub);
+    nearRenewal.items.data[0]!.current_period_end = now + 3600;
+    stripeSubscriptions.set(id, JSON.stringify(nearRenewal));
+    expect((await grant(paidReport, "retry")).reward.state).toBe("review");
+    stripeSubscriptions.set(id, JSON.stringify(sub));
+    nextRewardRead = (requested) => {
+      expect(requested).toBe(id);
+      const renewed = structuredClone(sub);
+      renewed.items.data[0]!.current_period_end = end + days;
+      renewed.latest_invoice = "in_renewal_race";
+      stripeSubscriptions.set(id, JSON.stringify(renewed));
+    };
+    expect((await grant(paidReport, "retry")).reward.state).toBe("review");
+    expect(rewardUpdates.length).toBe(beforeDelivery);
+    stripeSubscriptions.set(id, JSON.stringify(sub));
+    loseRewardResponse = true;
+    const lost = await request(admin.cookie, "/api/admin/pro-rewards", {
+      reportId: paidReport,
+      action: "retry",
+      bug: `bug-${paidReport}`,
+    });
+    expect(lost.status).toBe(503);
+    expect(
+      await db
+        .prepare("SELECT state FROM pro_reward WHERE reportId=?")
+        .bind(paidReport)
+        .first<{ state: string }>(),
+    ).toEqual({ state: "pending" });
+    expect((await grant(paidReport, "retry")).reward).toMatchObject({
+      id: heldForDiscount.reward.id,
+      state: "applied",
+      startsAt: end * 1000,
+      endsAt: (end + days) * 1000,
+    });
+    expect(rewardUpdates.filter((u) => u.id === id)).toHaveLength(1); // Retry observes success rather than adding 30 again.
+    expect(
+      rewardUpdates.find((u) => u.id === id)?.params.get("proration_behavior"),
+    ).toBe("none");
+    expect(rewardUpdates.find((u) => u.id === id)?.params.has("items")).toBe(
+      false,
+    );
+    const current = JSON.parse(stripeSubscriptions.get(id)!);
+    expect(current.items.data[0].price.recurring.interval).toBe(interval);
+    expect(current.metadata.keepMe).toBe("preserved");
+    const send = async (
+      snapshot: typeof sub,
+      type = "customer.subscription.updated",
+    ) => {
+      const time = Math.floor(Date.now() / 1000);
+      const body = JSON.stringify({
+        id: `evt_${randomUUID()}`,
+        object: "event",
+        type,
+        created: time,
+        data: { object: snapshot },
+      });
+      return mf.dispatchFetch(`${origin}/api/auth/stripe/webhook`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "stripe-signature": `t=${time},v1=${createHmac("sha256", webhookSecret).update(`${time}.${body}`).digest("hex")}`,
+        },
+        body,
+      });
+    };
+    expect((await send(sub)).status).toBe(200); // Old snapshot cannot undo fresh Stripe state.
+    expect((await send(sub)).status).toBe(200);
+    expect(await member(paid.cookie)).toMatchObject({
+      plan: "unlimited",
+      subs: [
+        {
+          status: "trialing",
+          trialEnd: new Date((end + days) * 1000).toISOString(),
+          billingInterval: interval,
+        },
+      ],
+    });
+    expect(
+      await db
+        .prepare("SELECT id FROM membership_welcome WHERE userId=?")
+        .bind(paid.id)
+        .first(),
+    ).toBeNull();
+    const trialCode = await codeAction();
+    const trialClaim = await request(paid.cookie, "/api/membership/redeem", {
+      code: trialCode.code,
+      consent: true,
+    });
+    expect(trialClaim.status).toBe(200);
+    // SAFETY: this code response follows the existing paid subscription.
+    const extendedTrial = (await trialClaim.json()) as typeof trialCode;
+    expect(extendedTrial.reward.endsAt).toBe((end + 2 * days) * 1000);
+    expect((await codeAction("retry", trialCode.reward.id)).reward.endsAt).toBe(
+      extendedTrial.reward.endsAt,
+    );
+    // Cancellation racing the Stripe write is never undone or retried as a
+    // fresh extension; the uncertain reward blocks later grants for review.
+    const raceReport = await report(paid.id);
+    nextRewardWrite = (s) => {
+      s.cancel_at = end + 2 * days;
+      s.cancel_at_period_end = true;
+    };
+    expect((await grant(raceReport)).reward.state).toBe("pending");
+    const afterRace = rewardUpdates.length;
+    expect((await grant(raceReport, "retry")).reward.state).toBe("pending");
+    expect(rewardUpdates.length).toBe(afterRace);
+    const racing = JSON.parse(stripeSubscriptions.get(id)!);
+    expect(racing.cancel_at).toBe(end + 2 * days);
+    expect(racing.cancel_at_period_end).toBe(true);
+    // Model an operator resolving the external cancellation conflict, then
+    // retry the SAME fixed target rather than awarding another 30 days.
+    racing.cancel_at = null;
+    racing.cancel_at_period_end = false;
+    stripeSubscriptions.set(id, JSON.stringify(racing));
+    expect((await grant(raceReport, "retry")).reward).toMatchObject({
+      state: "applied",
+      endsAt: (end + 3 * days) * 1000,
+    });
+    // Cancellation AFTER delivery remains canceled. A new reward is scheduled,
+    // not a subscription mutation, including fixed cancel_at without the flag.
+    let canceled = JSON.parse(stripeSubscriptions.get(id)!);
+    canceled.cancel_at = end + 3 * days;
+    stripeSubscriptions.set(id, JSON.stringify(canceled));
+    let cancelReport = await report(paid.id);
+    let count = rewardUpdates.length;
+    const scheduled = await grant(cancelReport);
+    expect(scheduled.reward.state).toBe("scheduled");
+    expect(rewardUpdates.length).toBe(count);
+    canceled.cancel_at = null;
+    stripeSubscriptions.set(id, JSON.stringify(canceled));
+    expect((await send(canceled)).status).toBe(200);
+    expect((await grant(cancelReport, "retry")).reward).toMatchObject({
+      state: "applied",
+      endsAt: (end + 4 * days) * 1000,
+    });
+    expect(rewardUpdates.length).toBe(count + 1);
+    canceled = JSON.parse(stripeSubscriptions.get(id)!);
+    canceled.cancel_at = end + 4 * days;
+    stripeSubscriptions.set(id, JSON.stringify(canceled));
+    cancelReport = await report(paid.id);
+    expect((await grant(cancelReport)).reward.state).toBe("scheduled");
+    count = rewardUpdates.length;
+    canceled.status = "canceled";
+    canceled.ended_at = canceled.cancel_at - 3600;
+    stripeSubscriptions.set(id, JSON.stringify(canceled));
+    expect((await send(canceled, "customer.subscription.deleted")).status).toBe(
+      200,
+    );
+    expect((await grant(cancelReport, "retry")).reward.state).toBe("review");
+    expect(await member(paid.cookie)).toMatchObject({
+      plan: "free",
+      giftEndsAt: null,
+    });
+    expect(rewardUpdates.length).toBe(count);
+    // A normal, separately approved cancellation reward still activates only
+    // after settlement; a debt at cancellation cannot become a Free gift.
+    canceled.status = "trialing";
+    canceled.ended_at = null;
+    stripeSubscriptions.set(id, JSON.stringify(canceled));
+    cancelReport = await report(paid.id);
+    expect((await grant(cancelReport)).reward.state).toBe("scheduled");
+    canceled.status = "canceled";
+    canceled.ended_at = canceled.cancel_at;
+    stripeSubscriptions.set(id, JSON.stringify(canceled));
+    rewardInvoices.set(customer, [...settledInvoices, { status: "open" }]);
+    expect((await send(canceled, "customer.subscription.deleted")).status).toBe(
+      400,
+    );
+    expect(await member(paid.cookie)).toMatchObject({
+      plan: "free",
+      giftEndsAt: null,
+    });
+    rewardInvoices.set(customer, settledInvoices);
+    expect((await send(canceled, "customer.subscription.deleted")).status).toBe(
+      200,
+    );
+    expect((await grant(cancelReport, "retry")).reward).toMatchObject({
+      state: "applied",
+      startsAt: canceled.ended_at * 1000,
+      endsAt: (canceled.ended_at + days) * 1000,
+    });
+    expect(rewardUpdates.length).toBe(count);
+    expect((await send(sub)).status).toBe(200); // Even a stale update after deletion stays canceled.
+    expect(await member(paid.cookie)).toMatchObject({
+      subs: [{ status: "canceled" }],
+    });
+    // A separate unresolved account never gets an app gift over a debt.
+    const debt = await login();
+    await db
+      .prepare(
+        "INSERT INTO subscription (id,plan,referenceId,status) VALUES (?,'unlimited',?,'past_due')",
+      )
+      .bind(randomUUID(), debt.id)
+      .run();
+    expect((await grant(await report(debt.id))).reward.state).toBe("review");
+    expect(await member(debt.cookie)).toMatchObject({ plan: "free" });
+    // An old Stripe customer with no current subscription can still owe money.
+    await db
+      .prepare("DELETE FROM subscription WHERE referenceId=?")
+      .bind(debt.id)
+      .run();
+    const oldCustomer = `cus_old_${debt.id}`;
+    await db
+      .prepare("UPDATE user SET stripeCustomerId=? WHERE id=?")
+      .bind(oldCustomer, debt.id)
+      .run();
+    rewardInvoices.set(oldCustomer, [{ status: "uncollectible" }]);
+    const oldDebtReport = await report(debt.id);
+    expect((await grant(oldDebtReport)).reward.state).toBe("review");
+    expect(await member(debt.cookie)).toMatchObject({ plan: "free" });
+    rewardInvoices.set(oldCustomer, []);
+    expect((await grant(oldDebtReport, "retry")).reward.state).toBe("applied");
+    expect(await member(debt.cookie)).toMatchObject({ plan: "unlimited" });
+  }
+  // Tied creation times must not duplicate or skip codes across history pages.
+  const ids = Array.from({ length: 52 }, () => randomUUID());
+  await db.batch(
+    ids.map((id) =>
+      db
+        .prepare(`INSERT INTO pro_reward
+    (id,bug,issuer,createdAt,reason,label,codeHash,claimBy,state)
+    VALUES (?,?,?,1,'Pagination fixture','DF-fixture',?,9999999999999,'issued')`)
+        .bind(id, `code:${id}`, admin.id, id),
+    ),
+  );
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await history(cursor);
+    expect(page.codes.length).toBeLessThanOrEqual(50);
+    seen.push(...page.codes.map((code) => code.id));
+    cursor = page.next ?? undefined;
+  } while (cursor);
+  expect(new Set(seen).size).toBe(seen.length);
+  expect(ids.every((id) => seen.includes(id))).toBe(true);
+}, 30_000);
+
 test("cardless trial setup is explicit, serialized, replayable and follows verified Stripe lifecycle without changing paid checkout", async () => {
   const db = await mf.getD1Database("DB");
   const userId = randomUUID();
@@ -751,19 +1696,55 @@ test("cardless trial setup is explicit, serialized, replayable and follows verif
       .prepare("DELETE FROM subscription WHERE id = 'eligibility_fixture'")
       .run();
   }
+  const paidPurchase = () =>
+    request(
+      "/api/auth/subscription/upgrade",
+      {
+        plan: "unlimited",
+        annual: false,
+        disableRedirect: true,
+        successUrl: "/settings?checkout=success",
+        cancelUrl: "/settings?checkout=canceled",
+      },
+      "http://fixture",
+    );
+  // A live unused trial reservation excludes ordinary checkout as well as the
+  // opposite direction below. Expired and consumed reservations do not.
+  await db
+    .prepare(
+      "INSERT INTO pro_trial_checkout (userId,attemptId,createdAt,expiresAt) VALUES (?,?,?,?)",
+    )
+    .bind(userId, randomUUID(), Date.now(), Date.now() + 3600_000)
+    .run();
+  const beforePaid = trialCheckoutPosts;
+  const blockedPaid = await paidPurchase();
+  expect(blockedPaid.status, await blockedPaid.clone().text()).toBe(409);
+  expect(trialCheckoutPosts).toBe(beforePaid);
+  expect(
+    await db
+      .prepare("SELECT userId FROM membership_checkout WHERE userId=?")
+      .bind(userId)
+      .first(),
+  ).toBeNull();
+  await db
+    .prepare("UPDATE pro_trial_checkout SET expiresAt=0 WHERE userId=?")
+    .bind(userId)
+    .run();
   // A normal paid purchase remains a paid purchase, never an implicit trial.
-  const paid = await request(
-    "/api/auth/subscription/upgrade",
-    {
-      plan: "unlimited",
-      annual: false,
-      disableRedirect: true,
-      successUrl: "/settings?checkout=success",
-      cancelUrl: "/settings?checkout=canceled",
-    },
-    "http://fixture",
-  );
+  const paid = await paidPurchase();
   expect(paid.status, await paid.clone().text()).toBe(200);
+  await db
+    .prepare(
+      "UPDATE pro_trial_checkout SET expiresAt=?,usedAt=? WHERE userId=?",
+    )
+    .bind(Date.now() + 3600_000, Date.now(), userId)
+    .run();
+  const afterUsedTrial = await paidPurchase();
+  expect(afterUsedTrial.status, await afterUsedTrial.clone().text()).toBe(200);
+  await db
+    .prepare("DELETE FROM pro_trial_checkout WHERE userId=?")
+    .bind(userId)
+    .run();
   const paidCheckout = [...trialCheckouts.values()].find(
     (entry) => entry.params.get("client_reference_id") === userId,
   );
@@ -772,6 +1753,12 @@ test("cardless trial setup is explicit, serialized, replayable and follows verif
     paidCheckout?.params.get("subscription_data[trial_period_days]"),
   ).toBeNull();
   expect(paidCheckout?.params.get("payment_method_collection")).toBeNull();
+  // An abandoned paid checkout must expire before a separate trial can start.
+  expect((await request(path, { consent: true })).status).toBe(409);
+  await db
+    .prepare("UPDATE membership_checkout SET expiresAt=0 WHERE userId=?")
+    .bind(userId)
+    .run();
   expect((await request(path, { consent: false })).status).toBe(400);
   expect(
     (await request(path, { consent: true }, "https://evil.test")).status,

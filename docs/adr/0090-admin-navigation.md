@@ -15,10 +15,12 @@ Dotflowy's sole admin and had to remember their URLs. Admins now get one
    More menu's Account and help section share `AppMenuItems`, so one **Admin**
    row below Settings covers both. Find lists one **Open admin** command. There
    is no shortcut, dock tab, submenu, or command for a destructive operation.
-2. **`/admin` is a list of links.** Feedback inbox, Waitlist, Restore a user,
+2. **`/admin` is a list of links.** Feedback inbox, Pro codes, Waitlist, Restore a user,
    in that order, with Restore marked destructive. Opening a link never changes
    data; Restore keeps its own review step. Each admin page starts with the
-   same **Admin** and **Back to outline** links, which wrap on phones.
+   same **Admin** and **Back to outline** links, which wrap on phones. Pro codes
+   generates standalone 30-day thank-you codes, records an internal reason,
+   and shows creation, expiry and first-redemption history (0087).
 3. **The server supplies the capability.** `GET /api/account-capabilities`
    returns `{ admin }` from `isAdminSession` for the current session, `private,
 no-store`, and 401 without a session. The client never names an admin

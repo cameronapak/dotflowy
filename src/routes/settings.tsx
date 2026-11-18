@@ -246,7 +246,10 @@ interface SubRow {
   plan: string;
   status: string;
   cancelAtPeriodEnd?: boolean;
-  periodEnd?: string | Date;
+  periodEnd?: string | Date | null;
+  cancelAt?: string | null;
+  billingInterval?: string | null;
+  rewarded?: boolean;
   stripeSubscriptionId?: string | null;
   trialEnd?: string | null;
 }
@@ -353,6 +356,7 @@ function UpgradeCard({
 
 function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
   const [busy, setBusy] = useState(false);
+  const { giftEndsAt, rewardMessage } = useMembership();
 
   async function upgrade(plan: "unlimited" | "founding", annual: boolean) {
     if (busy) return;
@@ -450,7 +454,13 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
               {paid && (
                 <Badge variant="secondary">
                   <CheckIcon data-icon="inline-start" />
-                  {trialing ? "Pro trial" : "Active"}
+                  {giftEndsAt && !sub
+                    ? "Thank-you gift"
+                    : trialing
+                      ? sub.rewarded
+                        ? "Thank-you reward"
+                        : "Pro trial"
+                      : "Active"}
                 </Badge>
               )}
             </div>
@@ -459,16 +469,37 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
                 3-year founding term
               </span>
             )}
-            {trialing && sub.trialEnd && (
+            {giftEndsAt && !sub && (
+              <p className="text-sm text-muted-foreground">
+                Pro is a gift until {new Date(giftEndsAt).toLocaleString()}. No
+                card, subscription or automatic renewal. Afterward you return to
+                Free; your outline stays saved.
+              </p>
+            )}
+            {rewardMessage && (
+              <p className="text-sm text-muted-foreground">{rewardMessage}</p>
+            )}
+            {trialing && !sub.rewarded && sub.trialEnd && (
               <p className="text-sm text-muted-foreground">
                 Trial ends {new Date(sub.trialEnd).toLocaleString()}. Without a
                 payment method, you return to Free. Add a payment method to
                 continue Pro at $5/month.
               </p>
             )}
-            {paid && sub?.cancelAtPeriodEnd && (
+            {trialing && sub.rewarded && sub.trialEnd && (
+              <p className="text-sm text-muted-foreground">
+                Thank you for helping fix Dotflowy. Your 30 extra days are
+                included.{" "}
+                {sub.cancelAt || sub.cancelAtPeriodEnd
+                  ? "Billing stays canceled."
+                  : `Your existing ${sub.billingInterval === "year" ? "yearly" : "monthly"} plan's next billing date is ${new Date(sub.trialEnd).toLocaleString()}, unless you cancel. A cardless trial still ends without renewal if you do not add a payment method. Stripe may label this extra time as a trial.`}
+              </p>
+            )}
+            {paid && (sub?.cancelAtPeriodEnd || sub?.cancelAt) && (
               <span className="text-sm text-amber-600 dark:text-amber-500">
-                Cancels at the end of the current period
+                {sub.cancelAt
+                  ? `Cancels ${new Date(sub.cancelAt).toLocaleString()}`
+                  : "Cancels at the end of the current period"}
               </span>
             )}
           </div>
@@ -480,29 +511,44 @@ function PlanBilling({ state, subs, reload, plan }: Subscriptions) {
               disabled={busy}
             >
               {busy && <LoaderIcon className="animate-spin" />}
-              {trialing ? "Continue Pro" : "Manage billing"}
+              {trialing && !sub.rewarded ? "Continue Pro" : "Manage billing"}
             </Button>
           )}
         </div>
 
         {plan === "free" && <UsageMeter />}
 
-        {paid && sub?.stripeSubscriptionId && (
-          <button
-            type="button"
-            onClick={() => void cancel()}
-            disabled={busy}
-            className="self-start text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:opacity-50"
-          >
-            Cancel subscription
-          </button>
-        )}
+        {paid &&
+          sub?.stripeSubscriptionId &&
+          !sub.cancelAt &&
+          !sub.cancelAtPeriodEnd && (
+            <button
+              type="button"
+              onClick={() => void cancel()}
+              disabled={busy}
+              className="self-start text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:opacity-50"
+            >
+              Cancel subscription
+            </button>
+          )}
       </div>
 
+      <a
+        href="/redeem"
+        className="self-start text-sm underline underline-offset-4"
+      >
+        Redeem code
+      </a>
       {plan === "free" && <ProTrialOffer />}
+      {giftEndsAt && !sub && (
+        <p className="text-sm text-muted-foreground">
+          Subscribing to Pro is optional. Checkout carries your remaining gift
+          time forward, then your chosen plan renews unless you cancel.
+        </p>
+      )}
 
-      {/* Upgrade options — free tier only */}
-      {plan === "free" && (
+      {/* A gift is not a subscription. Deliberate Pro checkout preserves its time. */}
+      {(plan === "free" || (giftEndsAt && !sub)) && (
         <div className="grid gap-3 sm:grid-cols-2">
           <UpgradeCard
             name="Pro"
