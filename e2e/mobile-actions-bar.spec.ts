@@ -590,16 +590,21 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(page.locator('[role="listbox"]')).toBeVisible();
   });
 
-  test("the actions button opens the focused bullet's actions sheet", async ({
+  test("the actions button lists the bullet's actions above the keyboard", async ({
     page,
   }) => {
     await load(page);
     await text(page, "alpha").click();
     await btn(page, "Bullet actions").click();
-    const sheet = page.getByRole("menu", { name: "Bullet actions" });
-    await sheet.getByRole("menuitem", { name: "Complete" }).click();
-    await expect(sheet).toHaveCount(0);
+    // A keyboard accessory, not a modal: the caret (and so the software
+    // keyboard) stays in the bullet while the actions are open and after.
+    const list = page.getByRole("listbox", { name: "Bullet actions" });
+    await expect(list.getByRole("option").last()).toHaveText("Delete");
+    await expect(text(page, "alpha")).toBeFocused();
+    await list.getByRole("option", { name: "Complete" }).click();
+    await expect(list).toHaveCount(0);
     await expect(text(page, "alpha")).toHaveAttribute("data-completed", "true");
+    await expect(text(page, "alpha")).toBeFocused();
   });
 
   test("a text selection swaps in the format buttons; collapsing swaps back", async ({

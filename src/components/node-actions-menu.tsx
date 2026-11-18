@@ -1,5 +1,11 @@
 import { Menu } from "@base-ui/react/menu";
-import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MoreIcon } from "@/lib/icons";
@@ -10,7 +16,8 @@ import { getNodeActionBridge } from "../data/command-bridge";
 import { buildNodeActions } from "../data/command-center";
 import { getTreeIndex } from "../data/tree-store";
 import { instanceIdForKey } from "../data/visible-order";
-import { MenuSheetContent } from "./menu-sheet";
+import { MenuList } from "./menu-list";
+import { TypingSuggestions } from "./typing-suggestions";
 import { Kbd, KbdGroup } from "./ui/kbd";
 
 /**
@@ -117,6 +124,20 @@ export function NodeActionsMenu() {
     setRequest(null);
   };
 
+  // The accessory never takes focus, so Escape arrives at the editor first.
+  useEffect(() => {
+    if (!mobile || !open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      setRequest(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [mobile, open]);
+
   // A plain trigger, not a Base UI one, so keep its expanded state here.
   useLayoutEffect(() => {
     const trigger = request?.anchor;
@@ -127,27 +148,44 @@ export function NodeActionsMenu() {
 
   if (!request) return null;
 
+  // Narrow screens: a keyboard accessory, like the `/` results (ADR 0066).
+  // It never takes focus, so the caret and software keyboard stay put.
   if (mobile) {
-    return (
-      <MenuSheetContent
-        title="Bullet actions"
-        isOpen={open}
-        onOpenChange={setOpen}
-        onAfterClose={afterClose}
+    const entries = remove ? [...actions, remove] : actions;
+    return open ? (
+      <TypingSuggestions
+        getEditor={() => request.returnFocus}
+        onDismiss={() => setOpen(false)}
       >
-        <div role="menu" aria-label="Bullet actions" className="p-1">
-          {actions.map((action) => (
-            <SheetItem key={action.id} action={action} onChoose={choose} />
-          ))}
-          {remove && (
-            <>
-              <hr className="my-1 border-border" />
-              <SheetItem action={remove} onChoose={choose} destructive />
-            </>
-          )}
-        </div>
-      </MenuSheetContent>
-    );
+        <MenuList
+          inDock
+          label="Bullet actions"
+          activeIndex={-1}
+          onHover={() => {}}
+          onSelect={(i) => {
+            const action = entries[i];
+            setOpen(false);
+            setRequest(null);
+            action?.run();
+          }}
+          entries={entries.map((action) => ({
+            key: action.id,
+            render: () => (
+              <span
+                className={
+                  action === remove
+                    ? "flex items-center gap-2 text-destructive"
+                    : "flex items-center gap-2"
+                }
+              >
+                <action.icon className="size-4 shrink-0 opacity-70" />
+                {action.label}
+              </span>
+            ),
+          }))}
+        />
+      </TypingSuggestions>
+    ) : null;
   }
 
   return (
@@ -229,28 +267,5 @@ function MenuItem({
         </KbdGroup>
       )}
     </Menu.Item>
-  );
-}
-
-function SheetItem({
-  action,
-  onChoose,
-  destructive,
-}: {
-  action: CommandCenterAction;
-  onChoose: (action: CommandCenterAction) => void;
-  destructive?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      data-variant={destructive ? "destructive" : undefined}
-      className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent data-[variant=destructive]:text-destructive"
-      onClick={() => onChoose(action)}
-    >
-      <action.icon className="size-4 shrink-0 opacity-70" />
-      {action.label}
-    </button>
   );
 }

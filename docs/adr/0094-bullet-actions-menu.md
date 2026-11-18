@@ -34,11 +34,14 @@ chose the ⋯ button.
    the hotkey library's raw form, so the physical Period key still matches
    where Shift+. types `>` or `:`. `Mod+/` was rejected because Safari uses
    it for the status bar and it needs Shift on many non-US layouts.
-6. **Touch uses the editing bar.** Below 768px the menu is a Liquidglass
-   sheet (0066). On coarse pointers the row's right edge belongs to the
-   chevron (0029), so the row button is hidden there and the bar holds ⋯.
-   Acting on a bullet on touch therefore starts with focusing it.
-7. **Actions run after close.** An action runs when the overlay finishes
+6. **Touch uses the editing bar, and the keyboard stays up.** On coarse
+   pointers the row's right edge belongs to the chevron (0029), and below
+   768px the canvas keeps its width for text and embeds, so the row button is
+   hidden there and the bar holds ⋯. The list opens as a keyboard accessory,
+   the same nonmodal panel as the `/` results (0066), not a Liquidglass sheet:
+   a modal sheet takes focus and dismisses the software keyboard mid-edit.
+   Escape or an outside tap closes it; choosing an action keeps the caret.
+7. **Desktop actions run after close.** An action runs when the menu finishes
    closing, so the Move and Mirror pickers and each action's own caret
    handoff are not undone by focus restoration.
 

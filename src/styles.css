@@ -1509,7 +1509,9 @@ h2 span.protection-indicator {
   opacity: 1;
 }
 
-@media (pointer: coarse) {
+/* Coarse pointers use the actions bar (the chevron owns this edge), and
+   narrow canvases keep the width for text and embeds. */
+@media (pointer: coarse), (width < 768px) {
   .node-actions-trigger {
     display: none;
   }
