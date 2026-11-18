@@ -25,6 +25,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -55,7 +56,10 @@ import type {
 import type { NodeCommands } from "./node-commands";
 
 import { setNodeActionBridge } from "../data/command-bridge";
-import { useEditorFeatures } from "../data/editor-features";
+import {
+  getEditorFeatures,
+  subscribeEditorFeatures,
+} from "../data/editor-features";
 import { embedUrl } from "../data/embed-url";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
@@ -802,7 +806,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       ? (stream.resolve(inViewSection) ?? stream.trailFor(inViewSection))
       : rootId;
   const trail = useTrail(trailRoot);
-  const { indentGuides } = useEditorFeatures();
+  // Select the one boolean, so other account preferences never re-render the
+  // whole editor (the snapshot also changes on focus refetches).
+  const indentGuides = useSyncExternalStore(
+    subscribeEditorFeatures,
+    () => getEditorFeatures().indentGuides,
+    () => true,
+  );
   const deepestVisibleDepth = useMemo(
     () => rows.reduce((deepest, row) => Math.max(deepest, row.depth), 0),
     [rows],
