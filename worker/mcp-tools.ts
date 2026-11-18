@@ -939,7 +939,8 @@ export const tools: ReadonlyArray<ToolDef> = [
     title: "Get Pro trial setup link",
     description:
       "Get the browser setup link for a 14-day Pro trial with no card required. This only provides information; the user must sign in and explicitly complete Stripe Checkout. It never starts a trial or authorizes payment. Available without Pro.",
-    input: Schema.Struct({}),
+    // Empty Struct accepts non-objects in Effect v4 and publishes no object type.
+    input: Schema.Record(Schema.String, Schema.Unknown),
     readOnly: true,
     destructive: false,
     handle: () =>

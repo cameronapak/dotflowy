@@ -432,7 +432,15 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
   const tool = (name: string) =>
     json.result.tools.find((t: any) => t.name === name);
 
-  expect(tool("add_node").inputSchema.type).toBe("object");
+  for (const descriptor of json.result.tools) {
+    expect({
+      name: descriptor.name,
+      type: descriptor.inputSchema.type,
+    }).toEqual({
+      name: descriptor.name,
+      type: "object",
+    });
+  }
   expect(tool("add_node").inputSchema.required).toEqual(["sourceApp", "text"]);
   const expectedHints = {
     get_pro_trial: [true, false],
@@ -510,6 +518,13 @@ test("protocol faults map to their JSON-RPC codes and GET is declined", async ()
   expect((await callTool(store, "add_node", { text: 42 })).error?.code).toBe(
     -32602,
   );
+  for (const args of [[], "not an object", 42, false]) {
+    const response = await rpc(store, "tools/call", {
+      name: "get_pro_trial",
+      arguments: args,
+    });
+    expect(await response.json()).toHaveProperty("error.code", -32602);
+  }
 
   const bad = await raw(store, { method: "POST", body: "{nope" });
   // SAFETY: parsed from the error body our own handler serializes; field checked by the expect below.
@@ -543,14 +558,17 @@ test("a free plan (no agent access) refuses tools/call but keeps discovery open 
   });
   expect(write.error.code).toBe(-32001);
   expect(batches.length).toBe(0);
-  const trial = await free("tools/call", {
-    name: "get_pro_trial",
-    arguments: {},
-  });
-  expect(trial.error).toBeUndefined();
-  expect(trial.result.content[0].text).toContain(
-    "https://app.dotflowy.com/settings#billing",
-  );
+  const trialCalls: RpcParams[] = [
+    { name: "get_pro_trial" },
+    { name: "get_pro_trial", arguments: {} },
+  ];
+  for (const params of trialCalls) {
+    const trial = await free("tools/call", params);
+    expect(trial.error).toBeUndefined();
+    expect(trial.result.content[0].text).toContain(
+      "https://app.dotflowy.com/settings#billing",
+    );
+  }
   expect(batches.length).toBe(0);
 
   // initialize / ping / tools/list stay open, so a free connection can still
