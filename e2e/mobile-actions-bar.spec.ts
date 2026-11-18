@@ -388,6 +388,28 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await expect(bar(page)).toHaveCount(0);
   });
 
+  test("the bar shows when Safari scrolls the page to reveal a low caret", async ({
+    page,
+  }) => {
+    // Revealing a caret low on the screen (the last bullet), iOS Safari scrolls
+    // the page and reports innerHeight as the visible height, while the layout
+    // viewport (documentElement.clientHeight) keeps its full height.
+    await page.addInitScript(() => {
+      const visible = () => document.documentElement.clientHeight - 300;
+      Object.defineProperty(window.visualViewport!, "height", {
+        configurable: true,
+        get: visible,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        get: visible,
+      });
+    });
+    await load(page);
+    await text(page, "alpha").click();
+    await expect(bar(page)).toBeVisible();
+  });
+
   test("fits the visible height and follows viewport panning without blocking editing", async ({
     page,
   }) => {
@@ -588,6 +610,22 @@ test.describe("mobile actions bar (coarse pointer)", () => {
     await caretAt(page, "alpha", 0);
     await btn(page, "Command menu").click();
     await expect(page.locator('[role="listbox"]')).toBeVisible();
+  });
+
+  test("the slash menu carries the row verbs the phone has no other way to reach", async ({
+    page,
+  }) => {
+    await load(page);
+    await caretAt(page, "alpha", 0);
+    await btn(page, "Command menu").click();
+    // Phones get no row ⋯ button (#192), so `/` holds the bullet's row verbs.
+    const list = page.locator('[role="listbox"]');
+    for (const name of ["Move up", "Move down", "Zoom in", "Delete"])
+      await expect(list.getByRole("option", { name })).toHaveCount(1);
+    await list.getByRole("option", { name: "Collapse" }).click();
+    await expect(text(page, "alpha-1")).toHaveCount(0);
+    await expect(text(page, "alpha")).toHaveText("Alpha");
+    await expect(text(page, "alpha")).toBeFocused();
   });
 
   test("a text selection swaps in the format buttons; collapsing swaps back", async ({

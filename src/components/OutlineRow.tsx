@@ -49,6 +49,7 @@ import {
 } from "./inline-code";
 import { useMenus } from "./menu-engine";
 import { MirrorBadge } from "./mirror-chrome";
+import { NodeActionsButton } from "./node-actions-menu";
 import { NodeBody } from "./node-body";
 import { NodeDecorations } from "./NodeDecorations";
 import {
@@ -654,6 +655,12 @@ function RowChrome({
           node={content}
           position="row:after-text"
           getCtx={pluginCtx}
+        />
+        {/* Bullet actions (#192): hover and editing reveal it; coarse pointers
+            use the `/` palette instead, since the chevron owns this edge. */}
+        <NodeActionsButton
+          rowKey={rowKey}
+          label={stripQuoteMarker(content.text).trim() || "empty bullet"}
         />
         {slash.menu}
         {menus.menu}

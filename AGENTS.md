@@ -38,6 +38,7 @@ New feature or design: `ls docs/adr/` and read the ADRs that match the surface. 
 | Spotlight dim + breathing room                         | 0033, 0060                                             |
 | Focus sessions, Pomodoro, and Document PiP             | 0074, 0002                                             |
 | Retired backend storage and restore guards             | 0075                                                   |
+| Row ⋯ menu, Mod+Shift+., and node action surfaces      | 0094, 0034                                             |
 
 ## Architecture
 

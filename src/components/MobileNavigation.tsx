@@ -17,6 +17,7 @@ import { HomeIcon } from "@/lib/icons";
 
 import type { HeaderSlotSpec, PluginContext } from "../plugins/types";
 
+import { softwareKeyboardOpen } from "../hooks/use-keyboard-viewport";
 import { useOpaqueChrome } from "../hooks/use-opaque-chrome";
 
 const NavigationContext = createContext<{
@@ -71,10 +72,7 @@ export default function MobileNavigation({
   useEffect(() => {
     const viewport = window.visualViewport;
     const update = () =>
-      setKeyboard(
-        !!viewport &&
-          window.innerHeight - viewport.height * viewport.scale > 100,
-      );
+      setKeyboard(!!viewport && softwareKeyboardOpen(viewport));
     update();
     viewport?.addEventListener("resize", update);
     window.addEventListener("resize", update);

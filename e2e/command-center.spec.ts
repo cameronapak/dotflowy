@@ -536,6 +536,41 @@ test("ambient target: a focused bullet's actions run against it", async ({
   );
 });
 
+test("a row's More button and Mod+Shift+. open that bullet's actions", async ({
+  page,
+}) => {
+  await load(page);
+  const menu = page.getByRole("menu", { name: "Bullet actions" });
+
+  // Pointer: hovering Bravo reveals its More button; picking an action runs
+  // it against Bravo, not the focused row (Zephyr holds the caret).
+  await text(page, "zephyr").click();
+  const bravoRow = page.locator('li[data-node-id="bravo"] > .outline-row');
+  await bravoRow.hover();
+  await bravoRow
+    .getByRole("button", { name: "More actions for Bravo" })
+    .click();
+  await menu.getByRole("menuitem", { name: /^Indent/ }).click();
+  await expect(page.locator('li[data-node-id="bravo"]')).toHaveAttribute(
+    "data-parent-id",
+    "alpha",
+  );
+
+  // Keyboard: the shortcut enters the menu on its first item, and Escape
+  // returns the caret to the bullet it came from.
+  await text(page, "zephyr").click();
+  await page.keyboard.press("ControlOrMeta+Shift+Period");
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(text(page, "zephyr")).toBeFocused();
+
+  // Delete runs from the menu on the shortcut's own row.
+  await page.keyboard.press("ControlOrMeta+Shift+Period");
+  await menu.getByRole("menuitem", { name: "Delete" }).click();
+  await expect(page.locator('li[data-node-id="zephyr"]')).toHaveCount(0);
+});
+
 test("per-result: -> opens a picked node's action sub-view", async ({
   page,
 }) => {

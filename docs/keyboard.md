@@ -8,6 +8,7 @@
 | `Cmd/Ctrl+↑` / `↓`                           | Collapse / expand                                                                                               |
 | `Cmd/Ctrl+Enter` or `Cmd/Ctrl+D`             | Toggle complete                                                                                                 |
 | `Cmd/Ctrl+.` / `Cmd/Ctrl+,`                  | Zoom in / out                                                                                                   |
+| `Cmd/Ctrl+Shift+.`                           | Open the bullet's actions menu (the same menu as the row's ⋯ button)                                            |
 | `Backspace` at the start of a task or bullet | Delete the last Markdown marker character and reveal the remaining prefix as editable text                      |
 | `Backspace` at the start of a paragraph      | Join into the previous visible row; delete an empty paragraph and focus the previous row                        |
 | `Arrow ↑` / `↓` at line edges                | Move between bullets (preserves the caret column)                                                               |

@@ -195,6 +195,7 @@ import { MirrorBadge } from "./mirror-chrome";
 import { MobileBreadcrumb } from "./mobile-breadcrumb";
 import { MobileActionsBar, type MobileBarActions } from "./MobileActionsBar";
 import { openMoveDialog } from "./move-dialog-opener";
+import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeBody } from "./node-body";
 import { BackToFind } from "./node-switcher";
 import { NodeDecorations } from "./NodeDecorations";
@@ -2028,6 +2029,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         pendingFlash={pendingFlash}
       />
       <SelectionActionsMenu ops={selection.ops} getCtx={pluginCtx} />
+      <NodeActionsMenu />
       <div className="outline-chrome" ref={headerRef}>
         <Header getCtx={pluginCtx}>
           <BreadcrumbTrail
