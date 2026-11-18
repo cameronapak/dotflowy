@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.11.1
+
+### Patch Changes
+
+- f6f3f90: Fix MCP tool discovery in Claude Code and other strict clients by publishing an object input schema for the no-argument Pro trial tool.
+
 ## 3.11.0
 
 ### Minor Changes
