@@ -105,17 +105,19 @@ export function resolvePlan(rows: ReadonlyArray<{ plan: string }>): Plan {
  * routing key rule extends to billing). An operator-comped user is a manually
  * inserted row (`plan`, `referenceId`, `status: 'active'`, no Stripe ids) —
  * this read treats it identically to a paid one (#170 owns the mechanism).
- * Webhooks keep `status` current, so `active`/`trialing` alone is the gate —
- * no period-end math here.
+ * Webhooks own subscription status. Earned, non-renewing gifts use their own
+ * server-side clock and never masquerade as plugin subscriptions.
  */
 export async function getPlan(
   userId: string,
   env: { DB: D1Database },
 ): Promise<Plan> {
   const result = await env.DB.prepare(
-    `SELECT plan FROM subscription WHERE referenceId = ?1 AND status IN ('active', 'trialing')`,
+    `SELECT plan FROM subscription WHERE referenceId = ?1 AND status IN ('active', 'trialing')
+     UNION ALL SELECT 'unlimited' AS plan FROM pro_reward WHERE userId=?1
+       AND state='applied' AND gift=1 AND startsAt<=?2 AND endsAt>?2`,
   )
-    .bind(userId)
+    .bind(userId, Date.now())
     .all<{ plan: string }>();
   return resolvePlan(result.results);
 }

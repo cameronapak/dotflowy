@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { Schema } from "effect";
 import { build } from "esbuild";
 import {
   Headers as ProviderHeaders,
@@ -18,9 +19,15 @@ beforeAll(async () => {
   const bundle = await build({
     stdin: {
       contents: `import { createAuth } from "./worker/auth";
+        const mail = new Map();
         export default { fetch(request, env, ctx) {
+          const url = new URL(request.url);
+          if (url.pathname === "/__fixture/email")
+            return Response.json(mail.get(url.searchParams.get("to")) ?? null);
           const mode = request.headers.get("x-fixture-signup-mode");
-          return createAuth({ ...env, SIGNUP_OPEN: mode === "open" ? "true" : mode === "malformed" ? "TRUE" : undefined }, "http://fixture", ctx).handler(request);
+          return createAuth({ ...env,
+            EMAIL: { async send(message) { mail.set(message.to, message.text); return { messageId: "fixture-only" }; } },
+            SIGNUP_OPEN: mode === "open" ? "true" : mode === "malformed" ? "TRUE" : undefined }, "http://fixture", ctx).handler(request);
         } };`,
       resolveDir: process.cwd(),
       loader: "ts",
@@ -191,6 +198,44 @@ async function session(
     user: { id: string; email: string; emailVerified: boolean };
   } | null>;
 }
+
+test("gift verification returns to redemption without signing in or allowing an external redirect", async () => {
+  const email = "gift-recipient@auth.test";
+  const credentials = {
+    name: "Gift Recipient",
+    email,
+    password: "fixture-password",
+    callbackURL: "/redeem",
+  };
+  const signup = await request("open", "/sign-up/email", credentials);
+  expect(signup.status).toBe(200);
+  expect(await session("open", signup)).toBeNull();
+  const mail = await mf.dispatchFetch(
+    `http://fixture/__fixture/email?to=${encodeURIComponent(email)}`,
+  );
+  const text = Schema.decodeUnknownSync(Schema.String)(await mail.json());
+  const link = text.match(
+    /http:\/\/fixture\/api\/auth\/verify-email\?[^\s]+/,
+  )?.[0];
+  expect(link).toBeDefined();
+  expect(new URL(link!).searchParams.get("callbackURL")).toBe("/redeem");
+  const verified = await mf.dispatchFetch(link!, { redirect: "manual" });
+  expect(verified.status).toBe(302);
+  expect(verified.headers.get("location")).toBe("/redeem");
+  expect(await session("open", verified)).toBeNull();
+  const login = await request("open", "/sign-in/email", credentials);
+  expect(login.status).toBe(200);
+  expect((await session("open", login))?.user).toMatchObject({
+    email,
+    emailVerified: true,
+  });
+  const unsafe = await request("open", "/sign-in/email", {
+    ...credentials,
+    callbackURL: "https://untrusted.test/redeem",
+  });
+  expect(unsafe.status).toBe(403);
+  expect(unsafe.headers.get("location")).toBeNull();
+});
 
 test("open Google signup creates a verified account and later sign-ins reuse it even with signup closed", async () => {
   const email = "new-google@auth.test";

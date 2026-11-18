@@ -78,6 +78,7 @@ import { acknowledgeWelcome, canSaveTheme, readMembership } from "./membership";
 import { legacyNumberedNode } from "./numbered-compat";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
+import { handleRewards } from "./pro-reward";
 import { trialCheckout } from "./pro-trial";
 import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
@@ -1242,6 +1243,18 @@ function handleApiRequest(
     const session = yield* Effect.promise(() =>
       auth.api.getSession({ headers: request.headers }),
     );
+    if (
+      url.pathname === "/api/admin/pro-rewards" ||
+      url.pathname === "/api/admin/pro-codes" ||
+      url.pathname === "/api/membership/redeem"
+    ) {
+      return yield* handleRewards(
+        request,
+        env,
+        session,
+        url.pathname !== "/api/membership/redeem",
+      );
+    }
     if (url.pathname === "/api/admin/feedback") {
       return yield* handleFeedbackInboxRequest(
         request,
@@ -1311,10 +1324,24 @@ function handleApiRequest(
 
     if (url.pathname === "/api/membership") {
       if (request.method === "GET") {
-        return json(
-          yield* Effect.promise(() => readMembership(env.DB, session.user.id)),
-          200,
-          { "cache-control": "private, no-store" },
+        return yield* readMembership(env.DB, session.user.id).pipe(
+          Effect.map((membership) =>
+            json(membership, 200, { "cache-control": "private, no-store" }),
+          ),
+          Effect.catchTag(
+            ["MembershipStorageError", "RewardStorageError"],
+            () =>
+              Effect.succeed(
+                json(
+                  {
+                    error:
+                      "Membership storage is unavailable. Retry in a moment.",
+                  },
+                  503,
+                  { "cache-control": "private, no-store" },
+                ),
+              ),
+          ),
         );
       }
       if (request.method === "POST") {

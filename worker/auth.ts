@@ -21,7 +21,7 @@ import {
 } from "better-auth/api";
 import { generateRandomString } from "better-auth/crypto";
 import { captcha, mcp } from "better-auth/plugins";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import Stripe from "stripe";
 
 import type { UserOutlineDO } from "./outline-do";
@@ -43,6 +43,11 @@ import { isRedeemableInvite, redeemInvite } from "./invites";
 import { readMcpConsent } from "./mcp-oauth";
 import { recordWelcome } from "./membership";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
+import {
+  giftCheckoutParams,
+  reconcileRewards,
+  reconcileMembershipCheckout,
+} from "./pro-reward";
 import { trialCheckoutParams } from "./pro-trial";
 
 /** Any undecoded JSON request-body field as the auth hooks see it (Better Auth
@@ -694,6 +699,28 @@ export function createAuth(
         // Stripe to retry. Delayed methods have their own paid completion event.
         onEvent: async (event) => {
           if (
+            (event.type === "customer.subscription.created" ||
+              event.type === "customer.subscription.updated") &&
+            event.data.object.metadata.dotflowyCheckout &&
+            event.data.object.metadata.dotflowyCheckoutUser
+          )
+            await Effect.runPromise(
+              reconcileMembershipCheckout(
+                env,
+                event.data.object.id,
+                event.data.object.metadata.dotflowyCheckoutUser,
+                event.data.object.metadata.dotflowyCheckout,
+              ),
+            );
+          if (
+            event.type === "customer.subscription.created" ||
+            event.type === "customer.subscription.updated" ||
+            event.type === "customer.subscription.deleted"
+          )
+            await Effect.runPromise(
+              reconcileRewards(env, event.data.object.id),
+            );
+          if (
             event.type === "customer.subscription.created" ||
             event.type === "customer.subscription.updated"
           ) {
@@ -762,7 +789,11 @@ export function createAuth(
           const checkout = event.data.object;
           if (
             checkout.mode !== "subscription" ||
-            checkout.payment_status !== "paid" ||
+            (checkout.payment_status !== "paid" &&
+              !(
+                checkout.payment_status === "no_payment_required" &&
+                checkout.metadata?.dotflowyGift
+              )) ||
             !checkout.client_reference_id ||
             !checkout.subscription
           )
@@ -777,7 +808,19 @@ export function createAuth(
             .first<{ plan: string; status: string }>();
           // An out-of-order event retries after the subscription record lands.
           if (!completed) throw new Error("Checkout subscription is not ready");
-          if (completed.status !== "trialing")
+          if (checkout.metadata?.dotflowyCheckout)
+            await Effect.runPromise(
+              reconcileMembershipCheckout(
+                env,
+                subscriptionId,
+                checkout.client_reference_id,
+                checkout.metadata.dotflowyCheckout,
+              ),
+            );
+          if (
+            checkout.payment_status === "paid" &&
+            completed.status !== "trialing"
+          )
             await recordWelcome(
               env.DB,
               checkout.client_reference_id,
@@ -833,7 +876,14 @@ export function createAuth(
                   "All founding seats are taken. The Pro plan is available.",
               });
             }
-            return {};
+            return Effect.runPromise(
+              giftCheckoutParams(
+                env.DB,
+                user.id,
+                plan.name,
+                !!ctx.body?.annual,
+              ),
+            );
           },
         },
       }),

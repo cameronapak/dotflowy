@@ -34,6 +34,16 @@ Payments are processed by Stripe. We never see or store your card number.
 
 If we change prices, we'll give you advance notice, and changes never apply retroactively to a period you've already paid for.
 
+### Thank-you rewards
+
+We may give 30 days of Pro as a thank-you for feedback or other contributions. Rewards are discretionary; submitting feedback does not guarantee one. Each reward provides 30 consecutive 24-hour days of Pro access and has no cash value. It is not a refund or an account credit.
+
+A reward code must be claimed within 90 days of issuance. Each code can be claimed once, by the first signed-in account with a verified email address that redeems it. Keep your code private and check the account before claiming: after a claim, the reward belongs to that account and cannot be transferred. Separate rewards may add to your existing gifted time. We may revoke or replace unclaimed codes; revoking an unclaimed code does not shorten time already delivered.
+
+For a Free account, a gift requires no payment card, creates no subscription, and does not automatically renew. For an eligible renewing monthly or annual subscriber, we add 30 days after existing paid coverage or an existing trial, keeping the same plan and billing interval. Your existing renewal agreement continues at the deferred date unless you cancel. Stripe may describe the extension as a trial. If your subscription is already set to cancel, it stays canceled and the gift follows your existing access without restarting billing.
+
+Dates shown before claiming are estimates. Some billing arrangements need review before we can deliver the reward; claiming a code does not mean delivery is complete. Check the confirmed status and dates in Dotflowy, and contact support if delivery remains unresolved. When gifted access ends without an active subscription or another gift, your account returns to Free and you keep access to your existing notes and export.
+
 ## 5. Acceptable use
 
 Use Dotflowy lawfully and don't break it for others. Specifically, don't:

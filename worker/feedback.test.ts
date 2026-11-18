@@ -54,6 +54,7 @@ beforeAll(async () => {
     "0018_first_party_feedback.sql",
     "0019_feedback_triage.sql",
     "0020_feedback_replies.sql",
+    "0022_pro_rewards.sql",
   ]) {
     const sql = await readFile(
       new URL(`../migrations/${file}`, import.meta.url),

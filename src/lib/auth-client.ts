@@ -79,11 +79,12 @@ export function hardReset(target: string = "/") {
  * failure (offline, 5xx) the session cookie is still valid and no teardown ran,
  * so staying put is correct — but say so, or the user walks away from a shared
  * machine believing they signed out.
+ * The gift page keeps its fixed /redeem destination when switching accounts.
  */
-export function signOutAndReload() {
+export function signOutAndReload(target: "/" | "/redeem" = "/") {
   void authClient.signOut({
     fetchOptions: {
-      onSuccess: () => hardReset(),
+      onSuccess: () => hardReset(target),
       onError: () => {
         toast.error("Sign out failed. Check your connection and try again.");
       },

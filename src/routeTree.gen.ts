@@ -15,6 +15,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as DemoRouteImport } from './routes/demo'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as RedeemRouteImport } from './routes/redeem'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ShareRouteImport } from './routes/share'
@@ -22,6 +23,7 @@ import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TodayRouteImport } from './routes/today'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminFeedbackRouteImport } from './routes/admin.feedback'
+import { Route as AdminProCodesRouteImport } from './routes/admin.pro-codes'
 import { Route as AdminRestoreRouteImport } from './routes/admin.restore'
 import { Route as AdminWaitlistRouteImport } from './routes/admin.waitlist'
 
@@ -53,6 +55,11 @@ const McpConsentRoute = McpConsentRouteImport.update({
 const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RedeemRoute = RedeemRouteImport.update({
+  id: '/redeem',
+  path: '/redeem',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -90,6 +97,11 @@ const AdminFeedbackRoute = AdminFeedbackRouteImport.update({
   path: '/feedback',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminProCodesRoute = AdminProCodesRouteImport.update({
+  id: '/pro-codes',
+  path: '/pro-codes',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminRestoreRoute = AdminRestoreRouteImport.update({
   id: '/restore',
   path: '/restore',
@@ -108,12 +120,14 @@ export interface FileRoutesByFullPath {
   '/demo': typeof DemoRoute
   '/mcp-consent': typeof McpConsentRoute
   '/privacy': typeof PrivacyRoute
+  '/redeem': typeof RedeemRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
   '/admin/feedback': typeof AdminFeedbackRoute
+  '/admin/pro-codes': typeof AdminProCodesRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
   '/admin/': typeof AdminIndexRoute
@@ -124,12 +138,14 @@ export interface FileRoutesByTo {
   '/demo': typeof DemoRoute
   '/mcp-consent': typeof McpConsentRoute
   '/privacy': typeof PrivacyRoute
+  '/redeem': typeof RedeemRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
   '/admin/feedback': typeof AdminFeedbackRoute
+  '/admin/pro-codes': typeof AdminProCodesRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
   '/admin': typeof AdminIndexRoute
@@ -142,12 +158,14 @@ export interface FileRoutesById {
   '/demo': typeof DemoRoute
   '/mcp-consent': typeof McpConsentRoute
   '/privacy': typeof PrivacyRoute
+  '/redeem': typeof RedeemRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/share': typeof ShareRoute
   '/terms': typeof TermsRoute
   '/today': typeof TodayRoute
   '/admin/feedback': typeof AdminFeedbackRoute
+  '/admin/pro-codes': typeof AdminProCodesRoute
   '/admin/restore': typeof AdminRestoreRoute
   '/admin/waitlist': typeof AdminWaitlistRoute
   '/admin/': typeof AdminIndexRoute
@@ -161,12 +179,14 @@ export interface FileRouteTypes {
     | '/demo'
     | '/mcp-consent'
     | '/privacy'
+    | '/redeem'
     | '/reset-password'
     | '/settings'
     | '/share'
     | '/terms'
     | '/today'
     | '/admin/feedback'
+    | '/admin/pro-codes'
     | '/admin/restore'
     | '/admin/waitlist'
     | '/admin/'
@@ -177,12 +197,14 @@ export interface FileRouteTypes {
     | '/demo'
     | '/mcp-consent'
     | '/privacy'
+    | '/redeem'
     | '/reset-password'
     | '/settings'
     | '/share'
     | '/terms'
     | '/today'
     | '/admin/feedback'
+    | '/admin/pro-codes'
     | '/admin/restore'
     | '/admin/waitlist'
     | '/admin'
@@ -194,12 +216,14 @@ export interface FileRouteTypes {
     | '/demo'
     | '/mcp-consent'
     | '/privacy'
+    | '/redeem'
     | '/reset-password'
     | '/settings'
     | '/share'
     | '/terms'
     | '/today'
     | '/admin/feedback'
+    | '/admin/pro-codes'
     | '/admin/restore'
     | '/admin/waitlist'
     | '/admin/'
@@ -212,6 +236,7 @@ export interface RootRouteChildren {
   DemoRoute: typeof DemoRoute
   McpConsentRoute: typeof McpConsentRoute
   PrivacyRoute: typeof PrivacyRoute
+  RedeemRoute: typeof RedeemRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
   ShareRoute: typeof ShareRoute
@@ -263,6 +288,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/redeem': {
+      id: '/redeem'
+      path: '/redeem'
+      fullPath: '/redeem'
+      preLoaderRoute: typeof RedeemRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reset-password': {
       id: '/reset-password'
       path: '/reset-password'
@@ -312,6 +344,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminFeedbackRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/pro-codes': {
+      id: '/admin/pro-codes'
+      path: '/pro-codes'
+      fullPath: '/admin/pro-codes'
+      preLoaderRoute: typeof AdminProCodesRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/restore': {
       id: '/admin/restore'
       path: '/restore'
@@ -331,6 +370,7 @@ declare module '@tanstack/react-router' {
 
 interface AdminRouteChildren {
   AdminFeedbackRoute: typeof AdminFeedbackRoute
+  AdminProCodesRoute: typeof AdminProCodesRoute
   AdminRestoreRoute: typeof AdminRestoreRoute
   AdminWaitlistRoute: typeof AdminWaitlistRoute
   AdminIndexRoute: typeof AdminIndexRoute
@@ -338,6 +378,7 @@ interface AdminRouteChildren {
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminFeedbackRoute: AdminFeedbackRoute,
+  AdminProCodesRoute: AdminProCodesRoute,
   AdminRestoreRoute: AdminRestoreRoute,
   AdminWaitlistRoute: AdminWaitlistRoute,
   AdminIndexRoute: AdminIndexRoute,
@@ -352,6 +393,7 @@ const rootRouteChildren: RootRouteChildren = {
   DemoRoute: DemoRoute,
   McpConsentRoute: McpConsentRoute,
   PrivacyRoute: PrivacyRoute,
+  RedeemRoute: RedeemRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
   ShareRoute: ShareRoute,

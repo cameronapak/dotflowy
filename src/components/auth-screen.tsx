@@ -36,7 +36,7 @@ function pendingOAuthQuery(): string | null {
   return isAuthorize ? params.toString() : null;
 }
 
-export function AuthScreen() {
+export function AuthScreen({ returnTo }: { returnTo?: "/redeem" }) {
   const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -224,6 +224,7 @@ export function AuthScreen() {
         email,
         password,
         inviteCode: inviteCode.trim(),
+        callbackURL: returnTo,
       };
       // disableSignal: every success branch below leaves via a top-level
       // navigation, but Better Auth otherwise fires its session signal ~10ms
@@ -242,7 +243,12 @@ export function AuthScreen() {
         : { disableSignal: true };
       const res = isSignup
         ? await signUp.email({ ...signupBody, fetchOptions })
-        : await signIn.email({ email, password, fetchOptions });
+        : await signIn.email({
+            email,
+            password,
+            callbackURL: returnTo,
+            fetchOptions,
+          });
       // A real credential/validation failure (>= 400) shows the error; on an
       // OAuth hop anything else (success, or the mcp plugin's after-hook 302
       // that fetch couldn't follow cross-origin) means the session was set —
@@ -289,9 +295,9 @@ export function AuthScreen() {
         // (a shared /$nodeId deep link, or your own spot after expiry — a
         // foreign id degrades to the missing-node view); sign-UP resets to "/"
         // (a brand-new outline has no nodes, the welcome seed beats a
-        // guaranteed-missing node). Keeps `busy` true — the page is navigating
-        // away.
-        hardReset(isSignup ? "/" : window.location.href);
+        // guaranteed-missing node). The gift page instead keeps its fixed
+        // /redeem destination. Keeps `busy` true while navigating away.
+        hardReset(returnTo ?? (isSignup ? "/" : window.location.href));
         return;
       }
     } catch {
@@ -330,11 +336,21 @@ export function AuthScreen() {
     }
   }
 
+  const Container = returnTo ? "section" : "main";
+  const Heading = returnTo ? "h2" : "h1";
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background p-6">
+    <Container
+      className={
+        returnTo
+          ? "flex justify-center"
+          : "flex min-h-dvh items-center justify-center bg-background p-6"
+      }
+    >
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
-          <h1 className="text-xl font-semibold">Dotflowy</h1>
+          <Heading className="text-xl font-semibold">
+            {returnTo ? "Sign in to claim your gift" : "Dotflowy"}
+          </Heading>
           <p className="mt-1 text-sm text-muted-foreground">
             {isForgot
               ? "Reset your password"
@@ -560,6 +576,6 @@ export function AuthScreen() {
           </p>
         )}
       </div>
-    </main>
+    </Container>
   );
 }
