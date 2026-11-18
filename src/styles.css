@@ -481,6 +481,50 @@
   }
 }
 
+/* ADR 0092: only an active installed-PWA overlay shares the native row.
+ * CSS environment values update with the browser's control geometry. */
+@media (display-mode: window-controls-overlay) {
+  /* Settings, auth, loading and the narrow toolbar keep a separate drag strip.
+   * Padding stays inside the screen-height outline shell's containing block. */
+  body:not(:has(.outline-header-desktop)) {
+    padding-top: calc(
+      env(safe-area-inset-top, 0px) + env(titlebar-area-height, 0px)
+    );
+  }
+
+  body:not(:has(.outline-header-desktop))::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto;
+    height: env(titlebar-area-height, 0px);
+    background: var(--background);
+    z-index: 10;
+    -webkit-app-region: drag;
+  }
+
+  .outline-header-desktop {
+    padding-top: env(titlebar-area-y, 0px);
+    -webkit-app-region: drag;
+  }
+
+  .outline-header-row {
+    max-width: none;
+    margin-left: env(titlebar-area-x, 0px);
+    width: env(titlebar-area-width, 100%);
+    height: env(titlebar-area-height, 0px);
+    padding: 0 12px;
+  }
+
+  .outline-header-desktop
+    :is(button, a, input, select, textarea, [contenteditable]) {
+    -webkit-app-region: no-drag;
+  }
+
+  .outline-header-desktop button {
+    max-height: env(titlebar-area-height, 100%);
+  }
+}
+
 /* Only outline routes lock the root. Settings, auth and legal pages retain
    document scrolling. Safari's keyboard may pan this viewport natively. */
 html:has(.outline-shell),
