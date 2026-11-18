@@ -21,7 +21,10 @@ import { cn } from "@/lib/utils";
 
 import { getOutlineScroller } from "../data/outline-scroll";
 import { useCoarsePointer } from "../hooks/use-coarse-pointer";
-import { useKeyboardViewport } from "../hooks/use-keyboard-viewport";
+import {
+  softwareKeyboardOpen,
+  useKeyboardViewport,
+} from "../hooks/use-keyboard-viewport";
 import { useOpaqueChrome } from "../hooks/use-opaque-chrome";
 import { caretPosition } from "./caret-menu-utils";
 import { useHistoryState } from "./history-restore";
@@ -112,9 +115,7 @@ function useOutlineEditing(
       // Normalize pinch zoom so zoom alone cannot look like a keyboard. Ignore
       // small browser-chrome differences; viewport panning is not keyboard size.
       // Older engines without this API retain the focus-only fallback.
-      const keyboard =
-        !viewport ||
-        window.innerHeight - viewport.height * viewport.scale > 100;
+      const keyboard = !viewport || softwareKeyboardOpen(viewport);
       setEditing(
         !!input && document.hasFocus() && !document.hidden && keyboard,
       );
