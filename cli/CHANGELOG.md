@@ -1,5 +1,11 @@
 # dotflowy
 
+## 0.3.1
+
+### Patch Changes
+
+- 225d29a: Document expiring personal API keys through DOTFLOWY_TOKEN alongside OAuth and explain how to replace invalid or expired credentials.
+
 ## 0.3.0
 
 ### Minor Changes
