@@ -417,10 +417,10 @@ run replaces the duplicate full local run, not focused checks or visual review.
 ```sh
 bun run fmt:check       # oxfmt
 bun run lint            # oxlint over src + worker + CLI source, tests, and scripts
-bun run typecheck       # tsc over the app (DOM libs)
-bun run typecheck:worker # tsc over worker/ (workers-types)
-bun run typecheck:test  # tsc over the unit tests (bun types)
-bun run typecheck:e2e   # tsc over app Playwright specs and fixtures, no browser
+bun run typecheck       # tsrs over the app (DOM libs)
+bun run typecheck:worker # tsrs over worker/ (workers-types)
+bun run typecheck:test  # tsrs over the unit tests (bun types)
+bun run typecheck:e2e   # tsrs over app Playwright specs and fixtures, no browser
 bun run test            # bun test — unit tests plus the Miniflare Worker suite (src + worker/)
 bun test scripts/release.test.ts scripts/shortcut.test.ts scripts/heavy-lane.test.ts
 bun run check:docs
@@ -428,6 +428,23 @@ bun run check:e2e-lanes # every app browser test runs in exactly one CI lane
 bunx changeset          # describe your change for the changelog (see below)
 bun run check:changeset # verify the committed branch carries that decision
 ```
+
+The root, landing, and CLI packages pin standalone `tsrs` to
+`0.25.0-ts7.1.0-beta`, which bundles the TypeScript **7.1 beta** checker. They
+use its default mode, not `--fast`, and keep their separate compiler programs.
+The CLI build also uses tsrs to emit JavaScript. The `typescript` dependencies
+remain available for editor and tool integrations; they do not choose the
+checker used by these scripts. Oxlint stays independent at 1.83.0 with the same
+rules and no type-aware mode.
+
+The adoption checks on Linux x64 matched project-owned file membership and
+deliberate-error diagnostics against the previous compilers for all seven
+programs (app, Worker, unit tests, e2e, landing, CLI source, and CLI tests).
+Both compilers reject the probes, but tsrs returns exit code 2 where the previous
+TypeScript 7 compiler returned 1. Treat any nonzero status as failure. This is
+bounded diagnostic coverage, not exhaustive TypeScript compatibility. macOS
+and Windows execution still need the existing CLI CI matrix; local Linux
+builds do not establish compatibility on those platforms.
 
 Then **run the app**: before calling an observable change done, drive it in
 `bun run cf:dev` — or exercise it through an e2e spec — and confirm the

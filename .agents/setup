@@ -76,6 +76,7 @@ fi
 
 step "Install landing dependencies" bash -c \
   'cd landing && bun install --frozen-lockfile'
+step "Install CLI dependencies" bun install --cwd cli --frozen-lockfile
 step "Prepare local Worker configuration and D1" env CI=1 bun run setup
 
 if [[ "$(uname -s)" == "Linux" ]]; then
