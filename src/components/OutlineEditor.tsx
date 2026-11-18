@@ -25,10 +25,12 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ComponentProps,
+  type CSSProperties,
   type ReactElement,
   type ReactNode,
   type RefObject,
@@ -54,6 +56,10 @@ import type {
 import type { NodeCommands } from "./node-commands";
 
 import { setNodeActionBridge } from "../data/command-bridge";
+import {
+  getEditorFeatures,
+  subscribeEditorFeatures,
+} from "../data/editor-features";
 import { embedUrl } from "../data/embed-url";
 import { isMirrorsEnabled } from "../data/flags";
 import { focusKeyFor } from "../data/focus-key";
@@ -800,6 +806,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       ? (stream.resolve(inViewSection) ?? stream.trailFor(inViewSection))
       : rootId;
   const trail = useTrail(trailRoot);
+  // Select the one boolean, so other account preferences never re-render the
+  // whole editor (the snapshot also changes on focus refetches).
+  const indentGuides = useSyncExternalStore(
+    subscribeEditorFeatures,
+    () => getEditorFeatures().indentGuides,
+    () => true,
+  );
   const deepestVisibleDepth = useMemo(
     () => rows.reduce((deepest, row) => Math.max(deepest, row.depth), 0),
     [rows],
@@ -1197,6 +1210,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       : undefined,
   });
   const virtualItems = virtualizer.getVirtualItems();
+  // `--indent-step` spaces the indent guides one level apart (styles.css).
+  const listStyle: CSSProperties & { "--indent-step": string } = {
+    position: "relative",
+    height: virtualizer.getTotalSize(),
+    "--indent-step": `${INDENT_PX}px`,
+  };
   useLayoutEffect(() => {
     // A provider can finish loading while the user types farther down the
     // outline. Anchor that editor, not only rows above the viewport.
@@ -2171,13 +2190,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                   >
                     <ul
                       className="outline-list"
+                      data-indent-guides={indentGuides || undefined}
                       ref={(el) => {
                         listRef.current = el;
                       }}
-                      style={{
-                        position: "relative",
-                        height: virtualizer.getTotalSize(),
-                      }}
+                      style={listStyle}
                     >
                       {virtualItems.map((vi) => {
                         const item = items[vi.index];
