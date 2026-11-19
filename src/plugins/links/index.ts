@@ -22,177 +22,23 @@ import {
   encodeUrlForMarkdown,
   isHttpUrl,
   LINK_PATTERN,
+  safeLinkHref,
 } from "../../data/links";
 import { getTreeIndex } from "../../data/tree-store";
-import { isRevealed, mdPunct, resolveNodeId } from "../token-kit";
-import {
-  definePlugin,
-  type El,
-  type PluginContext,
-  type TokenView,
-  type WidgetEl,
-} from "../types";
+import { isRevealed, resolveNodeId } from "../token-kit";
+import { definePlugin, type PluginContext } from "../types";
 import { LINK_FILTER_OPERATORS } from "./filter-operators";
 import {
   openLinkCreatePopover,
   openLinkEditPopover,
 } from "./link-edit-popover";
+import {
+  editButtonEl,
+  foldedLinkEl,
+  LINK_PARTS,
+  revealedLinkEl,
+} from "./render";
 import { unfurlNodeLinks } from "./unfurl";
-
-// Pull `[label](url)` apart for rendering. Mirrors the combined-regex shape, so
-// it always matches what the tokenizer fed us.
-const LINK_PARTS = /^\[([^\]]*)\]\(([^)]*)\)$/;
-
-const LINK_CLASS = "node-link cursor-pointer";
-
-// The host of a folded link's url, for the favicon lookup -- or null if the url
-// won't parse (a hand-typed rough edge). The token's url is percent-encoded for
-// `( ) space` only, so `new URL` parses the scheme + host fine.
-function linkHost(url: string): string | null {
-  try {
-    return new URL(url).hostname || null;
-  } catch {
-    return null;
-  }
-}
-
-// The site's favicon, served by Google's long-lived s2/favicons endpoint, which
-// falls back to a generic glyph on a miss -- so the <img> never shows a broken-
-// image icon. Chosen over smaller services for longevity (it renders on every
-// link, forever). `sz=64` stays crisp on hi-dpi at the small render box. It
-// rides INSIDE the folded <a>, so a click on it opens the link like any other
-// part of the anchor, and `loading="lazy"` keeps offscreen links cheap.
-function faviconImgEl(host: string): El {
-  return {
-    tag: "img",
-    attrs: {
-      class: "link-favicon",
-      src: `https://www.google.com/s2/favicons?domain=${host}&sz=64`,
-      alt: "",
-      "aria-hidden": "true",
-      draggable: "false",
-      loading: "lazy",
-    },
-  };
-}
-
-// A text-free icon, painted by CSS mask inside the accessible pencil button.
-function editIconEl(): El {
-  return {
-    tag: "span",
-    attrs: { class: "link-edit-icon", "aria-hidden": "true" },
-  };
-}
-
-function editButtonEl(token?: string): El {
-  return {
-    tag: "button",
-    attrs: {
-      type: "button",
-      class: "link-edit-button",
-      "aria-label": "Edit link",
-      title: "Edit link",
-      contenteditable: "false",
-      "data-src": "",
-      "data-src-len": 0,
-      "data-link-token": token,
-    },
-    children: [editIconEl()],
-  };
-}
-
-// The wrapper is one source atom. The anchor visits the URL and the sibling
-// pencil edits it, without nesting interactive controls inside the anchor.
-// Plain URLs use the same wrapper without a favicon or metadata lookup.
-function foldedLinkEl(
-  label: string,
-  url: string,
-  tok: string,
-  plain = false,
-  labelElements: (El | WidgetEl)[] = [label],
-): El {
-  const host = plain ? null : linkHost(url);
-  const start = label.match(/^\s*\S/u)?.[0] ?? label;
-  return {
-    tag: "span",
-    attrs: {
-      class: "link-with-editor",
-      contenteditable: "false",
-      "data-src": tok,
-      "data-src-len": tok.length,
-    },
-    children: [
-      {
-        tag: "a",
-        attrs: {
-          class: LINK_CLASS,
-          "data-link": !plain,
-          "data-plain-url": plain,
-          contenteditable: "false",
-          "data-src": tok,
-          "data-src-len": tok.length,
-          href: url,
-          target: "_blank",
-          rel: "noopener noreferrer",
-        },
-        children:
-          host && labelElements.length > 1
-            ? [faviconImgEl(host), ...labelElements]
-            : host
-              ? [
-                  {
-                    tag: "span",
-                    attrs: { class: "link-start" },
-                    children: [faviconImgEl(host), start],
-                  },
-                  label.slice(start.length),
-                ]
-              : labelElements,
-      },
-      editButtonEl(),
-    ],
-  };
-}
-
-// A revealed link (bracket reveal, ADR 0005): `[label]` as editable text -- the
-// brackets appear so the label edits as raw markdown -- but the URL itself
-// NEVER expands into the line. Only the bare `url` folds to one atomic chip
-// (`data-src` carries it, so readSource still reconstructs the full token and
-// the caret jumps over it) rendered as a pencil; the parens around it are REAL
-// text, so the caret walks through `](` and `)` one step at a time, and typing
-// between `]` and `(` breaks the token match -- the link splits open to raw
-// text. Clicking the chip opens the Edit Link popover. Everything except the
-// chip stays 1:1 with its slice of the source.
-function revealedLinkEl(label: string, url: string, view: TokenView): El {
-  return {
-    tag: "span",
-    attrs: { class: "link-reveal", "data-link-reveal": true },
-    children: [
-      mdPunct("["),
-      {
-        tag: "span",
-        attrs: { class: "link-label" },
-        children: view.renderInline(label, view.start + 1, true),
-      },
-      mdPunct("]"),
-      mdPunct("("),
-      {
-        tag: "button",
-        attrs: {
-          class: "link-url-chip",
-          "data-src": url,
-          "data-src-len": url.length,
-          contenteditable: "false",
-          title: "Edit link",
-          type: "button",
-          "aria-label": "Edit link",
-        },
-        children: [editIconEl()],
-      },
-      mdPunct(")"),
-    ],
-  };
-}
 
 // Resolve a click on an edit affordance to (nodeId, token, pencil rect) and
 // open the popover. A folded link's sibling pencil reads the full token off
@@ -430,7 +276,8 @@ export default definePlugin({
         e.preventDefault();
         e.stopPropagation();
         // SAFETY: the selector "a[data-link]" matched, so el is an anchor
-        const href = (el as HTMLAnchorElement).href;
+        const href = safeLinkHref((el as HTMLAnchorElement).href);
+        if (!href) return;
         const textEl = el.closest<HTMLElement>(".node-text");
         openUrlInFocusedTab(href, {
           restoreFocus: () => textEl?.focus({ preventScroll: true }),

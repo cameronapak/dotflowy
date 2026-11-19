@@ -175,6 +175,18 @@ test.each<[string, string, string, number]>([
     0,
   ],
   [
+    "a javascript: href keeps only its label",
+    "&lt;a href=&quot;javascript:alert(1)&quot;&gt;go&lt;/a&gt;",
+    "go",
+    1,
+  ],
+  [
+    "a mixed-case JaVaScRiPt: href keeps only its label",
+    "&lt;a href=&quot; JaVaScRiPt:alert(1)&quot;&gt;go&lt;/a&gt;",
+    "go",
+    1,
+  ],
+  [
     "redundant italic nesting stays italic",
     "&lt;i&gt;&lt;i&gt;x&lt;/i&gt;&lt;/i&gt;",
     "*x*",

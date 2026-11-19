@@ -6,6 +6,7 @@ import {
   hasLink,
   isHttpUrl,
   linkUrlAtOffset,
+  safeLinkHref,
   sanitizeLinkLabel,
   stripLinks,
   swapLinkLabel,
@@ -103,4 +104,21 @@ test("swapLinkLabel matches against the ENCODED url half (parens case)", () => {
   expect(swapLinkLabel(`[${raw}](${enc}) tail`, enc, raw, "Foo (bar)")).toBe(
     `[Foo (bar)](${enc}) tail`,
   );
+});
+
+test.each([
+  ["https://e.com/a?b=1", "https://e.com/a?b=1"],
+  ["HTTP://E.COM", "HTTP://E.COM"],
+  ["mailto:a@e.com", "mailto:a@e.com"],
+  ["/relative/path", "/relative/path"],
+  ["javascript:alert(1)", null],
+  ["JaVaScRiPt:alert(1)", null],
+  ["  javascript:alert(1)", null],
+  ["java\tscript:alert(1)", null],
+  ["java\nscript:alert(1)", null],
+  ["data:text/html,<script>alert(1)</script>", null],
+  ["vbscript:msgbox(1)", null],
+  ["", null],
+])("safeLinkHref(%p) -> %p", (url, expected) => {
+  expect(safeLinkHref(url)).toBe(expected);
 });

@@ -1,8 +1,12 @@
+import { safeLinkHref } from "../data/links";
+
 export function openUrlInFocusedTab(
   url: string,
   options: { restoreFocus?: () => void } = {},
 ): void {
-  const tab = window.open(url, "_blank");
+  const href = safeLinkHref(url);
+  if (!href) return; // javascript:, data:, ... never open
+  const tab = window.open(href, "_blank");
   if (!tab) return; // popup blocked -- nothing opened, nothing to restore
   if (options.restoreFocus) restoreOnReturn(options.restoreFocus);
   tab.focus();

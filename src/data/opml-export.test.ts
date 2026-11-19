@@ -144,6 +144,12 @@ test.each<[string, string, string[], string[]?]>([
     ],
   ],
   [
+    "a javascript: link exports as its label with no anchor",
+    "[x](javascript:alert%281%29) [y](JaVaScRiPt:alert%281%29)",
+    ['text="x y"'],
+    ["&lt;a", "javascript", "JaVaScRiPt"],
+  ],
+  [
     "the underscore italic alias exports like *i*",
     "_i_",
     ["&lt;i&gt;i&lt;/i&gt;"],

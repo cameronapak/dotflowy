@@ -23,7 +23,7 @@ import type { ChangeOp } from "./wire-schema";
 import { isValidDateKey } from "./date-links";
 import { emphasisAt } from "./emphasis";
 import { buildHighlightRun, type HighlightColor } from "./highlight";
-import { encodeUrlForMarkdown, sanitizeLinkLabel } from "./links";
+import { encodeUrlForMarkdown, safeLinkHref, sanitizeLinkLabel } from "./links";
 import { createNode, type NodeKind } from "./tree";
 
 // --- Typed failures -----------------------------------------------------------
@@ -388,7 +388,13 @@ function convertEl(
         return convert(el.children, state);
       }
       const rawLabel = convert(el.children, { ...state, insideLink: true });
-      const url = encodeUrlForMarkdown(el.attrs["href"] ?? "");
+      const href = safeLinkHref(el.attrs["href"] ?? "");
+      if (!href) {
+        if (el.attrs["href"]?.trim())
+          degraded.bump("unsafe link href dropped (label kept)");
+        return rawLabel;
+      }
+      const url = encodeUrlForMarkdown(href);
       const label = sanitizeLinkLabel(rawLabel);
       if (label !== rawLabel.trim() || rawLabel.includes("]")) {
         degraded.bump(
