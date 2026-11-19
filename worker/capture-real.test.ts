@@ -3290,6 +3290,48 @@ test("invalid capture input creates no nodes; key management enforces origin and
   expect(escalation.response.status).toBe(400);
 });
 
+test("stale OAuth clients get fixed remove-and-add guidance without changing other authorization errors", async () => {
+  const origin = (await mf.ready).origin;
+  for (const path of [
+    "/api/auth/mcp/authorize",
+    "/api/auth/oauth2/authorize",
+  ]) {
+    const query = new URLSearchParams({
+      client_id: '<script>alert("untrusted-client")</script>',
+      response_type: "code",
+      redirect_uri: "https://untrusted.example/callback",
+      error_description: '<script>alert("untrusted-description")</script>',
+    });
+    const response = await mf.dispatchFetch(`${origin}${path}?${query}`, {
+      redirect: "manual",
+    });
+    expect(response.status).toBe(400);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("content-type")).toBe(
+      "text/html; charset=utf-8",
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const html = await response.text();
+    expect(html).toContain("This AI app is using an old Dotflowy connection.");
+    expect(html).toContain(
+      "Remove the Dotflowy connector in your AI app's settings and add it again with https://app.dotflowy.com/mcp.",
+    );
+    expect(html).toContain("For the CLI, run <code>dotflowy login</code>.");
+    expect(html).not.toContain("untrusted");
+    const missingResponseType = await mf.dispatchFetch(
+      `${origin}${path}?client_id=old-client`,
+      { redirect: "manual" },
+    );
+    expect(missingResponseType.status).toBe(302);
+    const location = new URL(
+      missingResponseType.headers.get("location")!,
+      origin,
+    );
+    expect(location.pathname).toBe("/api/auth/error");
+    expect(location.searchParams.get("error")).toBe("invalid_request");
+  }
+});
+
 test("OAuth discovery, explicit account-bound consent, refresh rotation and isolated revocation", async () => {
   const db = await mf.getD1Database("DB");
   const origin = "http://localhost";
@@ -3307,7 +3349,7 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
       expect(await denied.json()).toEqual({
         error: "unauthorized",
         error_description:
-          "Your Dotflowy connection needs to be reconnected. Sign in again from your AI app's connector settings, or run `dotflowy login` for the CLI.",
+          "Remove the Dotflowy connector in your AI app's settings and add it again with https://app.dotflowy.com/mcp. For the CLI, run `dotflowy login`.",
       });
       expect(denied.headers.get("content-type")).toBe("application/json");
       expect(denied.headers.get("access-control-allow-origin")).toBe("*");

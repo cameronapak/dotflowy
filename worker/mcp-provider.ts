@@ -132,6 +132,23 @@ export async function handleMcpAuthRequest(
     if (!location) return response;
     const target = new URL(location, resource);
     if (
+      target.origin === new URL(resource).origin &&
+      target.pathname === "/api/auth/error" &&
+      target.searchParams.get("error") === "invalid_client"
+    )
+      return new Response(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Refresh your Dotflowy connection</title></head><body><main><h1>Refresh your Dotflowy connection</h1><p>This AI app is using an old Dotflowy connection. Remove the Dotflowy connector in your AI app\'s settings and add it again with https://app.dotflowy.com/mcp. For the CLI, run <code>dotflowy login</code>.</p></main></body></html>',
+        {
+          status: 400,
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+            "content-security-policy":
+              "default-src 'none'; frame-ancestors 'none'",
+          },
+        },
+      );
+    if (
       target.pathname !== "/mcp-consent" ||
       target.origin !== new URL(resource).origin
     )

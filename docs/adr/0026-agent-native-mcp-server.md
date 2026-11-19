@@ -196,8 +196,10 @@ The authorization server now uses `@better-auth/mcp`, built on
 `0023_better_auth_1_7.sql` follows the vendor reset path: remove old OAuth
 verification state, drop the three legacy OAuth tables, and create the 1.7
 client, resource, consent, access-token and refresh-token models. Existing agent
-registrations and credentials are intentionally invalidated; agents reconnect
-once. Users, browser sessions, API keys and outline routing are unaffected.
+registrations and credentials are intentionally invalidated; users remove the
+Dotflowy connector in their AI app's settings and add it again with
+`https://app.dotflowy.com/mcp` (CLI: `dotflowy login`). Users, browser sessions,
+API keys and outline routing are unaffected.
 
 The one-time reconnect email is an explicit operator action via
 `scripts/reconnect-notice.ts` and admin-only `POST /api/admin/reconnect-notice`
@@ -238,9 +240,16 @@ The resulting stable user id still passes through `resolveUserId`.
 Missing or invalid MCP credentials return HTTP 401 with the existing
 `WWW-Authenticate` resource-metadata challenge and CORS headers. The JSON body
 contains `error: "unauthorized"` and a uniform `error_description` directing
-users to reconnect in their AI app's connector settings or run `dotflowy login`.
+users to remove and re-add the connector or run `dotflowy login`.
 It does not identify reset tokens or return a JSON-RPC success. Clients may
 ignore the description; discovery and reauthorization still use the challenge.
+
+The OAuth authorize wrapper intercepts only same-origin `/api/auth/error`
+redirects with `error=invalid_client` and returns a fixed HTML instruction page
+with HTTP 400 and no-store caching. Better Auth 1.7 otherwise renders or redirects
+that error through its generic error page. Handling the redirect at this boundary
+leaves all other provider errors unchanged without setting a global `errorURL`.
+No client IDs, descriptions, callback URLs or other request values enter the HTML.
 
 Local `cf:dev` and `dev:api` explicitly use Wrangler's localhost HTTP upstream,
 so both the inferred issuer and browser Origin stay local. The 1.7 MCP provider

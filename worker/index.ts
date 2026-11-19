@@ -1212,7 +1212,7 @@ function handleApiRequest(
           JSON.stringify({
             error: "unauthorized",
             error_description:
-              "Your Dotflowy connection needs to be reconnected. Sign in again from your AI app's connector settings, or run `dotflowy login` for the CLI.",
+              "Remove the Dotflowy connector in your AI app's settings and add it again with https://app.dotflowy.com/mcp. For the CLI, run `dotflowy login`.",
           }),
           {
             status: 401,
