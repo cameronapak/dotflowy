@@ -163,7 +163,8 @@ The production workflow validates current `main`, prepares the version through
 the existing archive-before-consume script, and builds both sites. It pushes a
 temporary candidate branch and explicitly dispatches the seven real CLI checks
 on that exact SHA. Only after they succeed does it push the identical release
-commit/tag atomically, publish the GitHub Release, deploy landing, and deploy
+commit/tag atomically, publish the GitHub Release, deploy landing, apply pending
+D1 migrations, and deploy
 the app. Empty or absent changesets use the same checks and still deploy without
 a version bump. Release dates use America/Chicago. Candidate identity and
 protection rollout follow
@@ -178,8 +179,10 @@ with job-scoped Actions write permission. It does not bypass branch protection.
 
 Published releases and tags are reused on retries. Failures stop without rollback;
 publication can precede the live app, and landing can temporarily be ahead of it.
-This non-atomic sequence is accepted. D1 migrations and data backfills remain
-separately approved operations. Setup and recovery are in
+This non-atomic sequence is accepted. Merging approves pending D1 migrations,
+which CI applies non-interactively immediately before deploying the app. The
+Cloudflare CI token requires D1 Edit permission. Data backfills remain separately
+approved operations. Setup and recovery are in
 [the deployment guide](../deploying.md#automatic-production-deployment).
 
 ## Considered and rejected

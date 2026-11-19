@@ -176,7 +176,7 @@ the daily path when a `date` is given, so for them it is validated and ignored.)
 ## Consequences
 
 - New D1 migration `0004_create_oauth.sql` (`oauthApplication` / `oauthAccessToken` / `oauthConsent`,
-  written from the plugin's schema in `0003`'s conventions). Run `db:migrate:remote` before deploying.
+  written from the plugin's schema in `0003`'s conventions). CI applies pending D1 migrations before the app deploy; manual deploys must run `db:migrate:remote` first.
 - `BETTER_AUTH_URL` matters more: it is the OAuth **issuer** in the discovery metadata. `createAuth`
   falls back to the request origin when it's unset (correct on any single deployment), but pinning it
   in prod is the stable configuration. Local `wrangler dev` testing of the OAuth flow wants it in

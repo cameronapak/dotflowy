@@ -78,8 +78,8 @@ test("reconnect notices preview without sending, then send sequentially with the
   expect(calls).toEqual(
     ["first@example.test", "second@example.test", "third@example.test"].map(
       (to) => ({
-        from: "Dotflowy <no-reply@dotflowy.com>",
-        replyTo: undefined,
+        from: "Dotflowy Support <support@dotflowy.com>",
+        replyTo: "support@dotflowy.com",
         to,
         ...reconnectNoticeEmail,
       }),

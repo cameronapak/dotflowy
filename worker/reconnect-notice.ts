@@ -50,7 +50,11 @@ export async function runReconnectNotice(
     const outcome =
       dryRun || !env.EMAIL
         ? { status: "simulated" as const }
-        : await sendEmail(env, { to: email, ...reconnectNoticeEmail });
+        : await sendEmail(env, {
+            to: email,
+            sender: "support",
+            ...reconnectNoticeEmail,
+          });
     results.push({ email, status: outcome.status });
   }
   return {

@@ -724,14 +724,16 @@ fails rather than moving a conflicting tag.
 
 Merging to `main` approves automatic app release and deployment: quality checks,
 both builds, seven real CLI checks on the exact candidate SHA, atomic promotion,
-GitHub Release, landing deploy, then app deploy. Pending runs use the newest
+GitHub Release, landing deploy, D1 migrations, then app deploy. Pending runs use the newest
 `main`; failures stop without automatic rollback. Setup and retry steps:
 [`docs/deploying.md`](./docs/deploying.md#automatic-production-deployment).
 
 For a manual or self-hosted deploy: `wrangler login`, set the production secrets,
 run `bun run db:migrate:remote` **before** the first deploy, then `bun run deploy`.
 The separate landing command is `bun run --cwd landing deploy`. Manual deploys
-ship whatever is checked out. CI does not run D1 migrations or data backfills.
+ship whatever is checked out. CI applies pending D1 migrations before deploying
+the app; the Cloudflare CI token needs account-level D1 Edit permission.
+Data backfills remain separately approved manual operations.
 
 ## Questions
 
