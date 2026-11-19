@@ -2,4 +2,4 @@
 "dotflowy": patch
 ---
 
-Update locked HTTP dependencies to patched versions for dependency security fixes.
+Keeps Dotflowy's CLI dependencies up to date with the latest security and stability fixes.
