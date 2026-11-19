@@ -176,7 +176,7 @@ function candidateFixture(news = true) {
   writeFileSync(
     join(dir, ".test-bin/gh"),
     `#!/usr/bin/env bun
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 const endpoint = args.find(arg => arg.startsWith("repos/"));
 let reply;
@@ -191,6 +191,15 @@ if (endpoint?.endsWith("/dispatches")) {
   await Bun.write(".test-bin/run.json", JSON.stringify({ ...run, status: "completed", conclusion: "cancelled" }));
   reply = {};
 } else if (endpoint?.endsWith("/runs/171")) {
+  appendFileSync(".test-bin/run-calls", "poll\\n");
+  const errors = JSON.parse(readFileSync(".test-bin/run-errors.json", "utf8"));
+  const status = errors.shift();
+  writeFileSync(".test-bin/run-errors.json", JSON.stringify(errors));
+  if (status) {
+    console.log(JSON.stringify({ status: String(status) }));
+    console.error(status === 404 ? "gh: Not Found (HTTP 404)" : "gh: Forbidden (HTTP 403)");
+    process.exit(1);
+  }
   reply = JSON.parse(readFileSync(".test-bin/run.json", "utf8"));
 } else process.exit(1);
 process.stdout.write(args.includes("--jq") ? reply.status : JSON.stringify(reply));
@@ -201,6 +210,7 @@ process.stdout.write(args.includes("--jq") ? reply.status : JSON.stringify(reply
     '{"workflow_run_id":171}',
   );
   writeFileSync(join(dir, ".test-bin/run.json"), JSON.stringify(validation));
+  writeFileSync(join(dir, ".test-bin/run-errors.json"), "[]");
   writeFileSync(
     join(dir, ".test-bin/jobs.json"),
     JSON.stringify({ total_count: jobs.length, jobs }),
@@ -542,6 +552,54 @@ done
     ).toBe(`${main}\trefs/heads/main`);
     expect(git(dir, "ls-remote", "origin", "refs/tags/v1.3.0")).toBe(
       conflict === "tag" ? `${base}\trefs/tags/v1.3.0` : "",
+    );
+  }
+}, 30000);
+
+test("candidate lookup retries only 404s within the deadline and still validates the run", () => {
+  for (const scenario of ["visible", "forbidden", "timeout", "wrong-sha"]) {
+    const { dir, base, sha, env, validation } = candidateFixture();
+    writeFileSync(
+      join(dir, ".test-bin/run-errors.json"),
+      JSON.stringify([scenario === "forbidden" ? 403 : 404]),
+    );
+    if (scenario === "wrong-sha") {
+      writeFileSync(
+        join(dir, ".test-bin/run.json"),
+        JSON.stringify({ ...validation, head_sha: base }),
+      );
+    }
+    const result = run(
+      dir,
+      [
+        "bash",
+        "-e",
+        "-o",
+        "pipefail",
+        "-c",
+        `sleep() { ${scenario === "timeout" ? "SECONDS=10000" : ":"}; }
+${workflowStep("deploy.yml", "deploy", "Validate exact release candidate")}
+set -a; source "$GITHUB_ENV"; set +a
+${workflowStep("deploy.yml", "deploy", "Push release commit and tag atomically")}`,
+      ],
+      env,
+    );
+    if (scenario === "visible") expect(result.code, result.err).toBe(0);
+    else expect(result.code, scenario).not.toBe(0);
+    expect(readFileSync(join(dir, ".test-bin/run-calls"), "utf8")).toBe(
+      scenario === "visible" || scenario === "wrong-sha"
+        ? "poll\npoll\n"
+        : "poll\n",
+    );
+    if (scenario === "forbidden")
+      expect(result.err).toContain("gh: Forbidden (HTTP 403)");
+    if (scenario === "timeout")
+      expect(result.out).toContain("CLI candidate validation timed out");
+    expect(git(dir, "ls-remote", "origin", "refs/heads/main")).toBe(
+      `${scenario === "visible" ? sha : base}\trefs/heads/main`,
+    );
+    expect(git(dir, "ls-remote", "origin", "refs/tags/v1.3.0^{}")).toBe(
+      scenario === "visible" ? `${sha}\trefs/tags/v1.3.0^{}` : "",
     );
   }
 }, 30000);
