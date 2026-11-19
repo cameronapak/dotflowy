@@ -61,6 +61,7 @@ function e2eModuleUrls(): Plugin {
 // comes from config, not `--outDir`: TanStack Start prerenders the shell from
 // the server build it finds through this config, and a CLI flag does not reach it.
 const e2eBundleDir = process.env.DOTFLOWY_E2E_BUNDLE;
+const cfDev = process.env.DOTFLOWY_CF_DEV === "true";
 // Emit source maps only when we're going to upload + delete them (below), so
 // they never ship to the CDN on a tokenless build.
 const build: BuildEnvironmentOptions = {};
@@ -75,18 +76,18 @@ if (e2eBundleDir) build.outDir = e2eBundleDir;
 // It also keeps deployment trivial: any static CDN works.
 export default defineConfig({
   build,
+  define: { "import.meta.env.DOTFLOWY_CF_DEV": JSON.stringify(cfDev) },
   // cf:dev crosses high-latency portals: one client bundle avoids many waves
   // of chunk requests. Keep production and the Vite HMR loop unchanged.
-  environments:
-    process.env.DOTFLOWY_CF_DEV === "true"
-      ? {
-          client: {
-            build: {
-              rolldownOptions: { output: { codeSplitting: false } },
-            },
+  environments: cfDev
+    ? {
+        client: {
+          build: {
+            rolldownOptions: { output: { codeSplitting: false } },
           },
-        }
-      : undefined,
+        },
+      }
+    : undefined,
   server: {
     port: 3000,
     // Amp orb portals proxy the dev server through *.onamp.dev.

@@ -18,6 +18,7 @@ import { appRuntime } from "./runtime";
 import { persistOrNotify } from "./save-failure";
 import { nodeSchema } from "./schema";
 import { chainDisagreements } from "./sibling-chain";
+import { logSyncDiagnostic } from "./sync-diagnostics";
 import {
   decideSyncRecovery,
   nextStreak,
@@ -202,7 +203,10 @@ export function waitForSeqE(
 ): Effect.Effect<void> {
   return waitForSeqStrictE(seq, timeoutMs).pipe(
     Effect.catchTag("TimeoutError", () =>
-      Effect.sync(resyncNodes).pipe(
+      Effect.sync(() => {
+        logSyncDiagnostic({ event: "resync", reason: "echo-timeout" });
+        resyncNodes();
+      }).pipe(
         Effect.andThen(Effect.suspend(() => waitForSeqE(seq, timeoutMs))),
       ),
     ),
@@ -491,6 +495,7 @@ export const nodesCollection = createCollection({
                 cursor === null || frame.seq !== cursor + index + 1,
             ))
         ) {
+          logSyncDiagnostic({ event: "resync", reason: "sequence-gap" });
           resyncNodes();
           return;
         }
@@ -532,6 +537,7 @@ export const nodesCollection = createCollection({
           resetAppliedSeq(msg.seq);
           initialError = null;
           ensureReady();
+          logSyncDiagnostic({ event: "applied", mode: "snapshot" });
           // Self-heal any persisted sibling-chain corruption now that the full
           // outline is in hand (deferred so it writes outside this commit).
           // Copy: msg.nodes is a readonly wire array; the heal path wants Node[].
@@ -547,6 +553,7 @@ export const nodesCollection = createCollection({
             applyOps(frame.ops, frame.seq, frame.clientId);
           initialError = null;
           ensureReady();
+          logSyncDiagnostic({ event: "applied", mode: "resume" });
         } else {
           // A live change broadcast from this or another device.
           applyOps(msg.ops, msg.seq, msg.clientId);

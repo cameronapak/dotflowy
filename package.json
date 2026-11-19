@@ -41,6 +41,7 @@
     "typecheck:worker": "bun scripts/heavy-lane.ts tsrs --noEmit -p worker/tsconfig.json",
     "typecheck:test": "bun scripts/heavy-lane.ts tsrs --noEmit -p tsconfig.test.json",
     "typecheck:e2e": "bun scripts/heavy-lane.ts tsrs --noEmit -p e2e/tsconfig.json",
+    "check:effect": "bun scripts/heavy-lane.ts bun scripts/check-effect.ts",
     "check:docs": "bun scripts/check-doc-links.ts",
     "check:e2e-lanes": "bun scripts/check-e2e-lanes.ts",
     "check:changeset": "changeset status --since=origin/main",
