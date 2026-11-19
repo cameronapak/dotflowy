@@ -278,6 +278,30 @@ the repository. The script uses the same `DOTFLOWY_SESSION_COOKIE` or
 `DOTFLOWY_ADMIN_EMAIL` + `DOTFLOWY_ADMIN_PASSWORD` authentication as `scripts/announce.ts`.
 The account must be on the admin allowlist.
 
+Alternatively, enable a temporary bearer credential scoped **only** to this
+endpoint. Keep the token out of shell tracing, logs, CSVs, and the repository.
+The Worker secret and presented token must each be at least 32 characters;
+unset or short secrets disable bearer access. Invalid tokens do not authorize
+requests; existing admin sessions continue to work independently.
+
+```sh
+export DOTFLOWY_RECONNECT_TOKEN="$(openssl rand -hex 32)"
+printf '%s' "$DOTFLOWY_RECONNECT_TOKEN" | bunx --no-install wrangler secret put RECONNECT_NOTICE_TOKEN
+bun scripts/reconnect-notice.ts /home/ubuntu/private/reconnect-cohort.csv --api https://app.dotflowy.com --dry-run
+bun scripts/reconnect-notice.ts /home/ubuntu/private/reconnect-cohort.csv --api https://app.dotflowy.com --send
+bunx --no-install wrangler secret delete RECONNECT_NOTICE_TOKEN
+unset DOTFLOWY_RECONNECT_TOKEN
+```
+
+Run this sequence only as an authorized operator after deployment and review.
+The script prefers `DOTFLOWY_RECONNECT_TOKEN` when set, requiring no cookie or
+password. Remove the Worker secret promptly after sending, even if a batch
+fails, and investigate outcomes before enabling it again for failure-only retries.
+With the secret unset, only the existing admin-session gate is available and
+non-admin requests return 404. Token comparison uses constant-time comparison
+of SHA-256 digests. Wrong, short, or malformed bearer credentials also return
+404 unless independently authorized by an admin session.
+
 ```sh
 bun scripts/reconnect-notice.ts /home/ubuntu/private/reconnect-cohort.csv --api https://app.dotflowy.com --dry-run
 bun scripts/reconnect-notice.ts /home/ubuntu/private/reconnect-cohort.csv --api https://app.dotflowy.com --send

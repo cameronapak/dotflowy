@@ -85,7 +85,11 @@ import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { handleRewards } from "./pro-reward";
 import { trialCheckout } from "./pro-trial";
-import { ReconnectNoticeBody, runReconnectNotice } from "./reconnect-notice";
+import {
+  ReconnectNoticeBody,
+  reconnectBearerAuthorized,
+  runReconnectNotice,
+} from "./reconnect-notice";
 import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, rateLimitedTitleE, unfurlTitleE } from "./unfurl";
@@ -120,6 +124,7 @@ type UserOutlineDO = BaseUserOutlineDO;
 export { ShardDO } from "./retained-shard";
 
 interface Env extends AuthEnv {
+  RECONNECT_NOTICE_TOKEN?: string;
   /** Public Sentry DSN (a wrangler.jsonc var, not a secret; it ships in the
    *  client bundle too). Unset => error monitoring is dormant. See worker/
    *  sentry.ts (ticket #227, decided in #156). */
@@ -995,10 +1000,16 @@ function handleApiRequest(
     }
 
     if (url.pathname === "/api/admin/reconnect-notice") {
-      const session = yield* Effect.promise(() =>
-        auth.api.getSession({ headers: request.headers }),
+      const bearerAuthorized = reconnectBearerAuthorized(
+        request.headers.get("authorization"),
+        env.RECONNECT_NOTICE_TOKEN,
       );
-      if (!isAdminSession(session, env)) {
+      const session = bearerAuthorized
+        ? null
+        : yield* Effect.promise(() =>
+            auth.api.getSession({ headers: request.headers }),
+          );
+      if (!bearerAuthorized && !isAdminSession(session, env)) {
         return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
       }
       if (request.method !== "POST") {

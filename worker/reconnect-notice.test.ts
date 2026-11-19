@@ -14,6 +14,7 @@ import {
 } from "../scripts/reconnect-notice";
 import {
   ReconnectNoticeBody,
+  reconnectBearerAuthorized,
   reconnectNoticeEmail,
   runReconnectNotice,
 } from "./reconnect-notice";
@@ -96,6 +97,21 @@ test("reconnect notices preview without sending, then send sequentially with the
 });
 
 test("CSV and command parsing fail closed before any network access", () => {
+  const token = "disposable-reconnect-token-for-local-tests";
+  expect(reconnectBearerAuthorized(`Bearer ${token}`, token)).toBe(true);
+  for (const authorization of [
+    null,
+    "",
+    token,
+    `Basic ${token}`,
+    `Bearer ${token} extra`,
+    "Bearer short",
+    `Bearer ${token}x`,
+  ]) {
+    expect(reconnectBearerAuthorized(authorization, token)).toBe(false);
+  }
+  expect(reconnectBearerAuthorized(`Bearer ${token}`)).toBe(false);
+  expect(reconnectBearerAuthorized("Bearer short", "short")).toBe(false);
   expect(
     parseRecipientCsv(
       '\uFEFFuser_id,email,client_names\r\n1,"First@Example.test","Claude, Cursor"\r\n2,first@example.test,CLI\r\n3,second@example.test,"A ""quoted"" client"\r\n',
@@ -144,7 +160,13 @@ test("operator script defaults to preview and masks batch outcomes against a loo
     port: 0,
     async fetch(request) {
       expect(new URL(request.url).pathname).toBe("/api/admin/reconnect-notice");
-      expect(request.headers.get("cookie")).toBe("mock-session=local");
+      expect(request.headers.get("cookie")).toBe(
+        request.headers.has("authorization") ? null : "mock-session=local",
+      );
+      if (request.headers.has("authorization"))
+        expect(request.headers.get("authorization")).toBe(
+          "Bearer disposable-reconnect-token-for-local-tests",
+        );
       const body = Schema.decodeUnknownSync(ReconnectNoticeBody)(
         await request.json(),
       );
@@ -164,7 +186,8 @@ test("operator script defaults to preview and masks batch outcomes against a loo
     },
   });
   try {
-    for (const send of [false, true]) {
+    for (const mode of ["cookie", "token-preview", "token-send"]) {
+      const send = mode === "token-send";
       const child = Bun.spawn(
         [
           process.execPath,
@@ -177,7 +200,14 @@ test("operator script defaults to preview and masks batch outcomes against a loo
         {
           env: {
             ...process.env,
-            DOTFLOWY_SESSION_COOKIE: "mock-session=local",
+            DOTFLOWY_SESSION_COOKIE:
+              mode === "cookie" ? "mock-session=local" : undefined,
+            DOTFLOWY_ADMIN_EMAIL: undefined,
+            DOTFLOWY_ADMIN_PASSWORD: undefined,
+            DOTFLOWY_RECONNECT_TOKEN:
+              mode === "cookie"
+                ? undefined
+                : "disposable-reconnect-token-for-local-tests",
           },
           stdout: "pipe",
           stderr: "pipe",
@@ -192,6 +222,9 @@ test("operator script defaults to preview and masks batch outcomes against a loo
       expect(errors).toBe("");
       expect(output).not.toContain("first@example.test");
       expect(output).not.toContain("second@example.test");
+      expect(output).not.toContain(
+        "disposable-reconnect-token-for-local-tests",
+      );
       expect(output).toContain(
         send ? "f***@e***: accepted" : "DRY RUN: no emails sent.",
       );
@@ -200,7 +233,7 @@ test("operator script defaults to preview and masks batch outcomes against a loo
       );
     }
     expect(requests).toEqual(
-      [true, false].map((dryRun) => ({
+      [true, true, false].map((dryRun) => ({
         recipients: ["first@example.test", "second@example.test"],
         dryRun,
       })),

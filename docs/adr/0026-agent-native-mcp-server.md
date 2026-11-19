@@ -210,6 +210,19 @@ There is no database tracking or automatic retry: operators retry only failures
 from a new CSV and investigate unknown outcomes before resending. Deployment
 never triggers this email. See the operator steps in CONTRIBUTING.md.
 
+An optional one-time `RECONNECT_NOTICE_TOKEN` Worker secret also authorizes only
+this endpoint via `Authorization: Bearer`. Secrets and tokens shorter than 32
+characters cannot authorize; SHA-256 digests are compared in constant time.
+Unset secrets disable bearer access without changing admin-session access.
+Invalid bearer credentials receive 404 unless an admin session independently
+authorizes the request. `DOTFLOWY_RECONNECT_TOKEN` lets the operator script use
+this credential without a cookie or password. Generate a random token with
+`openssl rand -hex 32`, install it with `wrangler secret put RECONNECT_NOTICE_TOKEN`,
+review dry-run then explicitly send, and immediately remove it with
+`wrangler secret delete RECONNECT_NOTICE_TOKEN` and unset the local variable.
+The full non-logging command sequence is in CONTRIBUTING.md; deployment never
+creates this secret or sends the notice.
+
 Both `/mcp` and `/api/mcp` remain public MCP URLs. Root and path-aware
 `/.well-known/oauth-protected-resource` documents remain available, as does
 `/.well-known/oauth-authorization-server` (including issuer-path discovery).
