@@ -3182,17 +3182,40 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
   const db = await mf.getD1Database("DB");
   const origin = "http://localhost";
   for (const path of ["/mcp", "/api/mcp"]) {
-    const denied = await mf.dispatchFetch(`${origin}${path}`, {
-      method: "POST",
-    });
-    expect(denied.status).toBe(401);
-    const metadataUrl = denied.headers
-      .get("www-authenticate")!
-      .match(/resource_metadata="([^"]+)"/)![1]!;
-    expect(await (await mf.dispatchFetch(metadataUrl)).json()).toMatchObject({
-      resource: `${origin}${path}`,
-      authorization_servers: [`${origin}/api/auth`],
-    });
+    for (const authorization of [
+      undefined,
+      "Bearer invalid-oauth-token",
+      "Bearer dfk_invalid",
+    ]) {
+      const denied = await mf.dispatchFetch(`${origin}${path}`, {
+        method: "POST",
+        headers: authorization ? { authorization } : {},
+      });
+      expect(denied.status).toBe(401);
+      expect(await denied.json()).toEqual({
+        error: "unauthorized",
+        error_description:
+          "Your Dotflowy connection needs to be reconnected. Sign in again from your AI app's connector settings, or run `dotflowy login` for the CLI.",
+      });
+      expect(denied.headers.get("content-type")).toBe("application/json");
+      expect(denied.headers.get("access-control-allow-origin")).toBe("*");
+      expect(denied.headers.get("access-control-expose-headers")).toBe(
+        "WWW-Authenticate",
+      );
+      const metadataUrl = denied.headers
+        .get("www-authenticate")!
+        .match(/resource_metadata="([^"]+)"/)![1]!;
+      expect(new URL(metadataUrl).pathname).toBe(
+        `/.well-known/oauth-protected-resource${path}`,
+      );
+      expect(denied.headers.get("www-authenticate")).toBe(
+        `Bearer resource_metadata="${metadataUrl}"`,
+      );
+      expect(await (await mf.dispatchFetch(metadataUrl)).json()).toMatchObject({
+        resource: `${origin}${path}`,
+        authorization_servers: [`${origin}/api/auth`],
+      });
+    }
   }
   expect(
     await (

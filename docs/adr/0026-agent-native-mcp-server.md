@@ -211,6 +211,13 @@ The provider's active-token validator checks stored expiry/revocation and the
 MCP audience; proof-bound tokens are not accepted as unbound Bearer tokens.
 The resulting stable user id still passes through `resolveUserId`.
 
+Missing or invalid MCP credentials return HTTP 401 with the existing
+`WWW-Authenticate` resource-metadata challenge and CORS headers. The JSON body
+contains `error: "unauthorized"` and a uniform `error_description` directing
+users to reconnect in their AI app's connector settings or run `dotflowy login`.
+It does not identify reset tokens or return a JSON-RPC success. Clients may
+ignore the description; discovery and reauthorization still use the challenge.
+
 Local `cf:dev` and `dev:api` explicitly use Wrangler's localhost HTTP upstream,
 so both the inferred issuer and browser Origin stay local. The 1.7 MCP provider
 rejects HTTP custom-domain resources at construction; the legacy plugin did not.

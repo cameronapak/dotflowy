@@ -1173,15 +1173,22 @@ function handleApiRequest(
       if (!token?.userId) {
         // RFC 9728: point the client at the protected-resource metadata so it
         // can discover the authorization server and start the OAuth flow.
-        return new Response(JSON.stringify({ error: "unauthorized" }), {
-          status: 401,
-          headers: {
-            "content-type": "application/json",
-            "www-authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource${url.pathname}"`,
-            "access-control-allow-origin": "*",
-            "access-control-expose-headers": "WWW-Authenticate",
+        return new Response(
+          JSON.stringify({
+            error: "unauthorized",
+            error_description:
+              "Your Dotflowy connection needs to be reconnected. Sign in again from your AI app's connector settings, or run `dotflowy login` for the CLI.",
+          }),
+          {
+            status: 401,
+            headers: {
+              "content-type": "application/json",
+              "www-authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource${url.pathname}"`,
+              "access-control-allow-origin": "*",
+              "access-control-expose-headers": "WWW-Authenticate",
+            },
           },
-        });
+        );
       }
       // MCP (agent access) is a paid capability (#152/#170). Resolve the plan
       // from the token's `userId` — the Better Auth id the subscription table is

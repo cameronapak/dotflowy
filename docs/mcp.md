@@ -48,6 +48,14 @@ authentication infrastructure to Better Auth 1.7. Existing OAuth credentials
 are reset; personal API keys and browser sessions are unaffected. Use the same
 MCP URL and sign in again (CLI: `dotflowy login`).
 
+Missing or invalid credentials on `/mcp` and `/api/mcp` return HTTP 401 with
+`error: "unauthorized"` and an `error_description` explaining how to reconnect
+in your AI app's connector settings or run `dotflowy login`. The same message
+is used for every invalid credential. The `WWW-Authenticate` protected-resource
+metadata challenge and CORS headers remain available for OAuth discovery.
+This is an HTTP authentication error, not a JSON-RPC response; whether an AI
+app displays the description or starts reauthorization depends on the client.
+
 Every new OAuth authorization requires explicit approval in Dotflowy, even if
 the client omits `prompt=consent`. The consent page shows the authenticated
 account, registered client name, callback hostname, full-outline read/write
