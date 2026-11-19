@@ -41,10 +41,6 @@
   "optionalDependencies": {
     "@napi-rs/keyring": "2.1.0"
   },
-  "overrides": {
-    "launch-editor": "^2.14.2",
-    "undici": "^8.12.2"
-  },
   "engines": {
     "node": ">=22.19.0"
   }
