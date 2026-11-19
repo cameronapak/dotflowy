@@ -2,4 +2,4 @@
 "dotflowy": patch
 ---
 
-Keeps Dotflowy's authentication infrastructure up to date. Connected AI agents may need to reconnect once.
+Please sign in again once to your Dotflowy OAuth connections: reconnect MCP connectors in AI apps such as Claude, ChatGPT, and Cursor, and run `dotflowy login` for the Dotflowy CLI. Your outlines, browser sessions, and API keys are unchanged.
