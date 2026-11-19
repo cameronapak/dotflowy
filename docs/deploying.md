@@ -44,7 +44,8 @@ runs the same quality checks as CI, then:
    validate the selected main commit the same way.
 4. Confirms main has not advanced, pushes the identical release commit and tag
    atomically, then publishes the GitHub Release.
-5. Deploys the landing Worker (`dotflowy.com`), then the app Worker
+5. Deploys the landing Worker (`dotflowy.com`), applies pending D1 migrations,
+   then deploys the app Worker
    (`app.dotflowy.com`), using those builds.
 6. Checks the version in both public `changelog.json` assets, both homepages,
    and the app's public auth configuration endpoint.
@@ -59,11 +60,11 @@ release workflow remains independent.
 Add these under **Settings → Secrets and variables → Actions → New repository
 secret**:
 
-| Name                    | Value                                                                                                                   |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`  | Cloudflare deployment token, using the Edit Cloudflare Workers template, scoped to the account and `dotflowy.com` zone. |
-| `CLOUDFLARE_ACCOUNT_ID` | The account that owns both Workers.                                                                                     |
-| `SENTRY_AUTH_TOKEN`     | Optional Sentry organization token for client source-map uploads.                                                       |
+| Name                    | Value                                                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`  | Cloudflare deployment token, using the Edit Cloudflare Workers template plus account-level D1 Edit permission, scoped to the account and `dotflowy.com` zone. |
+| `CLOUDFLARE_ACCOUNT_ID` | The account that owns both Workers.                                                                                                                           |
+| `SENTRY_AUTH_TOKEN`     | Optional Sentry organization token for client source-map uploads.                                                                                             |
 
 The workflow uses GitHub's built-in `GITHUB_TOKEN` with Contents write permission
 for candidate branches, release commits, tags, and GitHub Releases. The deploy
@@ -149,8 +150,13 @@ workflow termination can also leave an orphan. After confirming its validation
 run has stopped, an authorized maintainer can delete that exact branch. Do not
 delete another attempt's candidate, change its SHA, or move a release tag.
 
-The workflow does **not** run D1 SQL migrations or data backfills. Approve and run
-those separately before deploying code that requires them. Wrangler still applies
+The workflow applies pending D1 SQL migrations immediately before the app deploy
+with `bunx --no-install wrangler d1 migrations apply dotflowy-db --remote`.
+`CI=true` makes confirmation non-interactive. A migration failure stops the app
+deploy; already applied migrations are not automatically rolled back if a later
+step fails. Review migrations before merging, including compatibility with the
+currently running app during this interval. Data backfills remain separately
+approved manual operations. Wrangler still applies
 Durable Object class migrations declared in `wrangler.jsonc`; review changes to
 that migration list before merging.
 

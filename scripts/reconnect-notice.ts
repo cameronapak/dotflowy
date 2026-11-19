@@ -119,10 +119,15 @@ const NoticeResponse = Schema.Struct({
 async function main() {
   const args = reconnectArgs(process.argv.slice(2));
   const recipients = parseRecipientCsv(await readFile(args.csv, "utf8"));
-  const cookie = await resolveAdminCookie(args.api);
+  const token = process.env.DOTFLOWY_RECONNECT_TOKEN;
+  if (token !== undefined && (token.length < 32 || /\s/.test(token)))
+    throw new Error("Invalid reconnect token.");
+  const headers = new Headers({ "content-type": "application/json" });
+  if (token) headers.set("authorization", `Bearer ${token}`);
+  else headers.set("cookie", await resolveAdminCookie(args.api));
   const response = await fetch(`${args.api}/api/admin/reconnect-notice`, {
     method: "POST",
-    headers: { "content-type": "application/json", cookie },
+    headers,
     body: JSON.stringify({ recipients, dryRun: args.dryRun }),
   });
   if (!response.ok) throw new Error("Reconnect notice request failed.");

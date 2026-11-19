@@ -320,6 +320,11 @@ test("deployment builds validated main before atomic push, publishing, and deplo
           run?: string;
           with?: { ref: string };
           "working-directory"?: string;
+          env?: {
+            CI?: string;
+            CLOUDFLARE_API_TOKEN?: string;
+            CLOUDFLARE_ACCOUNT_ID?: string;
+          };
           if?: string;
           "continue-on-error"?: boolean;
         }[];
@@ -343,6 +348,7 @@ test("deployment builds validated main before atomic push, publishing, and deplo
     "Push release commit and tag atomically",
     "Publish GitHub Release",
     "Deploy landing",
+    "Apply D1 migrations",
     "Deploy app",
   ];
   const steps = workflow.jobs.deploy.steps.filter((step) =>
@@ -351,6 +357,20 @@ test("deployment builds validated main before atomic push, publishing, and deplo
   expect(steps.map((step) => step.name)).toEqual(expected);
   expect(steps[4]?.run).toBe("bun run release:publish");
   expect(steps[5]?.["working-directory"]).toBe("landing");
+  expect(steps[6]?.run).toBe(
+    "bunx --no-install wrangler d1 migrations apply dotflowy-db --remote",
+  );
+  expect(steps[6]?.env).toEqual({
+    CI: "true",
+    CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+    CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
+  });
+  const appDeployIndex = workflow.jobs.deploy.steps.findIndex(
+    (step) => step.name === "Deploy app",
+  );
+  expect(workflow.jobs.deploy.steps[appDeployIndex - 1]?.name).toBe(
+    "Apply D1 migrations",
+  );
   const dir = mkdtempSync(join(tmpdir(), "dotflowy-deploy-"));
   fixtures.push(dir);
   mkdirSync(join(dir, ".test-bin"));

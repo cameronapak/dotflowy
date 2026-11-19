@@ -37,7 +37,15 @@ export default {
       const fetch = productionWorker.fetch;
       if (!fetch)
         throw new Error("production Worker fetch missing from fixture");
-      return fetch(request, env, ctx);
+      return fetch(
+        request,
+        {
+          ...env,
+          RECONNECT_NOTICE_TOKEN:
+            request.headers.get("x-fixture-reconnect-secret") ?? undefined,
+        },
+        ctx,
+      );
     }
 
     const input = await request.json<FixtureInput>();

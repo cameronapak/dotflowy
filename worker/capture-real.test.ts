@@ -621,6 +621,41 @@ test("membership gates theme writes, keeps the launch exception narrow, and scop
   expect((await request(freeCookie, "/api/admin/feedback")).status).toBe(404);
   // The admin capability comes from the session and agrees with enforcement.
   const adminCookie = await signIn("capabilities-admin");
+  const operatorToken = "disposable-reconnect-operator-token-1234567890";
+  for (const [secret, token, status] of [
+    [operatorToken, operatorToken, 200],
+    [operatorToken, "wrong-reconnect-operator-token-1234567890", 404],
+    [operatorToken, "short", 404],
+    ["short", "short", 404],
+    [undefined, operatorToken, 404],
+  ] as const) {
+    const headers = new Headers({
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    });
+    if (secret) headers.set("x-fixture-reconnect-secret", secret);
+    const response = await mf.dispatchFetch(
+      `${origin}/api/admin/reconnect-notice`,
+      {
+        method: "POST",
+        headers: Object.fromEntries(headers.entries()),
+        body: JSON.stringify({ recipients: ["recipient@example.test"] }),
+      },
+    );
+    expect(response.status).toBe(status);
+    if (status === 200)
+      expect(await response.json()).toMatchObject({ dryRun: true });
+  }
+  expect(
+    (
+      await mf.dispatchFetch(`${origin}/api/admin/feedback`, {
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+          "x-fixture-reconnect-secret": operatorToken,
+        },
+      })
+    ).status,
+  ).toBe(404);
   type ReconnectFixtureBody = {
     recipients?: string[];
     dryRun?: boolean | string;

@@ -1,7 +1,21 @@
 import { Schema } from "effect";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 import { sendEmail, type EmailEnv } from "./email";
 import { isPlausibleEmail, normalizeEmail } from "./identity";
+
+export function reconnectBearerAuthorized(
+  authorization: string | null,
+  secret?: string,
+): boolean {
+  if (!secret || secret.length < 32) return false;
+  const token = /^Bearer ([^\s]+)$/i.exec(authorization ?? "")?.[1];
+  if (!token || token.length < 32) return false;
+  return timingSafeEqual(
+    createHash("sha256").update(token).digest(),
+    createHash("sha256").update(secret).digest(),
+  );
+}
 
 export const ReconnectNoticeBody = Schema.Struct({
   recipients: Schema.Array(
@@ -50,7 +64,11 @@ export async function runReconnectNotice(
     const outcome =
       dryRun || !env.EMAIL
         ? { status: "simulated" as const }
-        : await sendEmail(env, { to: email, ...reconnectNoticeEmail });
+        : await sendEmail(env, {
+            to: email,
+            sender: "support",
+            ...reconnectNoticeEmail,
+          });
     results.push({ email, status: outcome.status });
   }
   return {
