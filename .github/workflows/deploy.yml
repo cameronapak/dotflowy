@@ -109,12 +109,21 @@ jobs:
           echo "CANDIDATE_RUN=$run_id" >> "$GITHUB_ENV"
           echo "Candidate $candidate: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run_id"
           echo "Candidate $candidate, base $RELEASE_BASE, validation run $run_id" >> "$GITHUB_STEP_SUMMARY"
+          run_error=$(mktemp)
+          trap 'rm -f "$run_error"' EXIT
           while (( SECONDS < deadline )); do
             test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$RELEASE_BASE" || {
               echo "::error::Main advanced during candidate validation; stop before promotion."
               exit 1
             }
-            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")
+            if ! run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" 2> "$run_error"); then
+              if grep -qx 'gh: Not Found (HTTP 404)' "$run_error"; then
+                sleep 15
+                continue
+              fi
+              cat "$run_error" >&2
+              exit 1
+            fi
             jq -e --arg sha "$candidate" --arg branch "$branch" --arg repo "$GITHUB_REPOSITORY" \
               '.head_sha == $sha and .head_branch == $branch and
                .repository.full_name == $repo and .head_repository.full_name == $repo and
