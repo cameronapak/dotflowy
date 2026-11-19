@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.14.1
+
+### Patch Changes
+
+- a241536: Keeps Dotflowy's app, CLI, and landing site dependencies up to date with the latest security and stability fixes.
+
 ## 3.14.0
 
 ### Minor Changes
