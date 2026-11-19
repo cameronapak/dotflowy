@@ -72,6 +72,8 @@ Review: `/code-review`. Auth, SSRF, Worker-to-DO trust, or signup gate: `/securi
 
 Every PR needs a root changeset, including an empty one for changes that are not news. App version bump or changelog: [ADR 0046](./docs/adr/0046-changelog-and-release-versioning.md). CLI version or npm release: [ADR 0062](./docs/adr/0062-automated-cli-releases.md). Commands: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
+- **CLI delivery:** after merging packaged CLI changes, follow the [CLI release handoff](./CONTRIBUTING.md#cli-release-handoff). Report either the verified npm version or the release PR awaiting publish approval; an app deploy or green version job is not CLI publication.
+
 ## Landing
 
 Landing site (`landing/`, dotflowy.com): Geist only, no mono. Accents match the app palette. Feature bullets stay vertical on desktop. Keep "Workflowy alternative" out of the H1 and the footer brand row. Icons in the app: free MIT Hugeicons (`@hugeicons/react`, `@hugeicons/core-free-icons`) at default stroke.

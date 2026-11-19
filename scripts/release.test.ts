@@ -123,6 +123,44 @@ function workflowStep(file: string, job: string, name: string) {
   return step.run;
 }
 
+test("CLI version success hands off the release PR without claiming publication", () => {
+  const dir = mkdtempSync(join(tmpdir(), "dotflowy-cli-handoff-"));
+  fixtures.push(dir);
+  const summary = join(dir, "summary.md");
+  const script = workflowStep(
+    "cli-release.yml",
+    "release-pr",
+    "Report pending publish approval",
+  );
+  for (const number of ["179", "", "pr/179"]) {
+    writeFileSync(summary, "");
+    const result = run(dir, ["bash", "-e", "-o", "pipefail", "-c", script], {
+      PR_NUMBER: number,
+      GITHUB_SERVER_URL: "https://github.com",
+      GITHUB_REPOSITORY: "owner/outline",
+      GITHUB_STEP_SUMMARY: summary,
+    });
+    const output = readFileSync(summary, "utf8");
+    if (number === "179") {
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("::warning title=CLI not published::");
+      expect(result.out).toContain("https://github.com/owner/outline/pull/179");
+      expect(output).toContain("CLI not published: approval pending");
+      expect(output).toContain(
+        "[Review the CLI release PR](https://github.com/owner/outline/pull/179)",
+      );
+      expect(output).toContain("Merging it approves npm publication.");
+      expect(output).toContain(
+        "verify the publish job and the exact npm version",
+      );
+    } else {
+      expect(result.code).not.toBe(0);
+      expect(result.out).toContain("::error::");
+      expect(output).toBe("");
+    }
+  }
+});
+
 function candidateFixture(news = true) {
   const dir = fixture(
     news ? { "news.md": '---\n"dotflowy": minor\n---\n\nNews.\n' } : {},
