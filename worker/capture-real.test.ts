@@ -199,7 +199,7 @@ beforeAll(async () => {
             ADMIN_EMAILS: {
               type: "text",
               value:
-                "feedback-other@capture.test,capabilities-admin@capture.test,rewards-admin@capture.test",
+                "feedback-other@capture.test,capabilities-admin@capture.test,rewards-admin@capture.test,reconnect-admin@capture.test",
             },
           },
           exports: {
@@ -621,6 +621,49 @@ test("membership gates theme writes, keeps the launch exception narrow, and scop
   expect((await request(freeCookie, "/api/admin/feedback")).status).toBe(404);
   // The admin capability comes from the session and agrees with enforcement.
   const adminCookie = await signIn("capabilities-admin");
+  expect((await request("", "/api/account-capabilities")).status).toBe(401);
+  for (const [cookie, admin] of [
+    [freeCookie, false],
+    [adminCookie, true],
+  ] as const) {
+    const capabilities = await request(cookie, "/api/account-capabilities");
+    expect(capabilities.headers.get("cache-control")).toBe("private, no-store");
+    expect(await capabilities.json()).toEqual({ admin });
+  }
+  expect((await request(adminCookie, "/api/admin/feedback")).status).toBe(200);
+});
+
+test("reconnect notices require an admin session or scoped bearer and preview validated recipients", async () => {
+  const db = await mf.getD1Database("DB");
+  const origin = (await mf.ready).origin;
+  const password = "reconnect-fixture-password";
+  const passwordHash = await hashPassword(password);
+  async function signIn(id: string) {
+    await fixture("seed", { userId: id, password: passwordHash });
+    const email = `${id}@capture.test`;
+    await db
+      .prepare('UPDATE "user" SET email = ? WHERE id = ?')
+      .bind(email, id)
+      .run();
+    const response = await mf.dispatchFetch(
+      "http://localhost/api/auth/sign-in/email",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost",
+        },
+        body: JSON.stringify({ email, password }),
+      },
+    );
+    expect(response.status).toBe(200);
+    return response.headers
+      .getSetCookie()
+      .map((value) => value.split(";")[0])
+      .join("; ");
+  }
+  const freeCookie = await signIn("reconnect-user");
+  const adminCookie = await signIn("reconnect-admin");
   const operatorToken = "disposable-reconnect-operator-token-1234567890";
   for (const [secret, token, status] of [
     [operatorToken, operatorToken, 200],
@@ -700,16 +743,6 @@ test("membership gates theme writes, keeps the launch exception narrow, and scop
       subject: "A quick sign-in refresh for your Dotflowy connections",
     },
   });
-  expect((await request("", "/api/account-capabilities")).status).toBe(401);
-  for (const [cookie, admin] of [
-    [freeCookie, false],
-    [adminCookie, true],
-  ] as const) {
-    const capabilities = await request(cookie, "/api/account-capabilities");
-    expect(capabilities.headers.get("cache-control")).toBe("private, no-store");
-    expect(await capabilities.json()).toEqual({ admin });
-  }
-  expect((await request(adminCookie, "/api/admin/feedback")).status).toBe(200);
 });
 
 test("only a signed paid checkout queues a welcome, and webhook retries cannot revive a dismissed note", async () => {
