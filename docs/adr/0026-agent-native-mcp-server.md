@@ -199,6 +199,17 @@ client, resource, consent, access-token and refresh-token models. Existing agent
 registrations and credentials are intentionally invalidated; agents reconnect
 once. Users, browser sessions, API keys and outline routing are unaffected.
 
+The one-time reconnect email is an explicit operator action via
+`scripts/reconnect-notice.ts` and admin-only `POST /api/admin/reconnect-notice`
+(non-admins get 404). A private CSV supplies recipients because migration 0023
+removes the legacy source tables. The route validates 1–50 emails, deduplicates,
+defaults to dry-run, and uses the approved fixed copy through `worker/email.ts`.
+Sequential sends are awaited to return per-recipient outcomes rather than
+detached with `ctx.waitUntil`. Neither path logs addresses; dry-run never sends.
+There is no database tracking or automatic retry: operators retry only failures
+from a new CSV and investigate unknown outcomes before resending. Deployment
+never triggers this email. See the operator steps in CONTRIBUTING.md.
+
 Both `/mcp` and `/api/mcp` remain public MCP URLs. Root and path-aware
 `/.well-known/oauth-protected-resource` documents remain available, as does
 `/.well-known/oauth-authorization-server` (including issuer-path discovery).

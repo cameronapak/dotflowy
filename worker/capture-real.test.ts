@@ -621,6 +621,50 @@ test("membership gates theme writes, keeps the launch exception narrow, and scop
   expect((await request(freeCookie, "/api/admin/feedback")).status).toBe(404);
   // The admin capability comes from the session and agrees with enforcement.
   const adminCookie = await signIn("capabilities-admin");
+  type ReconnectFixtureBody = {
+    recipients?: string[];
+    dryRun?: boolean | string;
+  };
+  const reconnect = (
+    cookie: string,
+    body: ReconnectFixtureBody,
+    method = "POST",
+  ) =>
+    mf.dispatchFetch(`${origin}/api/admin/reconnect-notice`, {
+      method,
+      headers: { cookie, "content-type": "application/json", origin },
+      body: method === "POST" ? JSON.stringify(body) : undefined,
+    });
+  for (const cookie of ["", freeCookie]) {
+    expect((await reconnect(cookie, {})).status).toBe(404);
+    expect((await reconnect(cookie, {}, "GET")).status).toBe(404);
+  }
+  expect((await reconnect(adminCookie, {}, "GET")).status).toBe(405);
+  for (const body of [
+    {},
+    { recipients: [] },
+    { recipients: ["invalid"] },
+    {
+      recipients: Array.from(
+        { length: 51 },
+        (_, i) => `recipient${i}@example.test`,
+      ),
+    },
+    { recipients: ["recipient@example.test"], dryRun: "false" },
+  ])
+    expect((await reconnect(adminCookie, body)).status).toBe(400);
+  const preview = await reconnect(adminCookie, {
+    recipients: ["Recipient@example.test", "recipient@example.test"],
+    dryRun: true,
+  });
+  expect(preview.status).toBe(200);
+  expect(await preview.json()).toMatchObject({
+    dryRun: true,
+    results: [{ email: "recipient@example.test", status: "simulated" }],
+    message: {
+      subject: "A quick sign-in refresh for your Dotflowy connections",
+    },
+  });
   expect((await request("", "/api/account-capabilities")).status).toBe(401);
   for (const [cookie, admin] of [
     [freeCookie, false],

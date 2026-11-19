@@ -85,6 +85,7 @@ import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { handleRewards } from "./pro-reward";
 import { trialCheckout } from "./pro-trial";
+import { ReconnectNoticeBody, runReconnectNotice } from "./reconnect-notice";
 import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, rateLimitedTitleE, unfurlTitleE } from "./unfurl";
@@ -991,6 +992,29 @@ function handleApiRequest(
       return json(
         yield* Effect.promise(() => runInviteBatch(env, body, url.origin)),
       );
+    }
+
+    if (url.pathname === "/api/admin/reconnect-notice") {
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method !== "POST") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      if (
+        request.headers.get("content-type")?.split(";")[0]?.trim() !==
+          "application/json" ||
+        (request.headers.get("origin") &&
+          request.headers.get("origin") !== url.origin)
+      ) {
+        return json({ error: "invalid origin or content type" }, 403);
+      }
+      const body = yield* decodeBody(request, ReconnectNoticeBody);
+      // Await the sequential batch so the operator receives every send outcome.
+      return json(yield* Effect.promise(() => runReconnectNotice(env, body)));
     }
 
     // Admin-only: email the launch "Dotflowy is open" blast to the waitlist
