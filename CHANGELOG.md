@@ -1,5 +1,13 @@
 # dotflowy
 
+## 3.14.3
+
+### Patch Changes
+
+- a8a8b12: Clarifies how to refresh an older AI app connection by removing the Dotflowy connector and adding it again.
+- e2e9fe2: Links only open when they use http, https, or mailto. A `javascript:` or other script link, whether typed, pasted, or imported from OPML, now shows as inert text.
+- a19a3e4: Link titles are no longer fetched for reserved IPv4 addresses or IPv6 addresses that embed an internal IPv4 address.
+
 ## 3.14.2
 
 ### Patch Changes
