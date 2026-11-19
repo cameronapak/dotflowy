@@ -43,6 +43,11 @@ in Settings → Plugins does not disable explicit MCP or CLI daily operations.
 
 ## OAuth consent and revocation
 
+Connected AI agents may need to reconnect once as Dotflowy updates its
+authentication infrastructure to Better Auth 1.7. Existing OAuth credentials
+are reset; personal API keys and browser sessions are unaffected. Use the same
+MCP URL and sign in again (CLI: `dotflowy login`).
+
 Every new OAuth authorization requires explicit approval in Dotflowy, even if
 the client omits `prompt=consent`. The consent page shows the authenticated
 account, registered client name, callback hostname, full-outline read/write
@@ -60,10 +65,11 @@ the connector in the AI app alone may not revoke its tokens.
 
 Root and `/mcp`-suffixed protected-resource discovery both identify the full
 `https://<your-deployment>/mcp` URL. The retained `/api/mcp` alias has its own
-path-aware discovery document. Existing bearer tokens and API keys remain valid
-without retroactive consent. New authorization uses S256 PKCE and explicit consent;
-successful refresh consumes the previous refresh grant. A client must save the
-new token pair, not retry the old refresh token.
+path-aware discovery document. API keys remain valid across the 1.7 upgrade;
+OAuth agents reconnect once. New authorization uses S256 PKCE and explicit consent;
+successful refresh consumes the previous refresh grant and invalidates the prior
+access token. A client must save the new pair: replaying the old refresh token
+revokes the client's refresh family for that user.
 
 ## Tool annotations
 

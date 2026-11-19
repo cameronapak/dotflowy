@@ -60,5 +60,13 @@ choose `login --insecure-storage` to use an unencrypted, user-only credential fi
 Diagnostics never print credentials. OS credential storage reduces accidental
 exposure; it does not guarantee protection from malware running as the user.
 
-Logout removes local credentials only. The current OAuth provider has no MCP
-revocation endpoint, so the CLI does not claim to revoke server tokens.
+Logout removes local credentials only; it does not call the provider's revocation
+endpoint or claim to revoke server tokens. Users can disconnect clients in
+Dotflowy's Connections settings. The Better Auth 1.7 reset in ADR 0026 requires
+existing OAuth agents (including the CLI) to sign in once again; the MCP URLs,
+PKCE flow, and discovery URLs remain compatible.
+
+The provider infers native client registration for exact loopback HTTP callbacks
+when `application_type` is omitted, preserving the published CLI's registration.
+It still rejects HTTP callbacks on non-loopback hosts and validates explicit
+web/native application types with the vendor's redirect rules.

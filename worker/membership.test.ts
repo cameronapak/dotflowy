@@ -66,7 +66,7 @@ beforeAll(async () => {
               type: "text",
               value: "disposable-membership-test-secret",
             },
-            BETTER_AUTH_URL: { type: "text", value: "http://fixture" },
+            BETTER_AUTH_URL: { type: "text", value: "http://localhost" },
             SIGNUP_OPEN: { type: "text", value: "true" },
           },
         },
@@ -77,6 +77,7 @@ beforeAll(async () => {
   for (const migration of [
     "0003_create_auth.sql",
     "0004_create_oauth.sql",
+    "0023_better_auth_1_7.sql",
     "0006_create_stripe.sql",
     "0017_membership_welcome.sql",
     "0021_pro_trial_checkout.sql",
@@ -95,11 +96,11 @@ afterAll(async () => {
 
 test("membership reads retain typed storage failures, GET sanitizes them to 503, and projection defects remain 500", async () => {
   const authRequest = (action: string) =>
-    mf.dispatchFetch(`http://fixture/api/auth/${action}/email`, {
+    mf.dispatchFetch(`http://localhost/api/auth/${action}/email`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        origin: "http://fixture",
+        origin: "http://localhost",
       },
       body: JSON.stringify({
         name: "Member",
@@ -118,7 +119,7 @@ test("membership reads retain typed storage failures, GET sanitizes them to 503,
     .join("; ");
   expect(cookie).not.toBe("");
   const membership = (query?: string, mode = "throw") =>
-    mf.dispatchFetch("http://fixture/api/membership", {
+    mf.dispatchFetch("http://localhost/api/membership", {
       headers: query
         ? { cookie, "x-fail-query": query, "x-fail-mode": mode }
         : { cookie },
@@ -146,7 +147,7 @@ test("membership reads retain typed storage failures, GET sanitizes them to 503,
   ]) {
     for (const mode of ["throw", "reject"]) {
       const typed = await mf.dispatchFetch(
-        "http://fixture/__membership-result",
+        "http://localhost/__membership-result",
         {
           headers: { "x-fail-query": query, "x-fail-mode": mode },
         },

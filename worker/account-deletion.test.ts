@@ -117,7 +117,14 @@ describe("deleteResidualUserRows", () => {
     expect(bySql("DELETE FROM capture_key")!.args).toEqual(["user-abc"]);
     expect(bySql("oauthAccessToken")!.args).toEqual(["user-abc"]);
     expect(bySql("oauthConsent")!.args).toEqual(["user-abc"]);
-    expect(bySql("oauthApplication")!.args).toEqual(["user-abc"]);
+    for (const table of [
+      "oauthRefreshToken",
+      "oauthClientResource",
+      "oauthClient",
+      "mcpGrant",
+      "verification",
+    ])
+      expect(bySql(table)!.args).toEqual(["user-abc"]);
     expect(bySql("DELETE FROM waitlist")!.args).toEqual(["user@example.com"]);
     expect(bySql("DELETE FROM invites")!.args).toEqual(["user@example.com"]);
     expect(bySql("subscription")).toBeUndefined();

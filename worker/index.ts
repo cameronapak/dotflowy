@@ -25,8 +25,12 @@
  * unambiguous 500s without collapsing known validation errors into the same bucket.
  */
 
+import {
+  oauthProviderAuthServerMetadata,
+  type AuthServerMetadata,
+  type ResourceServerMetadata,
+} from "@better-auth/oauth-provider";
 import * as Sentry from "@sentry/cloudflare";
-import { oAuthDiscoveryMetadata } from "better-auth/plugins";
 import { Data, Effect, Schema } from "effect";
 
 import type { KvClaim, WeekStartMigrationResult } from "./outline-do";
@@ -74,6 +78,7 @@ import {
 } from "./invites";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { handleMcpConnections, readMcpConsent } from "./mcp-oauth";
+import { handleMcpAuthRequest } from "./mcp-provider";
 import { acknowledgeWelcome, canSaveTheme, readMembership } from "./membership";
 import { legacyNumberedNode } from "./numbered-compat";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
@@ -901,7 +906,9 @@ function handleApiRequest(
     // Better Auth owns everything under /api/auth/* (sign-up/in/out, session,
     // and — via the mcp plugin — the OAuth authorize/token/register endpoints).
     if (url.pathname.startsWith("/api/auth/")) {
-      return yield* Effect.promise(() => auth.handler(request));
+      return yield* Effect.promise(() =>
+        handleMcpAuthRequest(auth, request, env.DB),
+      );
     }
 
     // Public signup config (#293): the SPA reads whether signup is OPEN (hide
@@ -1548,7 +1555,20 @@ const handler = {
     // Keep the root discovery URL for existing connectors, plus path-aware
     // documents whose resource exactly matches the canonical endpoint or alias.
     if (url.pathname.startsWith("/.well-known/oauth-authorization-server")) {
-      return oAuthDiscoveryMetadata(createAuth(env, url.origin))(request);
+      const response = await oauthProviderAuthServerMetadata(
+        createAuth(env, url.origin),
+      )(request);
+      const metadata = await response.json<AuthServerMetadata>();
+      const origin = new URL(env.BETTER_AUTH_URL ?? url.origin).origin;
+      return Response.json(
+        {
+          ...metadata,
+          authorization_endpoint: `${origin}/api/auth/mcp/authorize`,
+          token_endpoint: `${origin}/api/auth/mcp/token`,
+          registration_endpoint: `${origin}/api/auth/mcp/register`,
+        },
+        { headers: response.headers },
+      );
     }
     if (url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
       const suffix = url.pathname.slice(
@@ -1556,10 +1576,18 @@ const handler = {
       );
       if (!["", "/mcp", "/api/mcp"].includes(suffix))
         return new Response(null, { status: 404 });
-      const metadata = await createAuth(
-        env,
-        url.origin,
-      ).api.getMCPProtectedResource({ request, asResponse: false });
+      if (!["GET", "HEAD"].includes(request.method))
+        return new Response(null, {
+          status: 405,
+          headers: { allow: "GET, HEAD" },
+        });
+      const response = await createAuth(env, url.origin).handler(
+        new Request(new URL("/.well-known/oauth-protected-resource", url), {
+          method: "GET",
+          headers: request.headers,
+        }),
+      );
+      const metadata = await response.json<ResourceServerMetadata>();
       return Response.json(
         {
           ...metadata,

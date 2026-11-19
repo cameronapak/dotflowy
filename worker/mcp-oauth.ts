@@ -1,6 +1,24 @@
 /// <reference types="@cloudflare/workers-types" />
 import { Effect, Schema } from "effect";
 
+export async function grantEpoch(
+  db: D1Database,
+  userId: string,
+  clientId: string,
+) {
+  await db
+    .prepare(
+      "INSERT INTO mcpGrant (userId, clientId, epoch) VALUES (?, ?, 0) ON CONFLICT DO NOTHING",
+    )
+    .bind(userId, clientId)
+    .run();
+  const row = await db
+    .prepare("SELECT epoch FROM mcpGrant WHERE userId = ? AND clientId = ?")
+    .bind(userId, clientId)
+    .first<{ epoch: number }>();
+  return row?.epoch ?? -1;
+}
+
 const ConsentValue = Schema.Struct({
   userId: Schema.String,
   clientId: Schema.String,
@@ -8,6 +26,8 @@ const ConsentValue = Schema.Struct({
   requireConsent: Schema.Boolean,
   scope: Schema.Array(Schema.String),
   state: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  oauthQuery: Schema.String,
+  epoch: Schema.Number,
 });
 
 /** Read provider-owned state, never client-supplied names, scopes or redirects. */
@@ -31,11 +51,19 @@ export async function readMcpConsent(
   if (!value.requireConsent || value.userId !== userId) return null;
   const client = await db
     .prepare(
-      "SELECT name, redirectUrls FROM oauthApplication WHERE clientId = ? AND (disabled IS NULL OR disabled = 0)",
+      "SELECT name, redirectUris FROM oauthClient WHERE clientId = ? AND (disabled IS NULL OR disabled = 0)",
     )
     .bind(value.clientId)
-    .first<{ name: string; redirectUrls: string }>();
-  if (!client || !client.redirectUrls.split(",").includes(value.redirectURI))
+    .first<{ name: string; redirectUris: string }>();
+  if (!client) return null;
+  const redirects = Schema.decodeUnknownResult(
+    Schema.fromJsonString(Schema.Array(Schema.String)),
+  )(client.redirectUris);
+  if (
+    redirects._tag === "Failure" ||
+    !redirects.success.includes(value.redirectURI) ||
+    value.epoch !== (await grantEpoch(db, userId, value.clientId))
+  )
     return null;
   return { ...value, name: client.name };
 }
@@ -58,12 +86,17 @@ export function handleMcpConnections(
       const clients = yield* Effect.promise(() =>
         db
           .prepare(`
-        SELECT DISTINCT a.clientId, a.name FROM oauthApplication a
-        INNER JOIN oauthAccessToken t ON t.clientId = a.clientId
-        WHERE t.userId = ? AND (t.accessTokenExpiresAt > ? OR t.refreshTokenExpiresAt > ?)
+        SELECT DISTINCT a.clientId, a.name FROM oauthClient a
+        WHERE EXISTS (SELECT 1 FROM oauthAccessToken t WHERE t.clientId = a.clientId AND t.userId = ? AND t.expiresAt > ? AND t.revoked IS NULL)
+        OR EXISTS (SELECT 1 FROM oauthRefreshToken r WHERE r.clientId = a.clientId AND r.userId = ? AND r.expiresAt > ? AND r.revoked IS NULL)
         ORDER BY a.name, a.clientId
       `)
-          .bind(userId, new Date().toISOString(), new Date().toISOString())
+          .bind(
+            userId,
+            new Date().toISOString(),
+            userId,
+            new Date().toISOString(),
+          )
           .all<{ clientId: string; name: string }>(),
       );
       return reply({ connections: clients.results });
@@ -86,7 +119,17 @@ export function handleMcpConnections(
       db.batch([
         db
           .prepare(
+            "INSERT INTO mcpGrant (userId, clientId, epoch) SELECT ?, ?, 1 WHERE EXISTS (SELECT 1 FROM oauthClient WHERE clientId = ?) ON CONFLICT(userId, clientId) DO UPDATE SET epoch = epoch + 1",
+          )
+          .bind(userId, clientId, clientId),
+        db
+          .prepare(
             "DELETE FROM oauthAccessToken WHERE userId = ? AND clientId = ?",
+          )
+          .bind(userId, clientId),
+        db
+          .prepare(
+            "DELETE FROM oauthRefreshToken WHERE userId = ? AND clientId = ?",
           )
           .bind(userId, clientId),
         db
@@ -94,7 +137,7 @@ export function handleMcpConnections(
           .bind(userId, clientId),
         db
           .prepare(
-            `DELETE FROM verification WHERE json_valid(value) AND json_extract(value, '$.userId') = ? AND json_extract(value, '$.clientId') = ?`,
+            `DELETE FROM verification WHERE json_valid(value) AND json_extract(value, '$.userId') = ? AND COALESCE(json_extract(value, '$.clientId'), json_extract(value, '$.query.client_id')) = ?`,
           )
           .bind(userId, clientId),
       ]),

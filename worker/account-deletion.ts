@@ -158,7 +158,7 @@ export async function cancelActiveSubscriptions(
  * row is already gone (cleared in beforeDelete's Stripe step — it's the
  * entitlement record, too load-bearing for a best-effort sweep). What's left:
  *
- * - the mcp OAuth tables (migration 0004) DO declare `ON DELETE CASCADE`, so
+ * - the MCP OAuth tables (migration 0023) DO declare `ON DELETE CASCADE`, so
  *   they may already be gone; deleting them by `userId` is idempotent and makes
  *   cleanup correct whether or not D1 enforced the cascade.
  * - the `waitlist` row (migration 0005) and the `invites` row (migration 0007)
@@ -182,8 +182,20 @@ export function deleteResidualUserRows(
   return db.batch([
     db.prepare("DELETE FROM capture_key WHERE userId = ?").bind(userId),
     db.prepare("DELETE FROM oauthAccessToken WHERE userId = ?").bind(userId),
+    db.prepare("DELETE FROM oauthRefreshToken WHERE userId = ?").bind(userId),
     db.prepare("DELETE FROM oauthConsent WHERE userId = ?").bind(userId),
-    db.prepare("DELETE FROM oauthApplication WHERE userId = ?").bind(userId),
+    db
+      .prepare(
+        "DELETE FROM oauthClientResource WHERE clientId IN (SELECT clientId FROM oauthClient WHERE userId = ?)",
+      )
+      .bind(userId),
+    db.prepare("DELETE FROM oauthClient WHERE userId = ?").bind(userId),
+    db.prepare("DELETE FROM mcpGrant WHERE userId = ?").bind(userId),
+    db
+      .prepare(
+        "DELETE FROM verification WHERE json_valid(value) AND json_extract(value, '$.userId') = ?",
+      )
+      .bind(userId),
     db.prepare("DELETE FROM waitlist WHERE email = ?").bind(normalized),
     db.prepare("DELETE FROM invites WHERE email = ?").bind(normalized),
   ]);
