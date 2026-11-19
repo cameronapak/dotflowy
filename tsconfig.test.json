@@ -16,6 +16,7 @@
     "src/**/*.test.ts",
     "src/**/*.test.tsx",
     "worker/**/*.test.ts",
+    "scripts/check-effect.ts",
     "scripts/heavy-lane.ts",
     "scripts/heavy-lane.test.ts",
     "scripts/e2e-shards.ts",

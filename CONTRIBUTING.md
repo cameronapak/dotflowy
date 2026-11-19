@@ -125,6 +125,20 @@ logs and the `/api/sync` upgrade. The Vite proxy needs WebSocket support for `/a
 (`ws: true` in object form), and Vite must be restarted after any
 `vite.config.ts` proxy edit.
 
+In `bun run cf:dev` and Vite dev, filter the browser console for
+`[dotflowy:sync]` (enable Verbose). Agents can also collect these single-line
+JSON records with Playwright's `page.on("console", ...)` before navigation:
+
+| Event     | How to read it                                                                                    |
+| --------- | ------------------------------------------------------------------------------------------------- |
+| `connect` | The client is attempting a full snapshot or resume.                                               |
+| `applied` | The snapshot or resume actually reached the outline collection.                                   |
+| `retry`   | The socket dropped or timed out; includes the retry delay and whether a handshake ever completed. |
+| `resync`  | A sequence gap or missing write echo triggered snapshot recovery.                                 |
+
+The records contain no frames, outline text, IDs, URLs, or raw errors. They
+stay in the local browser console and are omitted from release builds.
+
 Local auth testing should use a real local account created with the invite code
 from your local `.dev.vars`. If you temporarily add an auth bypass for manual
 testing, keep it uncommitted and exclude it from PRs unless the PR is explicitly
@@ -495,6 +509,7 @@ bun run typecheck       # tsrs over the app (DOM libs)
 bun run typecheck:worker # tsrs over worker/ (workers-types)
 bun run typecheck:test  # tsrs over the unit tests (bun types)
 bun run typecheck:e2e   # tsrs over app Playwright specs and fixtures, no browser
+bun run check:effect    # errors-only Effect diagnostics (install CLI deps first)
 bun run test            # bun test — unit tests plus the Miniflare Worker suite (src + worker/)
 bun test scripts/release.test.ts scripts/shortcut.test.ts scripts/heavy-lane.test.ts
 bun run check:docs
@@ -510,6 +525,14 @@ The CLI build also uses tsrs to emit JavaScript. The `typescript` dependencies
 remain available for editor and tool integrations; they do not choose the
 checker used by these scripts. Oxlint stays independent at 1.83.0 with the same
 rules and no type-aware mode.
+
+`check:effect` runs the pinned Effect language service separately from tsrs,
+without modifying installed tools. It catches valid TypeScript that fails to
+run an Effect, including a discarded call or `yield` where `yield*` is needed.
+CI runs it against the app, Worker, and unit and CLI test programs; warnings
+and style suggestions are not gating. To run it locally, first install CLI deps
+with `bun install --cwd cli --frozen-lockfile`; the first run downloads the
+diagnostic binary into Bun's cache.
 
 The adoption checks on Linux x64 matched project-owned file membership and
 deliberate-error diagnostics against the previous compilers for all seven

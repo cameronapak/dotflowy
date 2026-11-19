@@ -46,6 +46,11 @@ Recovery requests share the pending connection until its snapshot arrives, so st
 timeouts cannot repeatedly cancel a slow handshake. Broadcasts received before the handshake
 are ignored because the snapshot or resume reply covers them.
 
+Vite dev and `cf:dev` log content-free sync milestones in the browser console:
+connection mode, applied handshake, retry reason and delay, and resync cause.
+The stream remains the only producer-to-collection channel. Diagnostics never
+contain frame data or raw errors and are disabled in release builds.
+
 ## Considered and rejected
 
 - **Keep the callback boundary, Effect internals only.** Lower blast radius, but bakes in a shape the

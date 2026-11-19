@@ -3,6 +3,7 @@ import { Duration, Effect, Layer, Stream } from "effect";
 import { Socket } from "effect/socket";
 
 import type { ServerMessage, SyncEvent } from "./realtime";
+import type { SyncDiagnostic } from "./sync-diagnostics";
 
 import { backoffMillis, createSyncStream } from "./realtime";
 
@@ -123,9 +124,9 @@ class FakeWebSocket implements WebSocket {
     );
   }
   /** Simulate an abnormal server-side drop (1006 = no clean close). */
-  driveServerClose(code = 1006): void {
+  driveServerClose(code = 1006, reason = ""): void {
     this.readyState = 3;
-    this.fire("close", new CloseEvent("close", { code, reason: "" }));
+    this.fire("close", new CloseEvent("close", { code, reason }));
   }
 }
 
@@ -135,6 +136,7 @@ const settle = Effect.sleep(Duration.millis(10));
 interface Harness {
   sockets: FakeWebSocket[];
   collected: SyncEvent[];
+  diagnostics: SyncDiagnostic[];
 }
 
 /** Indexed socket access that narrows away `undefined` (noUncheckedIndexedAccess). */
@@ -155,6 +157,7 @@ function withHarness(
 ): Promise<void> {
   const sockets: FakeWebSocket[] = [];
   const collected: SyncEvent[] = [];
+  const diagnostics: SyncDiagnostic[] = [];
   const layer = Layer.succeed(Socket.WebSocketConstructor)((
     _url: string,
     _options?: Socket.WebSocketConstructorOptions,
@@ -165,14 +168,19 @@ function withHarness(
   });
 
   const program = Effect.gen(function* () {
-    const { events, resync } = yield* createSyncStream(Effect.sync(cursor));
+    const { events, resync } = yield* createSyncStream(
+      Effect.sync(cursor),
+      (diagnostic) => {
+        diagnostics.push(diagnostic);
+      },
+    );
     yield* Stream.runForEach(events, (e: SyncEvent) =>
       Effect.sync(() => {
         collected.push(e);
       }),
     ).pipe(Effect.forkScoped);
     yield* settle; // let the first connection reach "waiting for open"
-    yield* body({ sockets, collected }, resync);
+    yield* body({ sockets, collected, diagnostics }, resync);
   });
 
   return Effect.runPromise(program.pipe(Effect.scoped, Effect.provide(layer)));
@@ -213,7 +221,7 @@ describe("createSyncStream", () => {
   test("coalesces resyncs until the authoritative handshake arrives", () =>
     withHarness(
       () => 99, // a non-null cursor we expect resync to IGNORE
-      ({ sockets, collected }, resync) =>
+      ({ sockets, collected, diagnostics }, resync) =>
         Effect.gen(function* () {
           expect(sockets.length).toBe(1);
           nth(sockets, 0).driveOpen();
@@ -262,21 +270,37 @@ describe("createSyncStream", () => {
           yield* resync;
           yield* settle;
           expect(sockets.length).toBe(3);
+          expect(diagnostics).toEqual([
+            { event: "connect", mode: "resume" },
+            { event: "connect", mode: "snapshot" },
+            { event: "connect", mode: "snapshot" },
+          ]);
         }),
     ));
 
   test("emits InitialError when the socket drops before any frame", () =>
     withHarness(
       () => null,
-      ({ sockets, collected }) =>
+      ({ sockets, collected, diagnostics }) =>
         Effect.gen(function* () {
           nth(sockets, 0).driveOpen();
-          nth(sockets, 0).driveServerClose(); // closed before any message
+          nth(sockets, 0).driveServerClose(1006, "private close reason");
           yield* settle;
           const initialErrors = collected.filter(
             (e) => e._tag === "InitialError",
           );
           expect(initialErrors.length).toBe(1);
+          expect(diagnostics).toEqual([
+            { event: "connect", mode: "snapshot" },
+            {
+              event: "retry",
+              reason: "SocketCloseError",
+              closeCode: 1006,
+              attempt: 1,
+              delayMs: expect.any(Number),
+              hadHandshake: false,
+            },
+          ]);
         }),
     ));
 

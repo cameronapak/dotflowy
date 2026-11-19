@@ -115,7 +115,7 @@ test("credential locks are released on failure and interruption", async () => {
       store.transaction(() =>
         Effect.gen(function* () {
           entered.resolve();
-          yield* Effect.never;
+          return yield* Effect.never;
         }),
       ),
       { signal: controller.signal },

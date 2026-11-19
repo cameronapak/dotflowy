@@ -1,10 +1,12 @@
 import {
+  Cause,
   Data,
   Deferred,
   Duration,
   Effect,
   Exit,
   Latch,
+  Option,
   Queue,
   Random,
   Ref,
@@ -13,8 +15,10 @@ import {
 } from "effect";
 import { Socket } from "effect/socket";
 
+import type { SyncDiagnostic } from "./sync-diagnostics";
 import type { ServerMessage } from "./wire-schema";
 
+import { logSyncDiagnostic } from "./sync-diagnostics";
 import { ServerMessageSchema } from "./wire-schema";
 
 // Re-export the wire types so this module stays the client's import surface for
@@ -148,6 +152,7 @@ const backoffDelay = (n: number): Effect.Effect<Duration.Duration> =>
  */
 export const createSyncStream = (
   cursor: Effect.Effect<number | null>,
+  report: (diagnostic: SyncDiagnostic) => void = logSyncDiagnostic,
 ): Effect.Effect<SyncStream> =>
   Effect.gen(function* () {
     // Consecutive-failure count driving the backoff. Reset to 0 once a connection
@@ -175,6 +180,10 @@ export const createSyncStream = (
           yield* resyncLatch.close;
           const force = yield* Ref.get(forceSnapshot);
           const since = force ? null : yield* cursor;
+          report({
+            event: "connect",
+            mode: since === null ? "snapshot" : "resume",
+          });
 
           const socket = yield* Socket.makeWebSocket(syncUrl());
           const writer = yield* socket.writer;
@@ -260,7 +269,28 @@ export const createSyncStream = (
               });
             }
             const n = yield* Ref.getAndUpdate(attempt, (x) => x + 1);
-            yield* Effect.sleep(yield* backoffDelay(n));
+            const delay = yield* backoffDelay(n);
+            const failure = Option.getOrUndefined(
+              Cause.findErrorOption(exit.cause),
+            );
+            const socketError =
+              failure?._tag === "SocketError" ? failure.reason : undefined;
+            report({
+              event: "retry",
+              reason:
+                socketError?._tag ??
+                (failure?._tag === "HelloTimeoutError"
+                  ? "hello-timeout"
+                  : "unexpected"),
+              closeCode:
+                socketError?._tag === "SocketCloseError"
+                  ? socketError.code
+                  : undefined,
+              attempt: n + 1,
+              delayMs: Duration.toMillis(delay),
+              hadHandshake: delivered,
+            });
+            yield* Effect.sleep(delay);
           }
           return yield* Effect.suspend(() => loop);
         });
