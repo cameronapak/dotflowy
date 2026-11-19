@@ -451,6 +451,30 @@ test("clicking a folded link opens it in a new tab and does NOT reveal/edit", as
   await expect(text(page, "n").locator(".link-reveal")).toBeVisible();
 });
 
+test("a javascript: link folds without an href and never opens", async ({
+  page,
+}) => {
+  await load(page, [
+    {
+      id: "n",
+      parentId: null,
+      prevSiblingId: null,
+      text: "[x](JaVaScRiPt:alert%281%29)",
+    },
+  ]);
+
+  const anchor = text(page, "n").locator("a[data-link]");
+  await expect(anchor).toHaveAttribute("data-unsafe-link", "");
+  await expect(anchor).not.toHaveAttribute("href", /.*/);
+  await anchor.click();
+  expect(await opened(page)).toEqual([]);
+
+  await focusBullet(page, "n");
+  await placeCaret(text(page, "n").locator(".link-label"), 1);
+  await page.keyboard.press("ControlOrMeta+Enter");
+  expect(await opened(page)).toEqual([]);
+});
+
 test("Mod+Enter inside a markdown link opens it instead of completing the node", async ({
   page,
 }) => {

@@ -24,7 +24,7 @@ import {
   parseHighlight,
   type HighlightColor,
 } from "./highlight";
-import { LINK_PATTERN, sanitizeLinkLabel } from "./links";
+import { LINK_PATTERN, safeLinkHref, sanitizeLinkLabel } from "./links";
 import { NODE_LINK_PATTERN, linkTargetId, linkedNodeLabel } from "./node-links";
 import { childrenOf, trueSourceOf, type TreeIndex } from "./tree";
 
@@ -204,7 +204,9 @@ function tokenToHtml(
   if (tok.startsWith("[")) {
     const m = MD_LINK_RE.exec(tok);
     if (!m) return escapeHtml(tok);
-    return `<a href="${escapeHtml(m[2] ?? "")}">${projectText(m[1] ?? "", index, appOrigin, true)}</a>`;
+    const label = projectText(m[1] ?? "", index, appOrigin, true);
+    const href = safeLinkHref(m[2] ?? "");
+    return href ? `<a href="${escapeHtml(href)}">${label}</a>` : label;
   }
   if (tok.startsWith("==")) {
     const { color, interior } = parseHighlight(tok);

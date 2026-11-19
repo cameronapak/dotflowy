@@ -67,6 +67,26 @@ export function isHttpUrl(s: string): boolean {
   return /^https?:\/\//i.test(s.trim());
 }
 
+const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+// Relative urls resolve against the page's own http(s) origin, so parse them
+// against a placeholder https base; only the scheme of the result matters.
+const RELATIVE_LINK_BASE = "https://dotflowy.invalid/";
+
+/** The url when it is safe to use as an `href` or to open, else null. Parses
+ *  with the WHATWG URL parser (the same one the browser applies to `href`), so
+ *  mixed case, leading whitespace, and embedded tabs/newlines can't sneak a
+ *  `javascript:` or `data:` scheme past the http/https/mailto allowlist. */
+export function safeLinkHref(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  try {
+    const { protocol } = new URL(trimmed, RELATIVE_LINK_BASE);
+    return SAFE_LINK_PROTOCOLS.has(protocol) ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
 /** If `s` is exactly one bare http(s) URL (no surrounding whitespace/words),
  *  return it trimmed; otherwise null. Used by paste (wrap a selection, or
  *  auto-link a pasted URL). */
