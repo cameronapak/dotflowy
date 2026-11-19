@@ -10,7 +10,7 @@
     "bootstrap": "bun scripts/bootstrap.ts",
     "dev": "bun scripts/dev.ts",
     "dev:web": "vite dev",
-    "dev:api": "wrangler dev --port 8787",
+    "dev:api": "wrangler dev --port 8787 --local-upstream localhost:8787 --upstream-protocol http",
     "build": "bun scripts/heavy-lane.ts vite build",
     "build:cli": "bun scripts/heavy-lane.ts bun run --cwd cli build",
     "typecheck:cli": "bun scripts/heavy-lane.ts bun run --cwd cli typecheck",

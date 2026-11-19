@@ -211,6 +211,13 @@ The provider's active-token validator checks stored expiry/revocation and the
 MCP audience; proof-bound tokens are not accepted as unbound Bearer tokens.
 The resulting stable user id still passes through `resolveUserId`.
 
+Local `cf:dev` and `dev:api` explicitly use Wrangler's localhost HTTP upstream,
+so both the inferred issuer and browser Origin stay local. The 1.7 MCP provider
+rejects HTTP custom-domain resources at construction; the legacy plugin did not.
+Pinning only the auth base URL cannot fix a separately rewritten Origin. Keep
+production HTTPS validation and CSRF checks unchanged rather than trusting the
+simulated production origin locally.
+
 Explicit consent remains account-bound and required on every authorization.
 The compatibility boundary keeps a short-lived, single-use opaque consent code
 in D1, bound to the server session's user and the provider-signed OAuth query.

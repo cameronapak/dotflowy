@@ -161,20 +161,19 @@ approved owner-only exception; Amp enablement and deployment remain separate.
 
 ### Testing the MCP OAuth flow locally
 
-The MCP endpoint (`/mcp`) is OAuth-gated, and testing it against `wrangler dev`
-has one gotcha: the dev proxy simulates the production custom domain, so it
-rewrites both the inferred issuer **and** the request `Origin` to
-`app.dotflowy.com`. Two local-only vars in `.dev.vars` make the flow work (both
-are documented in `.dev.vars.example`):
+The MCP endpoint (`/mcp`) is OAuth-gated. `bun run cf:dev` and `bun run dev:api`
+keep Wrangler's upstream URL and request `Origin` on localhost, so auth and
+discovery work without a `BETTER_AUTH_URL` override. When invoking Wrangler
+directly, use the same local routing flags:
 
 ```sh
-BETTER_AUTH_URL=http://localhost:8787
-BETTER_AUTH_TRUSTED_ORIGINS=http://app.dotflowy.com,https://app.dotflowy.com
+bunx wrangler dev --port 8787 --local-upstream localhost:8787 --upstream-protocol http
 ```
 
-Without the first, discovery points MCP clients at the prod domain; without the
-second, Better Auth's CSRF check rejects local sign-in with `403 Invalid origin`.
-Neither is needed in prod (there the origin genuinely _is_ the prod domain). See
+Without these flags, Wrangler simulates the production custom domain over HTTP,
+which the MCP provider correctly rejects. Pinning only `BETTER_AUTH_URL` leaves
+the rewritten `Origin` mismatched and can fail the CSRF check. Production still
+requires HTTPS; do not broaden trusted origins to work around local routing. See
 [ADR 0026](./docs/adr/0026-agent-native-mcp-server.md).
 
 ### Testing Stripe billing locally

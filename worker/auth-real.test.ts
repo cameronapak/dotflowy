@@ -24,6 +24,14 @@ beforeAll(async () => {
           const url = new URL(request.url);
           if (url.pathname === "/__fixture/email")
             return Response.json(mail.get(url.searchParams.get("to")) ?? null);
+          if (url.pathname === "/__fixture/unpinned-auth") {
+            try {
+              return createAuth({ ...env, BETTER_AUTH_URL: undefined }, request.headers.get("x-fixture-upstream") ?? url.origin, ctx)
+                .handler(new Request(new URL("/api/auth/get-session", url), request));
+            } catch (error) {
+              return Response.json({ error: error.message }, { status: 400 });
+            }
+          }
           const mode = request.headers.get("x-fixture-signup-mode");
           return createAuth({ ...env,
             EMAIL: { async send(message) { mail.set(message.to, message.text); return { messageId: "fixture-only" }; } },
@@ -139,6 +147,26 @@ beforeAll(async () => {
 afterAll(async () => {
   await mf?.dispose();
   if (directory) await rm(directory, { recursive: true, force: true });
+});
+
+test("unpinned auth accepts local upstream and HTTPS deployments, not HTTP custom domains", async () => {
+  for (const origin of ["http://localhost:8787", "https://app.dotflowy.com"]) {
+    const response = await mf.dispatchFetch(
+      "http://localhost/__fixture/unpinned-auth",
+      { headers: { "x-fixture-upstream": origin } },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toBeNull();
+  }
+  const insecure = await mf.dispatchFetch(
+    "http://localhost/__fixture/unpinned-auth",
+    { headers: { "x-fixture-upstream": "http://app.dotflowy.com" } },
+  );
+  expect(insecure.status).toBe(400);
+  expect(await insecure.json()).toEqual({
+    error:
+      "MCP resource URL must use HTTPS, except for localhost or loopback IP development URLs",
+  });
 });
 
 async function request(
