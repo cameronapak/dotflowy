@@ -85,6 +85,38 @@ test.each([
   ["http://[::ffff:7f00:1]/", false],
   ["http://[::ffff:10.0.0.1]/", false],
   ["http://[::ffff:169.254.169.254]/", false],
+  // IPv6 forms that embed or tunnel to IPv4, and other non-global-unicast v6.
+  ["http://[64:ff9b::7f00:1]/", false], // NAT64 -> 127.0.0.1
+  ["http://[64:ff9b::a9fe:a9fe]/", false], // NAT64 -> 169.254.169.254
+  ["http://[64:ff9b::8.8.8.8]/", false], // NAT64 is denied outright
+  ["http://[2002:7f00:1::]/", false], // 6to4 -> 127.0.0.1
+  ["http://[2002:808:808::1]/", false], // 6to4 is denied outright
+  ["http://[::7f00:1]/", false], // IPv4-compatible -> 127.0.0.1
+  ["http://[::127.0.0.1]/", false],
+  ["http://[::]/", false],
+  ["http://[2001::1]/", false], // Teredo
+  ["http://[2001:db8::1]/", false], // documentation
+  ["http://[ff02::1]/", false], // multicast
+  ["http://[fc00::1]/", false], // ULA
+  ["http://[fec0::1]/", false], // deprecated site-local
+  ["http://[2606:4700:4700::1111]/", true], // global unicast
+  ["http://[2001:4860:4860::8888]/", true],
+  // Names that merely start with v6-looking prefixes are hostnames, not literals.
+  ["https://fcbarcelona.com/", true],
+  ["https://fdic.gov/", true],
+  // Reserved, benchmarking, documentation, multicast, and broadcast IPv4.
+  ["http://198.18.0.1/", false],
+  ["http://198.19.255.255/", false],
+  ["http://192.0.0.1/", false],
+  ["http://192.0.2.1/", false],
+  ["http://198.51.100.1/", false],
+  ["http://203.0.113.1/", false],
+  ["http://224.0.0.1/", false],
+  ["http://240.0.0.1/", false],
+  ["http://255.255.255.255/", false],
+  ["http://0x7f.1/", false], // WHATWG normalizes to 127.0.0.1
+  ["http://8.8.8.8/", true],
+  ["http://[::ffff:198.18.0.1]/", false],
 ])("isAllowedUnfurlTarget(%p) is %p (SSRF guard)", (url, ok) => {
   expect(isAllowedUnfurlTarget(url)).toBe(ok);
 });
