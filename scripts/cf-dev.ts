@@ -61,9 +61,22 @@ if (!ok) {
 
 // 2. wrangler dev (Worker + per-user DO + serves dist/client live).
 log("starting wrangler dev on :8787");
+// Keep URL and Origin local instead of simulating the production custom domain.
 // `--var SENTRY_DSN:` blanks the committed DSN so the local Worker stays silent.
 const wrangler = Bun.spawn(
-  ["bunx", "wrangler", "dev", "--port", "8787", "--var", "SENTRY_DSN:"],
+  [
+    "bunx",
+    "wrangler",
+    "dev",
+    "--port",
+    "8787",
+    "--local-upstream",
+    "localhost:8787",
+    "--upstream-protocol",
+    "http",
+    "--var",
+    "SENTRY_DSN:",
+  ],
   {
     cwd: ROOT,
     stdio: ["inherit", "inherit", "inherit"],

@@ -24,10 +24,18 @@ beforeAll(async () => {
           const url = new URL(request.url);
           if (url.pathname === "/__fixture/email")
             return Response.json(mail.get(url.searchParams.get("to")) ?? null);
+          if (url.pathname === "/__fixture/unpinned-auth") {
+            try {
+              return createAuth({ ...env, BETTER_AUTH_URL: undefined }, request.headers.get("x-fixture-upstream") ?? url.origin, ctx)
+                .handler(new Request(new URL("/api/auth/get-session", url), request));
+            } catch (error) {
+              return Response.json({ error: error.message }, { status: 400 });
+            }
+          }
           const mode = request.headers.get("x-fixture-signup-mode");
           return createAuth({ ...env,
             EMAIL: { async send(message) { mail.set(message.to, message.text); return { messageId: "fixture-only" }; } },
-            SIGNUP_OPEN: mode === "open" ? "true" : mode === "malformed" ? "TRUE" : undefined }, "http://fixture", ctx).handler(request);
+            SIGNUP_OPEN: mode === "open" ? "true" : mode === "malformed" ? "TRUE" : undefined }, "http://localhost", ctx).handler(request);
         } };`,
       resolveDir: process.cwd(),
       loader: "ts",
@@ -64,7 +72,10 @@ beforeAll(async () => {
               type: "text" as const,
               value: "disposable-google-auth-test-secret",
             },
-            BETTER_AUTH_URL: { type: "text" as const, value: "http://fixture" },
+            BETTER_AUTH_URL: {
+              type: "text" as const,
+              value: "http://localhost",
+            },
             GOOGLE_CLIENT_ID: {
               type: "text" as const,
               value: "fixture-client",
@@ -122,6 +133,7 @@ beforeAll(async () => {
   for (const file of [
     "0003_create_auth.sql",
     "0004_create_oauth.sql",
+    "0023_better_auth_1_7.sql",
     "0005_create_waitlist.sql",
     "0006_create_stripe.sql",
     "0007_create_invites.sql",
@@ -137,6 +149,26 @@ afterAll(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
+test("unpinned auth accepts local upstream and HTTPS deployments, not HTTP custom domains", async () => {
+  for (const origin of ["http://localhost:8787", "https://app.dotflowy.com"]) {
+    const response = await mf.dispatchFetch(
+      "http://localhost/__fixture/unpinned-auth",
+      { headers: { "x-fixture-upstream": origin } },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toBeNull();
+  }
+  const insecure = await mf.dispatchFetch(
+    "http://localhost/__fixture/unpinned-auth",
+    { headers: { "x-fixture-upstream": "http://app.dotflowy.com" } },
+  );
+  expect(insecure.status).toBe(400);
+  expect(await insecure.json()).toEqual({
+    error:
+      "MCP resource URL must use HTTPS, except for localhost or loopback IP development URLs",
+  });
+});
+
 async function request(
   mode: string,
   path: string,
@@ -144,12 +176,12 @@ async function request(
   cookie?: string,
 ) {
   const headers = new ProviderHeaders({
-    origin: "http://fixture",
+    origin: "http://localhost",
     "content-type": "application/json",
     "x-fixture-signup-mode": mode,
   });
   if (cookie) headers.set("cookie", cookie);
-  return mf.dispatchFetch(`http://fixture/api/auth${path}`, {
+  return mf.dispatchFetch(`http://localhost/api/auth${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -167,8 +199,8 @@ function cookies(response: Pick<ProviderResponse, "headers">) {
 async function google(mode: string, email: string, requestSignUp = false) {
   const start = await request(mode, "/sign-in/social", {
     provider: "google",
-    callbackURL: "http://fixture/",
-    errorCallbackURL: "http://fixture/",
+    callbackURL: "http://localhost/",
+    errorCallbackURL: "http://localhost/",
     requestSignUp,
   });
   expect(start.status, await start.clone().text()).toBe(200);
@@ -211,11 +243,11 @@ test("gift verification returns to redemption without signing in or allowing an 
   expect(signup.status).toBe(200);
   expect(await session("open", signup)).toBeNull();
   const mail = await mf.dispatchFetch(
-    `http://fixture/__fixture/email?to=${encodeURIComponent(email)}`,
+    `http://localhost/__fixture/email?to=${encodeURIComponent(email)}`,
   );
   const text = Schema.decodeUnknownSync(Schema.String)(await mail.json());
   const link = text.match(
-    /http:\/\/fixture\/api\/auth\/verify-email\?[^\s]+/,
+    /http:\/\/localhost\/api\/auth\/verify-email\?[^\s]+/,
   )?.[0];
   expect(link).toBeDefined();
   expect(new URL(link!).searchParams.get("callbackURL")).toBe("/redeem");
@@ -241,13 +273,13 @@ test("open Google signup creates a verified account and later sign-ins reuse it 
   const email = "new-google@auth.test";
   const created = await google("open", email);
   expect(created.status).toBe(302);
-  expect(created.headers.get("location")).toBe("http://fixture/");
+  expect(created.headers.get("location")).toBe("http://localhost/");
   const first = await session("open", created);
   expect(first?.user).toMatchObject({ email, emailVerified: true });
   expect(first?.user.id).toBeTruthy();
 
   const again = await google("invite", email);
-  expect(again.headers.get("location")).toBe("http://fixture/");
+  expect(again.headers.get("location")).toBe("http://localhost/");
   expect((await session("invite", again))?.user.id).toBe(first!.user.id);
   const db = await mf.getD1Database("DB");
   expect(
@@ -345,7 +377,7 @@ test("Google links only verified matching password accounts, preserving their id
 
     const result = await google("invite", email);
     if (verified) {
-      expect(result.headers.get("location")).toBe("http://fixture/");
+      expect(result.headers.get("location")).toBe("http://localhost/");
       expect((await session("invite", result))?.user.id).toBe(user.id);
       const passwordLogin = await request("invite", "/sign-in/email", {
         email,

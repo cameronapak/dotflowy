@@ -83,7 +83,7 @@ personal API keys can also authenticate MCP, with server-enforced read-only or
 read/write permissions. OAuth discovery and browser-session separation remain.
 The paragraph below records the original OAuth-only decision.
 
-**OAuth: Better Auth's `mcp` plugin, not API keys, not the session cookie.** MCP clients speak OAuth
+**Historical OAuth design (superseded by the 1.7 amendment below): Better Auth's `mcp` plugin, not API keys, not the session cookie.** MCP clients speak OAuth
 2.1 (PKCE + dynamic client registration + RFC 9728 discovery), and Better Auth — already the identity
 layer ([ADR 0011](./0011-the-auth-gate.md)) — ships all of it as the `mcp` plugin: authorization/token/
 registration endpoints under `/api/auth/mcp/*`, tokens in D1 (migration `0004`), `getMcpSession` for
@@ -188,3 +188,76 @@ the daily path when a `date` is given, so for them it is validated and ignored.)
 - The tool registry is compile-time static, like the plugin registry
   ([ADR 0001](./0001-plugin-architecture.md)): adding a tool = one entry in `worker/mcp-tools.ts`
   (schema + handler), and `tools/list` derives itself.
+
+## Better Auth 1.7 migration
+
+The authorization server now uses `@better-auth/mcp`, built on
+`@better-auth/oauth-provider`, with opaque SHA-256-hashed tokens. Migration
+`0023_better_auth_1_7.sql` follows the vendor reset path: remove old OAuth
+verification state, drop the three legacy OAuth tables, and create the 1.7
+client, resource, consent, access-token and refresh-token models. Existing agent
+registrations and credentials are intentionally invalidated; agents reconnect
+once. Users, browser sessions, API keys and outline routing are unaffected.
+
+The one-time reconnect email is an explicit operator action via
+`scripts/reconnect-notice.ts` and admin-only `POST /api/admin/reconnect-notice`
+(non-admins get 404). A private CSV supplies recipients because migration 0023
+removes the legacy source tables. The route validates 1–50 emails, deduplicates,
+defaults to dry-run, and uses the approved fixed copy through `worker/email.ts`.
+Sequential sends are awaited to return per-recipient outcomes rather than
+detached with `ctx.waitUntil`. Neither path logs addresses; dry-run never sends.
+There is no database tracking or automatic retry: operators retry only failures
+from a new CSV and investigate unknown outcomes before resending. Deployment
+never triggers this email. See the operator steps in CONTRIBUTING.md.
+
+Both `/mcp` and `/api/mcp` remain public MCP URLs. Root and path-aware
+`/.well-known/oauth-protected-resource` documents remain available, as does
+`/.well-known/oauth-authorization-server` (including issuer-path discovery).
+The issuer is now the provider's `<origin>/api/auth`; protected-resource metadata
+advertises that issuer. Discovery retains the public `/api/auth/mcp/authorize`,
+`/token`, and `/register` aliases, which dispatch internally to 1.7's
+`/oauth2/*`. Resource requests for the origin or either MCP URL normalize to
+`<origin>/mcp`; unrelated resources are rejected. PKCE remains mandatory.
+The provider's active-token validator checks stored expiry/revocation and the
+MCP audience; proof-bound tokens are not accepted as unbound Bearer tokens.
+The resulting stable user id still passes through `resolveUserId`.
+
+Missing or invalid MCP credentials return HTTP 401 with the existing
+`WWW-Authenticate` resource-metadata challenge and CORS headers. The JSON body
+contains `error: "unauthorized"` and a uniform `error_description` directing
+users to reconnect in their AI app's connector settings or run `dotflowy login`.
+It does not identify reset tokens or return a JSON-RPC success. Clients may
+ignore the description; discovery and reauthorization still use the challenge.
+
+Local `cf:dev` and `dev:api` explicitly use Wrangler's localhost HTTP upstream,
+so both the inferred issuer and browser Origin stay local. The 1.7 MCP provider
+rejects HTTP custom-domain resources at construction; the legacy plugin did not.
+Pinning only the auth base URL cannot fix a separately rewritten Origin. Keep
+production HTTPS validation and CSRF checks unchanged rather than trusting the
+simulated production origin locally.
+
+Explicit consent remains account-bound and required on every authorization.
+The compatibility boundary keeps a short-lived, single-use opaque consent code
+in D1, bound to the server session's user and the provider-signed OAuth query.
+The browser never submits arbitrary redirects, scopes or a raw signed query to
+approve access. Approval forwards the saved query to the official provider,
+then tags the issued authorization code with the current revocation generation.
+
+D1 has no interactive transactions for provider rotation. Rotation uses the
+provider's conditional one-time update, with `refreshTokenReuseInterval: 0`:
+replaying a rotated refresh token invalidates the user's client family, not
+just the old credential. An `mcpGrant` generation and refresh-deletion trigger
+mitigate the provider's documented family-invalidation/rotation insertion window.
+Disconnect increments the generation and deletes access tokens, refresh tokens,
+consents and pending codes in one D1 batch. Token issuance snapshots the
+generation and checks it after insertion; a stale candidate pair is deleted
+before a response is returned. Refresh also invalidates the prior access token.
+The same check prevents an approval or code exchange from restoring a revoked
+grant. Account deletion removes both token models, consent, client-resource
+links, owned clients, grant generations and pending OAuth verification state.
+This is a D1-specific mitigation, not an interactive transaction across provider
+operations. Tests inject revocation during approval, exchange and rotation;
+they do not exhaust all multi-worker interleavings. Revisit this boundary when
+the provider supports atomic family invalidation.
+An already-authorized MCP request may finish when revocation races its execution;
+revocation cannot undo work already accepted by the outline DO.

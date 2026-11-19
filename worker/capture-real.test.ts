@@ -1,5 +1,6 @@
 import { hashPassword } from "better-auth/crypto";
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { Schema } from "effect";
 import { build } from "esbuild";
 import { Miniflare, Response as FixtureResponse } from "miniflare";
 import { createHash, createHmac, randomUUID } from "node:crypto";
@@ -61,7 +62,7 @@ async function fixture<A = unknown>(
 }
 
 async function fixtureResponse<A = unknown>(path: string, input: FixtureInput) {
-  const response = await mf.dispatchFetch(`http://fixture/fixture/${path}`, {
+  const response = await mf.dispatchFetch(`http://localhost/fixture/${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
@@ -73,7 +74,7 @@ async function fixtureResponse<A = unknown>(path: string, input: FixtureInput) {
 async function api(path: string, key: string, body?: typeof CaptureBody.Type) {
   const headers = new Headers({ authorization: `Bearer ${key}` });
   if (body !== undefined) headers.set("content-type", "application/json");
-  const response = await mf.dispatchFetch(`http://fixture${path}`, {
+  const response = await mf.dispatchFetch(`http://localhost${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: Object.fromEntries(headers),
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -182,7 +183,7 @@ beforeAll(async () => {
               type: "text",
               value: "disposable-capture-test-secret-not-for-production",
             },
-            BETTER_AUTH_URL: { type: "text", value: "http://fixture" },
+            BETTER_AUTH_URL: { type: "text", value: "http://localhost" },
             STRIPE_SECRET_KEY: {
               type: "text",
               value: "sk_test_disposable_membership_fixture",
@@ -401,6 +402,7 @@ beforeAll(async () => {
     "0020_feedback_replies.sql",
     "0021_pro_trial_checkout.sql",
     "0022_pro_rewards.sql",
+    "0023_better_auth_1_7.sql",
   ]) {
     const sql = await readFile(`migrations/${migration}`, "utf8");
     await db.exec(sql.replace(/--[^\n]*/g, "").replaceAll("\n", " "));
@@ -428,12 +430,12 @@ test("membership gates theme writes, keeps the launch exception narrow, and scop
       .bind(email, id)
       .run();
     const response = await mf.dispatchFetch(
-      "http://fixture/api/auth/sign-in/email",
+      "http://localhost/api/auth/sign-in/email",
       {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          origin: "http://fixture",
+          origin: "http://localhost",
         },
         body: JSON.stringify({ email, password }),
       },
@@ -619,6 +621,50 @@ test("membership gates theme writes, keeps the launch exception narrow, and scop
   expect((await request(freeCookie, "/api/admin/feedback")).status).toBe(404);
   // The admin capability comes from the session and agrees with enforcement.
   const adminCookie = await signIn("capabilities-admin");
+  type ReconnectFixtureBody = {
+    recipients?: string[];
+    dryRun?: boolean | string;
+  };
+  const reconnect = (
+    cookie: string,
+    body: ReconnectFixtureBody,
+    method = "POST",
+  ) =>
+    mf.dispatchFetch(`${origin}/api/admin/reconnect-notice`, {
+      method,
+      headers: { cookie, "content-type": "application/json", origin },
+      body: method === "POST" ? JSON.stringify(body) : undefined,
+    });
+  for (const cookie of ["", freeCookie]) {
+    expect((await reconnect(cookie, {})).status).toBe(404);
+    expect((await reconnect(cookie, {}, "GET")).status).toBe(404);
+  }
+  expect((await reconnect(adminCookie, {}, "GET")).status).toBe(405);
+  for (const body of [
+    {},
+    { recipients: [] },
+    { recipients: ["invalid"] },
+    {
+      recipients: Array.from(
+        { length: 51 },
+        (_, i) => `recipient${i}@example.test`,
+      ),
+    },
+    { recipients: ["recipient@example.test"], dryRun: "false" },
+  ])
+    expect((await reconnect(adminCookie, body)).status).toBe(400);
+  const preview = await reconnect(adminCookie, {
+    recipients: ["Recipient@example.test", "recipient@example.test"],
+    dryRun: true,
+  });
+  expect(preview.status).toBe(200);
+  expect(await preview.json()).toMatchObject({
+    dryRun: true,
+    results: [{ email: "recipient@example.test", status: "simulated" }],
+    message: {
+      subject: "A quick sign-in refresh for your Dotflowy connections",
+    },
+  });
   expect((await request("", "/api/account-capabilities")).status).toBe(401);
   for (const [cookie, admin] of [
     [freeCookie, false],
@@ -691,7 +737,7 @@ test("only a signed paid checkout queues a welcome, and webhook retries cannot r
       },
     });
   const send = (body: string, secret = webhookSecret) =>
-    mf.dispatchFetch("http://fixture/api/auth/stripe/webhook", {
+    mf.dispatchFetch("http://localhost/api/auth/stripe/webhook", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -773,11 +819,11 @@ test("standalone codes bind atomically to their first redeemer, track private hi
   async function login(id: string = randomUUID()) {
     await fixture("seed", { userId: id, password: hash });
     const response = await mf.dispatchFetch(
-      `http://fixture/api/auth/sign-in/email`,
+      `http://localhost/api/auth/sign-in/email`,
       {
         method: "POST",
         headers: {
-          origin: "http://fixture",
+          origin: "http://localhost",
           "content-type": "application/json",
         },
         body: JSON.stringify({ email: `${id}@capture.test`, password }),
@@ -1076,7 +1122,7 @@ test("standalone codes bind atomically to their first redeemer, track private hi
       successUrl: "/settings",
       cancelUrl: "/settings",
     },
-    "http://fixture",
+    "http://localhost",
   );
   expect(checkout.status, await checkout.clone().text()).toBe(200);
   const giftCheckout = [...trialCheckouts.values()].find(
@@ -1162,7 +1208,7 @@ test("standalone codes bind atomically to their first redeemer, track private hi
           successUrl: "/settings",
           cancelUrl: "/settings",
         },
-        "http://fixture",
+        "http://localhost",
       )
     ).status,
   ).toBe(200);
@@ -1630,10 +1676,13 @@ test("cardless trial setup is explicit, serialized, replayable and follows verif
   const password = "trial-fixture-password";
   await fixture("seed", { userId, password: await hashPassword(password) });
   const login = await mf.dispatchFetch(
-    "http://fixture/api/auth/sign-in/email",
+    "http://localhost/api/auth/sign-in/email",
     {
       method: "POST",
-      headers: { "content-type": "application/json", origin: "http://fixture" },
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost",
+      },
       body: JSON.stringify({ email: `${userId}@capture.test`, password }),
     },
   );
@@ -1706,7 +1755,7 @@ test("cardless trial setup is explicit, serialized, replayable and follows verif
         successUrl: "/settings?checkout=success",
         cancelUrl: "/settings?checkout=canceled",
       },
-      "http://fixture",
+      "http://localhost",
     );
   // A live unused trial reservation excludes ordinary checkout as well as the
   // opposite direction below. Expired and consumed reservations do not.
@@ -1765,7 +1814,7 @@ test("cardless trial setup is explicit, serialized, replayable and follows verif
   ).toBe(403);
   expect(
     (
-      await mf.dispatchFetch(`http://fixture${path}`, {
+      await mf.dispatchFetch(`http://localhost${path}`, {
         method: "POST",
         body: JSON.stringify({ consent: true }),
       })
@@ -1900,7 +1949,7 @@ test("cardless trial setup is explicit, serialized, replayable and follows verif
       created: now,
       data: { object },
     });
-    return mf.dispatchFetch("http://fixture/api/auth/stripe/webhook", {
+    return mf.dispatchFetch("http://localhost/api/auth/stripe/webhook", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -1932,7 +1981,7 @@ test("cardless trial setup is explicit, serialized, replayable and follows verif
   });
   const key = await fixture<Key>("key", { userId, permission: "read" });
   const mcp = () =>
-    mf.dispatchFetch("http://fixture/mcp", {
+    mf.dispatchFetch("http://localhost/mcp", {
       method: "POST",
       headers: {
         authorization: `Bearer ${key.key}`,
@@ -2032,10 +2081,13 @@ test("retained shards stay inert until authenticated account erasure, without af
   const email = `${randomUUID()}@capture.test`;
   const password = "disposable-test-password-1";
   const signup = await mf.dispatchFetch(
-    "http://fixture/api/auth/sign-up/email",
+    "http://localhost/api/auth/sign-up/email",
     {
       method: "POST",
-      headers: { "content-type": "application/json", origin: "http://fixture" },
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost",
+      },
       body: JSON.stringify({ name: "Deletion test", email, password }),
     },
   );
@@ -2052,10 +2104,13 @@ test("retained shards stay inert until authenticated account erasure, without af
     .bind(userId)
     .run();
   const signin = await mf.dispatchFetch(
-    "http://fixture/api/auth/sign-in/email",
+    "http://localhost/api/auth/sign-in/email",
     {
       method: "POST",
-      headers: { "content-type": "application/json", origin: "http://fixture" },
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost",
+      },
       body: JSON.stringify({ email, password }),
     },
   );
@@ -2093,8 +2148,11 @@ test("retained shards stay inert until authenticated account erasure, without af
   }
   const namespace = await mf.getDurableObjectNamespace("SHARD");
   expect(
-    (await namespace.get(namespace.idFromName(userId)).fetch("http://fixture/"))
-      .status,
+    (
+      await namespace
+        .get(namespace.idFromName(userId))
+        .fetch("http://localhost/")
+    ).status,
   ).toBe(404);
   await mf.unsafeEvictDurableObject("capture-test", "ShardDO", {
     name: userId,
@@ -2104,12 +2162,12 @@ test("retained shards stay inert until authenticated account erasure, without af
   ]);
 
   const refused = await mf.dispatchFetch(
-    "http://fixture/api/auth/delete-user",
+    "http://localhost/api/auth/delete-user",
     {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        origin: "http://fixture",
+        origin: "http://localhost",
         cookie,
       },
       body: JSON.stringify({ password: "wrong password" }),
@@ -2120,12 +2178,12 @@ test("retained shards stay inert until authenticated account erasure, without af
     { value: "retain me" },
   ]);
   const deleted = await mf.dispatchFetch(
-    "http://fixture/api/auth/delete-user",
+    "http://localhost/api/auth/delete-user",
     {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        origin: "http://fixture",
+        origin: "http://localhost",
         cookie,
       },
       body: JSON.stringify({ password }),
@@ -2181,7 +2239,7 @@ test("persisted cutover receipts still prevent replacing a recovered outline", a
       "completed-cutover",
     );
     const response = await mf.dispatchFetch(
-      "http://fixture/fixture/restore-snapshot",
+      "http://localhost/fixture/restore-snapshot",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -2209,10 +2267,13 @@ test("HTTP PATCH rejects an invalid batch without partial writes, then clears nu
     throw new Error(`fixture capture failed: ${capture.error}`);
   const { nodeId } = capture.receipt;
   const signin = await mf.dispatchFetch(
-    "http://fixture/api/auth/sign-in/email",
+    "http://localhost/api/auth/sign-in/email",
     {
       method: "POST",
-      headers: { "content-type": "application/json", origin: "http://fixture" },
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost",
+      },
       body: JSON.stringify({ email: `${userId}@capture.test`, password }),
     },
   );
@@ -2222,11 +2283,11 @@ test("HTTP PATCH rejects an invalid batch without partial writes, then clears nu
     .map((value) => value.split(";")[0])
     .join("; ");
   const patch = (updates: unknown[]) =>
-    mf.dispatchFetch("http://fixture/api/nodes", {
+    mf.dispatchFetch("http://localhost/api/nodes", {
       method: "PATCH",
       headers: {
         "content-type": "application/json",
-        origin: "http://fixture",
+        origin: "http://localhost",
         cookie,
       },
       body: JSON.stringify({ updates }),
@@ -2282,12 +2343,12 @@ test("feedback widget config requires the pinned real session, not email, admin 
   for (const userId of ["feedback-owner", "feedback-other"]) {
     await fixture("seed", { userId, password: await hashPassword(password) });
     const signin = await mf.dispatchFetch(
-      "http://fixture/api/auth/sign-in/email",
+      "http://localhost/api/auth/sign-in/email",
       {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          origin: "http://fixture",
+          origin: "http://localhost",
         },
         body: JSON.stringify({ email: `${userId}@capture.test`, password }),
       },
@@ -2302,13 +2363,13 @@ test("feedback widget config requires the pinned real session, not email, admin 
   }
   const request = (cookie = "", method = "GET") =>
     mf.dispatchFetch(
-      "http://fixture/api/feedback-widget?userId=feedback-owner",
+      "http://localhost/api/feedback-widget?userId=feedback-owner",
       {
         method,
         headers: {
           cookie,
           "x-user-id": "feedback-owner",
-          origin: "http://fixture",
+          origin: "http://localhost",
         },
       },
     );
@@ -2328,15 +2389,18 @@ test("feedback widget config requires the pinned real session, not email, admin 
   const wrongMethod = await request(cookies[0], "POST");
   expect(wrongMethod.status).toBe(405);
   expect(wrongMethod.headers.get("allow")).toBe("GET");
-  const signedOut = await mf.dispatchFetch("http://fixture/api/auth/sign-out", {
-    method: "POST",
-    headers: {
-      cookie: cookies[0],
-      origin: "http://fixture",
-      "content-type": "application/json",
+  const signedOut = await mf.dispatchFetch(
+    "http://localhost/api/auth/sign-out",
+    {
+      method: "POST",
+      headers: {
+        cookie: cookies[0],
+        origin: "http://localhost",
+        "content-type": "application/json",
+      },
+      body: "{}",
     },
-    body: "{}",
-  });
+  );
   expect(signedOut.status).toBe(200);
   expect((await request(cookies[0])).status).toBe(404);
 });
@@ -2866,10 +2930,10 @@ test("real password change and reset revoke keys; sign-out does not", async () =
   const auth = (path: string, body: AuthBody, cookie?: string) => {
     const headers = new Headers({
       "content-type": "application/json",
-      origin: "http://fixture",
+      origin: "http://localhost",
     });
     if (cookie) headers.set("cookie", cookie);
-    return mf.dispatchFetch(`http://fixture/api/auth/${path}`, {
+    return mf.dispatchFetch(`http://localhost/api/auth/${path}`, {
       method: "POST",
       headers: Object.fromEntries(headers),
       body: JSON.stringify(body),
@@ -2899,11 +2963,11 @@ test("real password change and reset revoke keys; sign-out does not", async () =
     .map((value) => value.split(";")[0])
     .join("; ");
   const beforeCreation = Date.now();
-  const created = await mf.dispatchFetch("http://fixture/api/keys", {
+  const created = await mf.dispatchFetch("http://localhost/api/keys", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      origin: "http://fixture",
+      origin: "http://localhost",
       cookie,
     },
     // Omitting expiry exercises the canonical route's secure default.
@@ -2917,7 +2981,7 @@ test("real password change and reset revoke keys; sign-out does not", async () =
     beforeCreation + 30 * 86400000,
   );
   expect(first.entry.expiresAt).toBeLessThanOrEqual(Date.now() + 30 * 86400000);
-  const handshake = await mf.dispatchFetch("http://fixture/mcp", {
+  const handshake = await mf.dispatchFetch("http://localhost/mcp", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -2936,9 +3000,9 @@ test("real password change and reset revoke keys; sign-out does not", async () =
   const rotate = (
     body: RotationRequest,
     path = "/api/keys",
-    origin = "http://fixture",
+    origin = "http://localhost",
   ) =>
-    mf.dispatchFetch(`http://fixture${path}`, {
+    mf.dispatchFetch(`http://localhost${path}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", origin, cookie },
       body: JSON.stringify(body),
@@ -2995,11 +3059,11 @@ test("real password change and reset revoke keys; sign-out does not", async () =
       authorization: `Bearer ${rotated.key}`,
     }),
   ).toEqual({ authenticated: true });
-  const deniedRotation = await mf.dispatchFetch("http://fixture/api/keys", {
+  const deniedRotation = await mf.dispatchFetch("http://localhost/api/keys", {
     method: "PATCH",
     headers: {
       "content-type": "application/json",
-      origin: "http://fixture",
+      origin: "http://localhost",
       authorization: `Bearer ${rotated.key}`,
     },
     body: JSON.stringify({ id: rotated.entry.id }),
@@ -3021,7 +3085,7 @@ test("real password change and reset revoke keys; sign-out does not", async () =
       authorization: `Bearer ${first.key}`,
     }),
   ).toEqual({ authenticated: true });
-  const listing = await mf.dispatchFetch("http://fixture/api/keys", {
+  const listing = await mf.dispatchFetch("http://localhost/api/keys", {
     headers: { cookie },
   });
   expect(listing.status).toBe(200);
@@ -3065,7 +3129,7 @@ test("real password change and reset revoke keys; sign-out does not", async () =
   ).toEqual({ authenticated: true });
   const requested = await auth("request-password-reset", {
     email,
-    redirectTo: "http://fixture/reset-password",
+    redirectTo: "http://localhost/reset-password",
   });
   expect(requested.status, await requested.clone().text()).toBe(200);
   const token = await db
@@ -3160,25 +3224,65 @@ test("invalid capture input creates no nodes; key management enforces origin and
 
 test("OAuth discovery, explicit account-bound consent, refresh rotation and isolated revocation", async () => {
   const db = await mf.getD1Database("DB");
-  const origin = "http://fixture";
+  const origin = "http://localhost";
   for (const path of ["/mcp", "/api/mcp"]) {
-    const denied = await mf.dispatchFetch(`${origin}${path}`, {
-      method: "POST",
-    });
-    expect(denied.status).toBe(401);
-    const metadataUrl = denied.headers
-      .get("www-authenticate")!
-      .match(/resource_metadata="([^"]+)"/)![1]!;
-    expect(await (await mf.dispatchFetch(metadataUrl)).json()).toMatchObject({
-      resource: `${origin}${path}`,
-      authorization_servers: [origin],
-    });
+    for (const authorization of [
+      undefined,
+      "Bearer invalid-oauth-token",
+      "Bearer dfk_invalid",
+    ]) {
+      const denied = await mf.dispatchFetch(`${origin}${path}`, {
+        method: "POST",
+        headers: authorization ? { authorization } : {},
+      });
+      expect(denied.status).toBe(401);
+      expect(await denied.json()).toEqual({
+        error: "unauthorized",
+        error_description:
+          "Your Dotflowy connection needs to be reconnected. Sign in again from your AI app's connector settings, or run `dotflowy login` for the CLI.",
+      });
+      expect(denied.headers.get("content-type")).toBe("application/json");
+      expect(denied.headers.get("access-control-allow-origin")).toBe("*");
+      expect(denied.headers.get("access-control-expose-headers")).toBe(
+        "WWW-Authenticate",
+      );
+      const metadataUrl = denied.headers
+        .get("www-authenticate")!
+        .match(/resource_metadata="([^"]+)"/)![1]!;
+      expect(new URL(metadataUrl).pathname).toBe(
+        `/.well-known/oauth-protected-resource${path}`,
+      );
+      expect(denied.headers.get("www-authenticate")).toBe(
+        `Bearer resource_metadata="${metadataUrl}"`,
+      );
+      expect(await (await mf.dispatchFetch(metadataUrl)).json()).toMatchObject({
+        resource: `${origin}${path}`,
+        authorization_servers: [`${origin}/api/auth`],
+      });
+    }
   }
   expect(
     await (
       await mf.dispatchFetch(`${origin}/.well-known/oauth-protected-resource`)
     ).json(),
   ).toMatchObject({ resource: `${origin}/mcp` });
+  expect(
+    (
+      await mf.dispatchFetch(
+        `${origin}/.well-known/oauth-protected-resource/mcp`,
+        { method: "HEAD" },
+      )
+    ).status,
+  ).toBe(200);
+  const discovery = await (
+    await mf.dispatchFetch(`${origin}/.well-known/oauth-authorization-server`)
+  ).json();
+  expect(discovery).toMatchObject({
+    issuer: `${origin}/api/auth`,
+    authorization_endpoint: `${origin}/api/auth/mcp/authorize`,
+    token_endpoint: `${origin}/api/auth/mcp/token`,
+    registration_endpoint: `${origin}/api/auth/mcp/register`,
+  });
   const cookies: [string, string] = ["", ""];
   const users = [];
   for (let i = 0; i < 2; i++) {
@@ -3210,9 +3314,28 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
       client_name: "Local OAuth reviewer",
       redirect_uris: ["https://client.example/callback?existing=1"],
       token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code", "refresh_token"],
     }),
   });
   expect(register.status).toBe(201);
+  for (const [redirect, status] of [
+    ["http://127.0.0.1:8765/callback", 201],
+    ["http://untrusted.example/callback", 400],
+  ] as const) {
+    const native = await mf.dispatchFetch(`${origin}/api/auth/mcp/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        client_name: "Loopback CLI",
+        redirect_uris: [redirect],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+      }),
+    });
+    expect(native.status).toBe(status);
+    if (native.ok)
+      expect(await native.json()).toMatchObject({ application_type: "native" });
+  }
   // SAFETY: This successful DCR response is produced by the real provider; its client id is used in the exercised authorization flow.
   const client = (await register.json()) as { client_id: string };
   const verifier = "disposable-oauth-verifier-012345678901234567890123456789";
@@ -3257,6 +3380,7 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
     const location = new URL(response.headers.get("location")!, origin);
     expect(location.pathname).toBe("/mcp-consent");
     expect(location.searchParams.has("code")).toBe(false);
+    expect(location.searchParams.get("consent_code")).toBeTruthy();
     return location.searchParams.get("consent_code")!;
   };
   const decide = (
@@ -3361,6 +3485,17 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
     };
   };
   const first = await issue();
+  const stored = await db
+    .prepare("SELECT token FROM oauthAccessToken WHERE token = ?")
+    .bind(createHash("sha256").update(first.access_token).digest("base64url"))
+    .first();
+  expect(stored).not.toBeNull();
+  expect(
+    await db
+      .prepare("SELECT token FROM oauthAccessToken WHERE token = ?")
+      .bind(first.access_token)
+      .first(),
+  ).toBeNull();
   const unapproved = await authorize();
   for (const credentials of [
     {
@@ -3408,7 +3543,7 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
       })
     ).status,
   ).not.toBe(200);
-  expect((await mcp(current.access_token)).status).toBe(200);
+  expect((await mcp(current.access_token)).status).toBe(401);
   const racing = await issue();
   const competitors = await Promise.all(
     [0, 1].map(() =>
@@ -3421,6 +3556,57 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
   expect(
     competitors.filter((response) => response.status === 200),
   ).toHaveLength(1);
+  expect((await mcp(racing.access_token)).status).toBe(401);
+  await tokenRequest({
+    grant_type: "refresh_token",
+    refresh_token: racing.refresh_token,
+  });
+  for (const response of competitors) {
+    if (response.ok) {
+      const pair = Schema.decodeUnknownSync(
+        Schema.Struct({
+          access_token: Schema.String,
+          refresh_token: Schema.String,
+        }),
+      )(await response.json());
+      expect((await mcp(pair.access_token)).status).toBe(401);
+      expect(
+        (
+          await tokenRequest({
+            grant_type: "refresh_token",
+            refresh_token: pair.refresh_token,
+          })
+        ).status,
+      ).not.toBe(200);
+    }
+  }
+  const interruptedRotation = await issue();
+  await db
+    .prepare(`CREATE TRIGGER revoke_during_rotation BEFORE INSERT ON oauthRefreshToken
+    WHEN NEW.userId = '${users[0]}' AND NEW.clientId = '${client.client_id}' BEGIN
+      DELETE FROM oauthAccessToken WHERE userId = NEW.userId AND clientId = NEW.clientId;
+      DELETE FROM oauthRefreshToken WHERE userId = NEW.userId AND clientId = NEW.clientId;
+      DELETE FROM oauthConsent WHERE userId = NEW.userId AND clientId = NEW.clientId;
+    END`)
+    .run();
+  try {
+    const interrupted = await tokenRequest({
+      grant_type: "refresh_token",
+      refresh_token: interruptedRotation.refresh_token,
+    });
+    expect(interrupted.status).not.toBe(200);
+    expect(
+      await db
+        .prepare(
+          "SELECT id FROM oauthRefreshToken WHERE userId = ? AND clientId = ?",
+        )
+        .bind(users[0], client.client_id)
+        .all(),
+    ).toMatchObject({ results: [] });
+  } finally {
+    await db.exec("DROP TRIGGER revoke_during_rotation");
+  }
+  await issue();
   const inFlight = await authorize();
   const workerOrigin = (await mf.ready).origin;
   const revoke = (cookie: string, requestOrigin = workerOrigin) =>
@@ -3442,6 +3628,19 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
   });
   const revoked = await revoke(cookies[0]);
   expect(revoked.status, await revoked.text()).toBe(200);
+  expect(
+    (
+      await mf.dispatchFetch(`${origin}/api/mcp-connections`, {
+        method: "DELETE",
+        headers: {
+          cookie: cookies[0],
+          origin: workerOrigin,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ clientId: "unknown-client" }),
+      })
+    ).status,
+  ).toBe(200);
   expect((await mcp(current.access_token)).status).toBe(401);
   expect(
     (
@@ -3460,48 +3659,26 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
       })
     ).status,
   ).toBe(401);
-  // Legacy credentials still work and refresh without retroactive consent.
-  await db
-    .prepare(
-      "INSERT INTO oauthAccessToken (id,accessToken,refreshToken,accessTokenExpiresAt,refreshTokenExpiresAt,clientId,userId,scopes,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?)",
-    )
-    .bind(
-      randomUUID(),
-      "legacy-oauth-fixture",
-      "legacy-refresh-fixture",
-      Date.now() + 60000,
-      Date.now() + 60000,
-      client.client_id,
-      users[0],
-      "openid offline_access",
-      Date.now(),
-      Date.now(),
-    )
-    .run();
-  expect((await mcp("legacy-oauth-fixture")).status).toBe(200);
-  const legacyRefreshed = await tokenRequest({
-    grant_type: "refresh_token",
-    refresh_token: "legacy-refresh-fixture",
-  });
-  expect(legacyRefreshed.status).toBe(200);
-  // SAFETY: The provider's successful refresh response is exercised as an MCP bearer below.
-  const legacyCurrent = (await legacyRefreshed.json()) as {
-    access_token: string;
-  };
-  expect((await mcp(legacyCurrent.access_token)).status).toBe(200);
+  // The 1.7 reset intentionally invalidates old credentials; agents reconnect.
   expect((await mcp("legacy-oauth-fixture")).status).toBe(401);
-  expect((await revoke(cookies[0])).status).toBe(200);
-  expect((await mcp(legacyCurrent.access_token)).status).toBe(401);
+  expect(
+    (
+      await tokenRequest({
+        grant_type: "refresh_token",
+        refresh_token: "legacy-refresh-fixture",
+      })
+    ).status,
+  ).not.toBe(200);
 
   // Revoke after the approval reads pending state but before its write. The
   // provider must not restore consent after that pending state is deleted.
   const staleConsent = await authorize();
   await db
-    .prepare(`CREATE TRIGGER revoke_during_approval BEFORE UPDATE ON verification
+    .prepare(`CREATE TRIGGER revoke_during_approval BEFORE DELETE ON verification
     WHEN OLD.identifier = '${staleConsent}' BEGIN
       DELETE FROM oauthAccessToken WHERE userId = json_extract(OLD.value, '$.userId') AND clientId = json_extract(OLD.value, '$.clientId');
       DELETE FROM oauthConsent WHERE userId = json_extract(OLD.value, '$.userId') AND clientId = json_extract(OLD.value, '$.clientId');
-      DELETE FROM verification WHERE identifier = OLD.identifier;
+      UPDATE mcpGrant SET epoch = epoch + 1 WHERE userId = json_extract(OLD.value, '$.userId') AND clientId = json_extract(OLD.value, '$.clientId');
     END`)
     .run();
   try {
@@ -3554,19 +3731,21 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
       headers: { cookie: cookies[1] },
     });
   await db
-    .prepare(
-      "UPDATE oauthAccessToken SET accessTokenExpiresAt = ? WHERE accessToken = ?",
+    .prepare("UPDATE oauthAccessToken SET expiresAt = ? WHERE token = ?")
+    .bind(
+      "2000-01-01T00:00:00.000Z",
+      createHash("sha256").update(otherUser.access_token).digest("base64url"),
     )
-    .bind("2000-01-01T00:00:00.000Z", otherUser.access_token)
     .run();
   expect(await (await otherConnections()).json()).toEqual({
     connections: [{ clientId: client.client_id, name: "Local OAuth reviewer" }],
   });
   await db
-    .prepare(
-      "UPDATE oauthAccessToken SET refreshTokenExpiresAt = ? WHERE accessToken = ?",
+    .prepare("UPDATE oauthRefreshToken SET expiresAt = ? WHERE token = ?")
+    .bind(
+      "2000-01-01T00:00:00.000Z",
+      createHash("sha256").update(otherUser.refresh_token).digest("base64url"),
     )
-    .bind("2000-01-01T00:00:00.000Z", otherUser.access_token)
     .run();
   expect(await (await otherConnections()).json()).toEqual({ connections: [] });
 });
@@ -3586,7 +3765,7 @@ test("API keys enforce MCP permissions, plan gates, capture scope, and live revo
     params: { name?: string; arguments?: Record<string, string> } = {},
     path = "/mcp",
   ) => {
-    const response = await mf.dispatchFetch(`http://fixture${path}`, {
+    const response = await mf.dispatchFetch(`http://localhost${path}`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${key}`,
@@ -3726,10 +3905,13 @@ test("share target: launch hands text over without saving; Add to Today is sessi
   const userId = `share-${randomUUID()}`;
   await fixture("seed", { userId, password: await hashPassword(password) });
   const signin = await mf.dispatchFetch(
-    "http://fixture/api/auth/sign-in/email",
+    "http://localhost/api/auth/sign-in/email",
     {
       method: "POST",
-      headers: { "content-type": "application/json", origin: "http://fixture" },
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost",
+      },
       body: JSON.stringify({ email: `${userId}@capture.test`, password }),
     },
   );
@@ -3746,11 +3928,11 @@ test("share target: launch hands text over without saving; Add to Today is sessi
     headers: Record<string, string>,
     form = new FormData(),
   ) => {
-    const encoded = new Request("http://fixture/share", {
+    const encoded = new Request("http://localhost/share", {
       method: "POST",
       body: form,
     });
-    return mf.dispatchFetch("http://fixture/share", {
+    return mf.dispatchFetch("http://localhost/share", {
       method: "POST",
       headers: {
         cookie,
@@ -3778,7 +3960,7 @@ test("share target: launch hands text over without saving; Add to Today is sessi
     (
       await launch({
         "sec-fetch-site": "same-origin",
-        origin: "http://fixture",
+        origin: "http://localhost",
       })
     ).headers.get("location"),
   ).toBe("/share#");
@@ -3812,7 +3994,7 @@ test("share target: launch hands text over without saving; Add to Today is sessi
     headers: Record<string, string>,
     body: typeof CaptureBody.Type,
   ) =>
-    mf.dispatchFetch("http://fixture/api/share", {
+    mf.dispatchFetch("http://localhost/api/share", {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
@@ -3826,21 +4008,24 @@ test("share target: launch hands text over without saving; Add to Today is sessi
   expect(
     (
       await add(
-        { authorization: `Bearer ${key}`, origin: "http://fixture" },
+        { authorization: `Bearer ${key}`, origin: "http://localhost" },
         payload,
       )
     ).status,
   ).toBe(401);
   expect((await api("/api/capture", "", payload)).response.status).toBe(401);
-  const cookieOnCapture = await mf.dispatchFetch("http://fixture/api/capture", {
-    method: "POST",
-    headers: {
-      cookie,
-      origin: "http://fixture",
-      "content-type": "application/json",
+  const cookieOnCapture = await mf.dispatchFetch(
+    "http://localhost/api/capture",
+    {
+      method: "POST",
+      headers: {
+        cookie,
+        origin: "http://localhost",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
     },
-    body: JSON.stringify(payload),
-  });
+  );
   expect(cookieOnCapture.status).toBe(401);
   // The session still needs this server's Origin.
   const foreign = await add({ cookie, origin: "https://evil.test" }, payload);
@@ -3849,7 +4034,7 @@ test("share target: launch hands text over without saving; Add to Today is sessi
     (await fixture<Inspection>("inspect", { userId })).snapshot.nodes,
   ).toEqual([]);
 
-  const saved = await add({ cookie, origin: "http://fixture" }, payload);
+  const saved = await add({ cookie, origin: "http://localhost" }, payload);
   expect(saved.status).toBe(200);
   // SAFETY: a 200 from /api/share is the capture receipt (worker/capture.ts).
   const receipt = (await saved.json()) as CaptureReceipt & {
@@ -3860,7 +4045,7 @@ test("share target: launch hands text over without saving; Add to Today is sessi
     date: "2026-11-13",
     replayed: false,
   });
-  const replay = await add({ cookie, origin: "http://fixture" }, payload);
+  const replay = await add({ cookie, origin: "http://localhost" }, payload);
   expect(await replay.json()).toEqual({ ...receipt, replayed: true });
   const { snapshot } = await fixture<Inspection>("inspect", { userId });
   const task = snapshot.nodes.find((node) => node.id === receipt.nodeId)!;

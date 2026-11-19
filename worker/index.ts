@@ -25,8 +25,12 @@
  * unambiguous 500s without collapsing known validation errors into the same bucket.
  */
 
+import {
+  oauthProviderAuthServerMetadata,
+  type AuthServerMetadata,
+  type ResourceServerMetadata,
+} from "@better-auth/oauth-provider";
 import * as Sentry from "@sentry/cloudflare";
-import { oAuthDiscoveryMetadata } from "better-auth/plugins";
 import { Data, Effect, Schema } from "effect";
 
 import type { KvClaim, WeekStartMigrationResult } from "./outline-do";
@@ -74,12 +78,14 @@ import {
 } from "./invites";
 import { handleMcp, mcpCorsPreflight } from "./mcp";
 import { handleMcpConnections, readMcpConsent } from "./mcp-oauth";
+import { handleMcpAuthRequest } from "./mcp-provider";
 import { acknowledgeWelcome, canSaveTheme, readMembership } from "./membership";
 import { legacyNumberedNode } from "./numbered-compat";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { handleRewards } from "./pro-reward";
 import { trialCheckout } from "./pro-trial";
+import { ReconnectNoticeBody, runReconnectNotice } from "./reconnect-notice";
 import { resolveRestorePoint } from "./restore";
 import { workerSentryOptions } from "./sentry";
 import { isHttpUrlString, rateLimitedTitleE, unfurlTitleE } from "./unfurl";
@@ -901,7 +907,9 @@ function handleApiRequest(
     // Better Auth owns everything under /api/auth/* (sign-up/in/out, session,
     // and — via the mcp plugin — the OAuth authorize/token/register endpoints).
     if (url.pathname.startsWith("/api/auth/")) {
-      return yield* Effect.promise(() => auth.handler(request));
+      return yield* Effect.promise(() =>
+        handleMcpAuthRequest(auth, request, env.DB),
+      );
     }
 
     // Public signup config (#293): the SPA reads whether signup is OPEN (hide
@@ -984,6 +992,29 @@ function handleApiRequest(
       return json(
         yield* Effect.promise(() => runInviteBatch(env, body, url.origin)),
       );
+    }
+
+    if (url.pathname === "/api/admin/reconnect-notice") {
+      const session = yield* Effect.promise(() =>
+        auth.api.getSession({ headers: request.headers }),
+      );
+      if (!isAdminSession(session, env)) {
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      }
+      if (request.method !== "POST") {
+        return json({ error: "method not allowed" }, 405);
+      }
+      if (
+        request.headers.get("content-type")?.split(";")[0]?.trim() !==
+          "application/json" ||
+        (request.headers.get("origin") &&
+          request.headers.get("origin") !== url.origin)
+      ) {
+        return json({ error: "invalid origin or content type" }, 403);
+      }
+      const body = yield* decodeBody(request, ReconnectNoticeBody);
+      // Await the sequential batch so the operator receives every send outcome.
+      return json(yield* Effect.promise(() => runReconnectNotice(env, body)));
     }
 
     // Admin-only: email the launch "Dotflowy is open" blast to the waitlist
@@ -1166,15 +1197,22 @@ function handleApiRequest(
       if (!token?.userId) {
         // RFC 9728: point the client at the protected-resource metadata so it
         // can discover the authorization server and start the OAuth flow.
-        return new Response(JSON.stringify({ error: "unauthorized" }), {
-          status: 401,
-          headers: {
-            "content-type": "application/json",
-            "www-authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource${url.pathname}"`,
-            "access-control-allow-origin": "*",
-            "access-control-expose-headers": "WWW-Authenticate",
+        return new Response(
+          JSON.stringify({
+            error: "unauthorized",
+            error_description:
+              "Your Dotflowy connection needs to be reconnected. Sign in again from your AI app's connector settings, or run `dotflowy login` for the CLI.",
+          }),
+          {
+            status: 401,
+            headers: {
+              "content-type": "application/json",
+              "www-authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource${url.pathname}"`,
+              "access-control-allow-origin": "*",
+              "access-control-expose-headers": "WWW-Authenticate",
+            },
           },
-        });
+        );
       }
       // MCP (agent access) is a paid capability (#152/#170). Resolve the plan
       // from the token's `userId` — the Better Auth id the subscription table is
@@ -1548,7 +1586,20 @@ const handler = {
     // Keep the root discovery URL for existing connectors, plus path-aware
     // documents whose resource exactly matches the canonical endpoint or alias.
     if (url.pathname.startsWith("/.well-known/oauth-authorization-server")) {
-      return oAuthDiscoveryMetadata(createAuth(env, url.origin))(request);
+      const response = await oauthProviderAuthServerMetadata(
+        createAuth(env, url.origin),
+      )(request);
+      const metadata = await response.json<AuthServerMetadata>();
+      const origin = new URL(env.BETTER_AUTH_URL ?? url.origin).origin;
+      return Response.json(
+        {
+          ...metadata,
+          authorization_endpoint: `${origin}/api/auth/mcp/authorize`,
+          token_endpoint: `${origin}/api/auth/mcp/token`,
+          registration_endpoint: `${origin}/api/auth/mcp/register`,
+        },
+        { headers: response.headers },
+      );
     }
     if (url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
       const suffix = url.pathname.slice(
@@ -1556,10 +1607,18 @@ const handler = {
       );
       if (!["", "/mcp", "/api/mcp"].includes(suffix))
         return new Response(null, { status: 404 });
-      const metadata = await createAuth(
-        env,
-        url.origin,
-      ).api.getMCPProtectedResource({ request, asResponse: false });
+      if (!["GET", "HEAD"].includes(request.method))
+        return new Response(null, {
+          status: 405,
+          headers: { allow: "GET, HEAD" },
+        });
+      const response = await createAuth(env, url.origin).handler(
+        new Request(new URL("/.well-known/oauth-protected-resource", url), {
+          method: "GET",
+          headers: request.headers,
+        }),
+      );
+      const metadata = await response.json<ResourceServerMetadata>();
       return Response.json(
         {
           ...metadata,

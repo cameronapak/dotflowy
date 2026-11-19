@@ -9,8 +9,10 @@
  * MCP tool calls also require a paid plan locally — run `bun run comp:dev-plan`
  * once per D1 reset before exercising writes.
  *
- * Requires `bun run dev` / `bun run dev:api` and `bun run seed:user`.
+ * Requires `bun run cf:dev` and `bun run seed:user`.
  */
+import { Schema } from "effect";
+
 const API = "http://localhost:8787";
 const AUTH = `${API}/api/auth`;
 const EMAIL = "dev@dotflowy.local";
@@ -19,15 +21,19 @@ const ORIGIN = "http://localhost:8787";
 /** Loopback redirect the authorize step can target without a listener. */
 const REDIRECT_URI = "http://127.0.0.1:8765/callback";
 
-type SignInBody = { user?: { id?: string; email?: string } };
-type RegisterBody = { client_id?: string; error?: string };
-type TokenBody = {
-  access_token?: string;
-  token_type?: string;
-  expires_in?: number;
-  error?: string;
-  error_description?: string;
-};
+const SignInBody = Schema.Struct({
+  user: Schema.Struct({ id: Schema.String }),
+});
+const RegisterBody = Schema.Struct({
+  client_id: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(Schema.String),
+});
+const TokenBody = Schema.Struct({
+  access_token: Schema.optionalKey(Schema.String),
+  expires_in: Schema.optionalKey(Schema.Number),
+  error: Schema.optionalKey(Schema.String),
+  error_description: Schema.optionalKey(Schema.String),
+});
 
 function randomVerifier(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -68,7 +74,7 @@ async function signIn(): Promise<{ cookie: string; userId: string }> {
       `sign-in failed (${res.status}): ${text}. Run \`bun run seed:user\` first.`,
     );
   }
-  const body = (await res.json()) as SignInBody;
+  const body = Schema.decodeUnknownSync(SignInBody)(await res.json());
   const userId = body.user?.id;
   if (!userId) throw new Error("sign-in succeeded but user id missing");
   return { cookie: sessionCookie(res), userId };
@@ -90,7 +96,7 @@ async function registerClient(cookie: string): Promise<string> {
       response_types: ["code"],
     }),
   });
-  const body = (await res.json()) as RegisterBody;
+  const body = Schema.decodeUnknownSync(RegisterBody)(await res.json());
   if (!res.ok || !body.client_id) {
     throw new Error(
       `client registration failed (${res.status}): ${JSON.stringify(body)}`,
@@ -122,16 +128,26 @@ async function authorizeCode(
       `authorize failed (status ${res.status}, location ${location ?? "none"})`,
     );
   }
-  const code = new URL(location).searchParams.get("code");
+  const pending = new URL(location, API).searchParams.get("consent_code");
+  if (!pending) throw new Error("authorize redirect missing consent request");
+  const consent = await fetch(`${AUTH}/oauth2/consent`, {
+    method: "POST",
+    headers: { cookie, origin: ORIGIN, "content-type": "application/json" },
+    body: JSON.stringify({ consent_code: pending, accept: true }),
+  });
+  const approved = Schema.decodeUnknownSync(
+    Schema.Struct({
+      redirectURI: Schema.optionalKey(Schema.String),
+    }),
+  )(await consent.json());
+  if (!consent.ok || !approved.redirectURI)
+    throw new Error(`consent failed (${consent.status})`);
+  const code = new URL(approved.redirectURI).searchParams.get("code");
   if (!code) throw new Error(`authorize redirect missing code: ${location}`);
   return code;
 }
 
-async function exchangeToken(
-  clientId: string,
-  code: string,
-  verifier: string,
-): Promise<TokenBody> {
+async function exchangeToken(clientId: string, code: string, verifier: string) {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
@@ -147,7 +163,7 @@ async function exchangeToken(
     },
     body,
   });
-  const json = (await res.json()) as TokenBody;
+  const json = Schema.decodeUnknownSync(TokenBody)(await res.json());
   if (!res.ok || !json.access_token) {
     throw new Error(
       `token exchange failed (${res.status}): ${JSON.stringify(json)}`,
@@ -160,7 +176,9 @@ async function main(): Promise<void> {
   try {
     await fetch(`${API}/api/auth/ok`);
   } catch {
-    console.error(`Worker not reachable at ${API}. Run \`bun run dev\` first.`);
+    console.error(
+      `Worker not reachable at ${API}. Run \`bun run cf:dev\` first.`,
+    );
     process.exit(1);
   }
 

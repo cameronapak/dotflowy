@@ -161,20 +161,19 @@ approved owner-only exception; Amp enablement and deployment remain separate.
 
 ### Testing the MCP OAuth flow locally
 
-The MCP endpoint (`/mcp`) is OAuth-gated, and testing it against `wrangler dev`
-has one gotcha: the dev proxy simulates the production custom domain, so it
-rewrites both the inferred issuer **and** the request `Origin` to
-`app.dotflowy.com`. Two local-only vars in `.dev.vars` make the flow work (both
-are documented in `.dev.vars.example`):
+The MCP endpoint (`/mcp`) is OAuth-gated. `bun run cf:dev` and `bun run dev:api`
+keep Wrangler's upstream URL and request `Origin` on localhost, so auth and
+discovery work without a `BETTER_AUTH_URL` override. When invoking Wrangler
+directly, use the same local routing flags:
 
 ```sh
-BETTER_AUTH_URL=http://localhost:8787
-BETTER_AUTH_TRUSTED_ORIGINS=http://app.dotflowy.com,https://app.dotflowy.com
+bunx wrangler dev --port 8787 --local-upstream localhost:8787 --upstream-protocol http
 ```
 
-Without the first, discovery points MCP clients at the prod domain; without the
-second, Better Auth's CSRF check rejects local sign-in with `403 Invalid origin`.
-Neither is needed in prod (there the origin genuinely _is_ the prod domain). See
+Without these flags, Wrangler simulates the production custom domain over HTTP,
+which the MCP provider correctly rejects. Pinning only `BETTER_AUTH_URL` leaves
+the rewritten `Origin` mismatched and can fail the CSRF check. Production still
+requires HTTPS; do not broaden trusted origins to work around local routing. See
 [ADR 0026](./docs/adr/0026-agent-native-mcp-server.md).
 
 ### Testing Stripe billing locally
@@ -270,6 +269,35 @@ unexpired `pro_reward` gifts. Free is neither an entitled subscription nor a
 current gift. An operator-comped user is a hand-inserted active row with no Stripe ids.
 Keep the founding seat cap in `getCheckoutSessionParams` at checkout-creation
 time. Webhooks and `subscription.list()` resolve plans from that same list.
+
+## One-time reconnect notice (operators)
+
+After deploying the Better Auth 1.7 update, use the approved private CSV with an
+`email` column (other columns and quoted CSV fields are supported). Keep it outside
+the repository. The script uses the same `DOTFLOWY_SESSION_COOKIE` or
+`DOTFLOWY_ADMIN_EMAIL` + `DOTFLOWY_ADMIN_PASSWORD` authentication as `scripts/announce.ts`.
+The account must be on the admin allowlist.
+
+```sh
+bun scripts/reconnect-notice.ts /home/ubuntu/private/reconnect-cohort.csv --api https://app.dotflowy.com --dry-run
+bun scripts/reconnect-notice.ts /home/ubuntu/private/reconnect-cohort.csv --api https://app.dotflowy.com --send
+```
+
+The default is dry-run; only explicit `--send` can send. Review the dry-run copy
+and recipient count first. The route accepts 1–50 email entries and normalizes
+and deduplicates them. Results are masked and numbered in CSV order after
+deduplication. No recipient addresses are logged by this flow. Missing email
+bindings return `simulated` without logging the message. Sends are sequential
+and awaited so the response contains each recipient's accepted/failed/simulated
+outcome; using `ctx.waitUntil` alone would return before those outcomes exist.
+`accepted` means provider acceptance, not inbox delivery.
+
+There is no database tracking or automatic retry. Save the results privately.
+For failures, prepare a new CSV containing **only failed recipients** and run
+dry-run then send on that file; never resend the original successful batch.
+If a response is lost, outcomes are unknown: investigate before retrying to
+avoid duplicate mail. The endpoint never reads the old OAuth tables and does
+not reuse waitlist notification flags. No notice is sent by deployment itself.
 
 ## Testing
 
