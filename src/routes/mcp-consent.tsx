@@ -28,6 +28,7 @@ interface ConsentDetails {
   redirectHost: string;
   scopes: string[];
   email: string;
+  admin: boolean;
 }
 
 function McpConsent() {
@@ -114,6 +115,12 @@ function McpConsent() {
                   Add, edit, move, and delete nodes, including shared mirror
                   content.
                 </li>
+                <li>Send feedback when you ask and view what you've sent.</li>
+                {details.admin && (
+                  <li>
+                    This admin connection can also read the feedback inbox.
+                  </li>
+                )}
                 {details.scopes.includes("offline_access") && (
                   <li>Keep access through refresh tokens when you are away.</li>
                 )}

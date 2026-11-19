@@ -606,6 +606,12 @@ test("MCP sign-in requires consent and Settings revokes the issued grant", async
   await expect(
     page.getByText("Keep access through refresh tokens when you are away."),
   ).toBeVisible();
+  await expect(
+    page.getByText("Send feedback when you ask and view what you've sent."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("This admin connection can also read the feedback inbox."),
+  ).toHaveCount(0);
   await page.screenshot({ path: info.outputPath("consent.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(
@@ -682,4 +688,83 @@ test("MCP sign-in requires consent and Settings revokes the issued grant", async
     0,
   );
   await page.screenshot({ path: info.outputPath("consent-expired.png") });
+  const keyNotice = "This admin key can also read the feedback inbox.";
+  const openKeys = async () => {
+    await page.goto(`${origin}/settings#capture-keys`);
+    await page.getByRole("button", { name: "Manage", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "API keys" })).toBeVisible();
+  };
+  await openKeys();
+  await page
+    .getByRole("button", { name: "Read and write", exact: true })
+    .click();
+  await expect(page.getByText(keyNotice)).toHaveCount(0);
+  await expect(page.getByText(/send feedback when you ask/)).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("keys-ordinary-write.png"),
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Read-only", exact: true }).click();
+  await expect(page.getByText(keyNotice)).toHaveCount(0);
+  await expect(page.getByText(/View feedback you've sent/)).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("keys-ordinary-read.png"),
+    animations: "disabled",
+  });
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Close", exact: true })
+    .click();
+  // Only the test-owned account changes role, using the same legacy policy
+  // exercised by production. No response mocking or browser-side admin flag.
+  await backend.db
+    .prepare('UPDATE "user" SET email = ? WHERE id = ?')
+    .bind("feedback-admin@worker-browser.test", user.id)
+    .run();
+  await page.goto(authorizeUrl);
+  await expect(
+    page.getByText("This admin connection can also read the feedback inbox."),
+  ).toBeVisible();
+  await page.screenshot({ path: info.outputPath("consent-admin.png") });
+  const created = await context.request.post(`${origin}/api/keys`, {
+    headers: { origin },
+    data: { name: "Admin review key", permission: "read", expiry: "30d" },
+  });
+  expect(created.status()).toBe(201);
+  await openKeys();
+  await expect(page.getByText(keyNotice)).toHaveCount(0);
+  await page.getByRole("button", { name: "Read-only", exact: true }).click();
+  await expect(page.getByText(keyNotice)).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("keys-admin-read.png"),
+    animations: "disabled",
+  });
+  await page
+    .getByRole("button", { name: "Read and write", exact: true })
+    .click();
+  await expect(page.getByText(keyNotice)).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("keys-admin-write.png"),
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Capture only", exact: true }).click();
+  await expect(page.getByText(keyNotice)).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Rotate Admin review key", exact: true })
+    .click();
+  await expect(page.getByText(keyNotice)).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("keys-admin-rotate.png"),
+    animations: "disabled",
+  });
+  await page.goto(`${origin}/privacy`);
+  const feedbackPolicy = page.locator("p").filter({
+    has: page.getByText("Feedback.", { exact: true }),
+  });
+  await expect(feedbackPolicy).toContainText(
+    "Other users cannot access your reports.",
+  );
+  await feedbackPolicy.screenshot({
+    path: info.outputPath("feedback-privacy.png"),
+  });
 });

@@ -105,6 +105,10 @@ export async function startBackend() {
               },
               BETTER_AUTH_URL: { type: "text", value: origin },
               SIGNUP_OPEN: { type: "text", value: "true" },
+              ADMIN_EMAILS: {
+                type: "text",
+                value: "feedback-admin@worker-browser.test",
+              },
               OWNER_USER_ID: {
                 type: "text",
                 value: "no-owner-in-this-fixture",

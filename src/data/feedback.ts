@@ -35,6 +35,32 @@ export const FeedbackReceipt = Schema.Struct({
   replayed: Schema.Boolean,
 });
 
+/** Account-owned history, separate from staff triage and correspondence. */
+export const FeedbackHistoryQuery = Schema.Struct({
+  id: Schema.optionalKey(FeedbackSubmission.fields.id),
+  kind: Schema.optionalKey(FeedbackKind),
+  limit: Schema.optionalKey(
+    Schema.Number.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 1, maximum: 100 }),
+    ),
+  ),
+});
+export type FeedbackHistoryQuery = typeof FeedbackHistoryQuery.Type;
+
+export const FeedbackHistory = Schema.Struct({
+  submissions: Schema.Array(
+    Schema.Struct({
+      id: FeedbackSubmission.fields.id,
+      kind: FeedbackKind,
+      message: FeedbackSubmission.fields.message,
+      createdAt: Schema.Number,
+    }),
+  ),
+  hasMore: Schema.Boolean,
+});
+export type FeedbackHistory = typeof FeedbackHistory.Type;
+
 export class FeedbackClientError extends Schema.TaggedError<FeedbackClientError>()(
   "FeedbackClientError",
   { message: Schema.String },

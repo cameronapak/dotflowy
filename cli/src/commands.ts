@@ -23,6 +23,28 @@ const source = { "source-app": string("sourceApp") };
 const CLI_SOURCE_APP = "Dotflowy CLI";
 
 export const commands = {
+  feedback: {
+    tool: "submit_feedback",
+    positional: "message",
+    fields: { id: string("id"), kind: string("kind") },
+  },
+  "feedback-history": {
+    tool: "list_my_feedback",
+    fields: {
+      id: string("id"),
+      kind: string("kind"),
+      limit: { wire: "limit", type: "integer" },
+    },
+  },
+  "feedback-inbox": {
+    tool: "list_feedback",
+    fields: {
+      kind: string("kind"),
+      plan: string("plan"),
+      status: string("status"),
+      limit: { wire: "limit", type: "integer" },
+    },
+  },
   outline: {
     tool: "get_outline",
     positional: "nodeId",

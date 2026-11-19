@@ -188,3 +188,17 @@ the daily path when a `date` is given, so for them it is validated and ignored.)
 - The tool registry is compile-time static, like the plugin registry
   ([ADR 0001](./0001-plugin-architecture.md)): adding a tool = one entry in `worker/mcp-tools.ts`
   (schema + handler), and `tools/list` derives itself.
+
+## Feedback access amendment
+
+`submit_feedback` adds user-directed private feedback without touching the
+outline. `list_my_feedback` reads only the authenticated account's submissions,
+including exact reference lookup. `list_feedback` is discoverable and callable
+only by the existing Dotflowy admin policy, rechecked from the authenticated
+account on each request.
+OAuth and API keys share these checks; discovery is never the authorization
+boundary. Feedback's kind-based membership gate, own history, and admin reads
+are exempt from the blanket paid outline gate. New connection disclosures mention inbox access
+only for admins. No new scopes, grants or permission configuration are introduced.
+Persistence, retries and the bounded admin output are specified in
+[ADR 0087](./0087-membership-experience.md#agent-feedback-access).

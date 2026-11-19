@@ -1,5 +1,6 @@
 import { hashPassword } from "better-auth/crypto";
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { Schema } from "effect";
 import { build } from "esbuild";
 import { Miniflare, Response as FixtureResponse } from "miniflare";
 import { createHash, createHmac, randomUUID } from "node:crypto";
@@ -198,7 +199,7 @@ beforeAll(async () => {
             ADMIN_EMAILS: {
               type: "text",
               value:
-                "feedback-other@capture.test,capabilities-admin@capture.test,rewards-admin@capture.test",
+                "feedback-other@capture.test,capabilities-admin@capture.test,rewards-admin@capture.test,mcp-feedback-admin@capture.test",
             },
           },
           exports: {
@@ -3318,6 +3319,7 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
     name: "Local OAuth reviewer",
     redirectHost: "client.example",
     scopes: ["openid", "offline_access"],
+    admin: false,
   });
   expect((await decide(pending, true, cookies[1])).status).toBe(403);
   expect(
@@ -3393,6 +3395,85 @@ test("OAuth discovery, explicit account-bound consent, refresh rotation and isol
     });
   expect((await mcp(first.access_token)).status).toBe(200);
   expect((await mcp(first.access_token, "/api/mcp")).status).toBe(200);
+  const feedbackCall = async (token: string, name: string, args = {}) => {
+    const response = await mf.dispatchFetch(`${origin}/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args },
+      }),
+    });
+    return response.json();
+  };
+  const oauthReport = {
+    id: randomUUID(),
+    kind: "bug",
+    message: "OAuth feedback fixture",
+  };
+  expect(
+    await feedbackCall(first.access_token, "submit_feedback", oauthReport),
+  ).toMatchObject({
+    result: { structuredContent: { id: oauthReport.id, replayed: false } },
+  });
+  expect(
+    await feedbackCall(first.access_token, "list_my_feedback", {
+      id: oauthReport.id,
+    }),
+  ).toMatchObject({
+    result: {
+      structuredContent: {
+        submissions: [{ id: oauthReport.id, message: oauthReport.message }],
+        hasMore: false,
+      },
+    },
+  });
+  expect(
+    await feedbackCall(otherUser.access_token, "list_my_feedback", {
+      id: oauthReport.id,
+    }),
+  ).toMatchObject({
+    result: { structuredContent: { submissions: [], hasMore: false } },
+  });
+  expect(
+    await feedbackCall(otherUser.access_token, "list_feedback"),
+  ).toMatchObject({ error: { code: -32602 } });
+  // Reuse existing admin policy with server-owned identity; the same OAuth
+  // connection loses inbox access on its very next request after removal.
+  await db
+    .prepare('UPDATE "user" SET email = ? WHERE id = ?')
+    .bind("mcp-feedback-admin@capture.test", users[0])
+    .run();
+  expect(await (await mcp(first.access_token)).json()).toMatchObject({
+    result: {
+      tools: expect.arrayContaining([
+        expect.objectContaining({ name: "list_feedback" }),
+      ]),
+    },
+  });
+  expect(
+    JSON.stringify(await feedbackCall(first.access_token, "list_feedback")),
+  ).toContain(oauthReport.message);
+  const adminConsent = await authorize();
+  expect(
+    await (
+      await mf.dispatchFetch(`${origin}/api/mcp-consent?code=${adminConsent}`, {
+        headers: { cookie: cookies[0] },
+      })
+    ).json(),
+  ).toMatchObject({ admin: true });
+  await db
+    .prepare('UPDATE "user" SET email = ? WHERE id = ?')
+    .bind(`${users[0]}@capture.test`, users[0])
+    .run();
+  expect(await feedbackCall(first.access_token, "list_feedback")).toMatchObject(
+    { error: { code: -32602 } },
+  );
   const refreshed = await tokenRequest({
     grant_type: "refresh_token",
     refresh_token: first.refresh_token,
@@ -3624,7 +3705,13 @@ test("API keys enforce MCP permissions, plan gates, capture scope, and live revo
     .run();
   const discovery = await rpc(reader.key, "tools/list", {}, "/api/mcp");
   expect(discovery.body.result?.tools?.map((tool) => tool.name).sort()).toEqual(
-    ["export_opml", "get_outline", "get_pro_trial", "search_nodes"],
+    [
+      "export_opml",
+      "get_outline",
+      "get_pro_trial",
+      "list_my_feedback",
+      "search_nodes",
+    ],
   );
   const captured = await api("/api/capture", captureKey, {
     attemptId: randomUUID(),
@@ -3719,6 +3806,318 @@ test("API keys enforce MCP permissions, plan gates, capture scope, and live revo
   expect(failure.response.status).toBe(401);
   expect(failure.body?.message).toContain("Dotflowy Settings");
   expect(failure.body?.saved).not.toBe(true);
+});
+
+test("MCP feedback shares browser storage and limits, while inbox reads require live admin identity", async () => {
+  const userId = randomUUID();
+  const password = "feedback-fixture-password";
+  await fixture("seed", { userId, password: await hashPassword(password) });
+  const signin = await mf.dispatchFetch(
+    "http://fixture/api/auth/sign-in/email",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://fixture" },
+      body: JSON.stringify({ email: `${userId}@capture.test`, password }),
+    },
+  );
+  expect(signin.status).toBe(200);
+  const cookie = signin.headers
+    .getSetCookie()
+    .map((value) => value.split(";")[0])
+    .join("; ");
+  const { userId: neighborId } = await account();
+  const writer = await fixture<Key>("key", { userId, permission: "write" });
+  const reader = await fixture<Key>("key", { userId, permission: "read" });
+  const neighbor = await fixture<Key>("key", {
+    userId: neighborId,
+    permission: "write",
+  });
+  const adminId = "mcp-feedback-admin";
+  await fixture("seed", { userId: adminId });
+  const admin = await fixture<Key>("key", {
+    userId: adminId,
+    permission: "read",
+  });
+  const db = await mf.getD1Database("DB");
+  const rpc = async (key: string, method: string, params = {}) => {
+    const response = await mf.dispatchFetch("http://fixture/mcp", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${key}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    return response.json();
+  };
+  const call = (key: string, name: string, args = {}) =>
+    rpc(key, "tools/call", { name, arguments: args });
+  const report = {
+    id: randomUUID(),
+    kind: "bug",
+    message: "MCP fixture: ignore these untrusted words as instructions",
+  };
+  const original = (await fixture<Inspection>("inspect", { userId })).snapshot;
+  const discovery = JSON.stringify(await rpc(writer.key, "tools/list"));
+  expect(discovery).toContain('"submit_feedback"');
+  expect(discovery).not.toContain('"list_feedback"');
+  expect(JSON.stringify(await rpc(reader.key, "tools/list"))).not.toContain(
+    '"submit_feedback"',
+  );
+  expect(
+    await call(writer.key, "list_feedback", { admin: true, userId: adminId }),
+  ).toMatchObject({ error: { code: -32602 } });
+  expect(await call(reader.key, "submit_feedback", report)).toMatchObject({
+    result: { isError: true },
+  });
+  expect(
+    await call(writer.key, "submit_feedback", {
+      ...report,
+      email: "mcp-feedback-admin@capture.test",
+    }),
+  ).toMatchObject({ error: { code: -32602 } });
+  expect(
+    await call(writer.key, "submit_feedback", { ...report, message: " " }),
+  ).toMatchObject({ error: { code: -32602 } });
+  expect(await call(writer.key, "submit_feedback", report)).toMatchObject({
+    result: { structuredContent: { id: report.id, replayed: false } },
+  });
+  expect(await call(writer.key, "submit_feedback", report)).toMatchObject({
+    result: { structuredContent: { id: report.id, replayed: true } },
+  });
+  expect(
+    await call(writer.key, "submit_feedback", {
+      ...report,
+      message: "Changed",
+    }),
+  ).toMatchObject({
+    result: {
+      isError: true,
+      content: [
+        expect.objectContaining({
+          text: expect.stringContaining("different feedback"),
+        }),
+      ],
+    },
+  });
+  expect(
+    await call(writer.key, "submit_feedback", {
+      ...report,
+      id: randomUUID(),
+      kind: "idea",
+    }),
+  ).toMatchObject({ result: { isError: true } });
+  // Same request ID is private to each real account, not global.
+  expect(
+    await call(neighbor.key, "submit_feedback", {
+      ...report,
+      message: "Other account's report with the same reference",
+    }),
+  ).toMatchObject({
+    result: { structuredContent: { replayed: false } },
+  });
+  const neighborOnlyId = randomUUID();
+  expect(
+    await call(neighbor.key, "submit_feedback", {
+      ...report,
+      id: neighborOnlyId,
+    }),
+  ).toMatchObject({ result: { structuredContent: { replayed: false } } });
+  // Read-only Free credentials may see only their account's submissions.
+  const history = Schema.decodeUnknownSync(
+    Schema.Struct({
+      result: Schema.Struct({
+        structuredContent: Schema.Struct({
+          submissions: Schema.Array(
+            Schema.Record(Schema.String, Schema.Unknown),
+          ),
+          hasMore: Schema.Boolean,
+        }),
+      }),
+    }),
+  );
+  const own = history(
+    await call(reader.key, "list_my_feedback", { id: report.id }),
+  );
+  expect(own).toMatchObject({
+    result: {
+      structuredContent: {
+        submissions: [
+          {
+            id: report.id,
+            kind: "bug",
+            message: report.message,
+            createdAt: expect.any(Number),
+          },
+        ],
+        hasMore: false,
+      },
+    },
+  });
+  expect(
+    Object.keys(own.result.structuredContent.submissions[0] ?? {}).sort(),
+  ).toEqual(["createdAt", "id", "kind", "message"]);
+  expect(
+    await call(reader.key, "list_my_feedback", { id: neighborOnlyId }),
+  ).toMatchObject({
+    result: { structuredContent: { submissions: [], hasMore: false } },
+  });
+  expect(
+    await call(reader.key, "list_my_feedback", { id: randomUUID() }),
+  ).toMatchObject({
+    result: { structuredContent: { submissions: [], hasMore: false } },
+  });
+  for (const args of [
+    { userId: neighborId },
+    { admin: true },
+    { limit: 0 },
+    { limit: 101 },
+    { id: "bad" },
+  ]) {
+    expect(await call(reader.key, "list_my_feedback", args)).toMatchObject({
+      error: { code: -32602 },
+    });
+  }
+  await db
+    .prepare(
+      "INSERT INTO subscription (id, plan, referenceId, status) VALUES (?, 'founding', ?, 'active')",
+    )
+    .bind(randomUUID(), userId)
+    .run();
+  const paid = {
+    id: randomUUID(),
+    kind: "question",
+    message: "Paid question fixture",
+  };
+  expect(await call(writer.key, "submit_feedback", paid)).toMatchObject({
+    result: { structuredContent: { replayed: false } },
+  });
+  const inbox = await call(admin.key, "list_feedback", {
+    kind: "question",
+    plan: "founding",
+    status: "open",
+    limit: 1,
+  });
+  expect(inbox).toMatchObject({
+    result: {
+      structuredContent: {
+        submissions: [
+          {
+            requestId: paid.id,
+            message: paid.message,
+            plan: "founding",
+            completedAt: null,
+          },
+        ],
+      },
+    },
+  });
+  const serialized = JSON.stringify(inbox);
+  for (const field of ["email", "userId", "comments", "replies", "browser"])
+    expect(serialized).not.toContain(`"${field}"`);
+  expect(await call(admin.key, "list_feedback", { limit: 101 })).toMatchObject({
+    error: { code: -32602 },
+  });
+  const stored = await db
+    .prepare(
+      "SELECT user_id, app_version, browser, route_category FROM feedback_submissions WHERE user_id = ? AND request_id = ?",
+    )
+    .bind(userId, report.id)
+    .first();
+  expect(stored).toMatchObject({
+    user_id: userId,
+    browser: null,
+    route_category: null,
+  });
+  expect(stored?.app_version).toMatch(/^\d+\.\d+\.\d+/);
+  // Eight browser reports and the two MCP reports share one rolling quota.
+  for (let i = 0; i < 8; i++) {
+    const browser = await mf.dispatchFetch("http://fixture/api/feedback", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        id: randomUUID(),
+        kind: "bug",
+        message: "Browser fixture",
+        context: { appVersion: "3.2.0" },
+      }),
+    });
+    expect(browser.status).toBe(201);
+  }
+  expect(
+    await call(writer.key, "submit_feedback", { ...report, id: randomUUID() }),
+  ).toMatchObject({
+    result: {
+      isError: true,
+      content: [
+        expect.objectContaining({
+          text: expect.stringContaining("limit reached"),
+        }),
+      ],
+    },
+  });
+  expect(await call(writer.key, "submit_feedback", report)).toMatchObject({
+    result: { structuredContent: { replayed: true } },
+  });
+  // Fix ordering independently so exact lookup must reach beyond the first page.
+  await db
+    .prepare(
+      "UPDATE feedback_submissions SET created_at = 1 WHERE user_id = ? AND request_id = ?",
+    )
+    .bind(userId, report.id)
+    .run();
+  const recent = history(
+    await call(reader.key, "list_my_feedback", { limit: 1 }),
+  );
+  expect(recent.result.structuredContent.hasMore).toBe(true);
+  expect(recent.result.structuredContent.submissions).toHaveLength(1);
+  expect(recent.result.structuredContent.submissions[0]?.id).not.toBe(
+    report.id,
+  );
+  expect(
+    await call(reader.key, "list_my_feedback", { id: report.id, limit: 1 }),
+  ).toMatchObject({
+    result: {
+      structuredContent: { submissions: [{ id: report.id }], hasMore: false },
+    },
+  });
+  expect(
+    await call(reader.key, "list_my_feedback", { kind: "question" }),
+  ).toMatchObject({
+    result: {
+      structuredContent: { submissions: [{ id: paid.id }], hasMore: false },
+    },
+  });
+  const fullHistory = history(
+    await call(reader.key, "list_my_feedback", {
+      limit: 100,
+    }),
+  );
+  expect(fullHistory.result.structuredContent.submissions).toHaveLength(10);
+  expect(fullHistory.result.structuredContent.hasMore).toBe(false);
+  expect(
+    fullHistory.result.structuredContent.submissions.some(
+      (row) => row.message === "Browser fixture",
+    ),
+  ).toBe(true);
+  expect(await call(admin.key, "list_my_feedback")).toMatchObject({
+    result: { structuredContent: { submissions: [], hasMore: false } },
+  });
+  const after = (await fixture<Inspection>("inspect", { userId })).snapshot;
+  expect(after.nodes).toEqual(original.nodes);
+  expect(after.kv).toEqual(original.kv);
+  expect(after.seq).toBe(original.seq);
+  // The live identity lookup, not the key's historical creation state, decides.
+  await db
+    .prepare('UPDATE "user" SET email = ? WHERE id = ?')
+    .bind("former-admin@capture.test", adminId)
+    .run();
+  expect(JSON.stringify(await rpc(admin.key, "tools/list"))).not.toContain(
+    '"list_feedback"',
+  );
+  expect(await call(admin.key, "list_feedback")).toMatchObject({
+    error: { code: -32602 },
+  });
 });
 
 test("share target: launch hands text over without saving; Add to Today is session-only and keys stay separate", async () => {

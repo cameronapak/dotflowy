@@ -12,6 +12,7 @@ import {
   TrashIcon,
 } from "@/lib/icons";
 
+import { useAdminAccess } from "../data/admin-access";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { buttonVariants } from "./ui/button-variants";
@@ -39,12 +40,12 @@ const PERMISSIONS = {
   read: {
     label: "Read-only",
     description:
-      "Read, search, and export through MCP or the CLI. Cannot change your outline.",
+      "Read, search, and export through MCP or the CLI. View feedback you've sent. Cannot change your outline.",
   },
   write: {
     label: "Read and write",
     description:
-      "All MCP and CLI operations, plus capture. Can edit and delete your outline.",
+      "Read, edit, and delete your outline. Capture notes, send feedback when you ask, and view what you've sent.",
   },
 } satisfies Record<Permission, { label: string; description: string }>;
 
@@ -249,6 +250,7 @@ function CaptureDialog({
   onOpenChange,
   setup,
 }: CaptureDialogProps & { setup: boolean }) {
+  const { access } = useAdminAccess();
   const [keys, setKeys] = useState<CaptureKeyEntry[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [loading, setLoading] = useState(false);
@@ -574,6 +576,11 @@ function CaptureDialog({
                 <p className="text-xs text-muted-foreground">
                   {PERMISSIONS[permission].description}
                 </p>
+                {access === "admin" && permission !== "capture" && (
+                  <p className="text-xs text-muted-foreground">
+                    This admin key can also read the feedback inbox.
+                  </p>
+                )}
               </Field>
             )}
             {setup && (
@@ -899,6 +906,12 @@ function CaptureDialog({
                             {PERMISSIONS[key.permission].label.toLowerCase()}.
                             Update each shortcut or script with the replacement.
                           </p>
+                          {access === "admin" &&
+                            key.permission !== "capture" && (
+                              <p className="text-sm text-muted-foreground">
+                                This admin key can also read the feedback inbox.
+                              </p>
+                            )}
                           <Field>
                             <FieldLabel id={`rotate-expiry-${key.id}`}>
                               Replacement expiration

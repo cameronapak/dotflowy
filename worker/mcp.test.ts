@@ -13,7 +13,11 @@ import { Clock, Effect, Schema } from "effect";
 import { TestClock } from "effect/testing";
 
 import type { ChangeOp, Node } from "../src/data/wire-schema";
-import type { AfterTextWrite, OutlineStore } from "./mcp-tools";
+import type {
+  AfterTextWrite,
+  OutlineStore,
+  McpFeedbackContext,
+} from "./mcp-tools";
 
 import { createNode } from "../src/data/tree";
 import { handleMcp } from "./mcp";
@@ -443,6 +447,8 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
   }
   expect(tool("add_node").inputSchema.required).toEqual(["sourceApp", "text"]);
   const expectedHints = {
+    submit_feedback: [false, false],
+    list_my_feedback: [true, false],
     get_pro_trial: [true, false],
     get_outline: [true, false],
     search_nodes: [true, false],
@@ -466,7 +472,13 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
     expect(tool(name).annotations.readOnlyHint).toBe(readOnlyHint);
     expect(tool(name).annotations.destructiveHint).toBe(destructiveHint);
     expect(tool(name).annotations.openWorldHint).toBe(
-      ["add_node", "add_subtree", "update_node", "add_to_today"].includes(name),
+      [
+        "submit_feedback",
+        "add_node",
+        "add_subtree",
+        "update_node",
+        "add_to_today",
+      ].includes(name),
     );
   }
 
@@ -506,6 +518,60 @@ test("tools/list publishes the Effect Schema inputs agents rely on", async () =>
   expect(search.inputSchema.properties.nodeId).toBeDefined();
   expect(search.inputSchema.properties.cursor).toBeDefined();
   expect(search.outputSchema.required).toEqual(["nodes", "nextCursor"]);
+});
+
+test("admin discovery and direct calls reuse the pinned policy and fail closed before touching feedback storage", async () => {
+  const { store } = makeStore();
+  const feedback: McpFeedbackContext = {
+    // No database is reachable: discovery and denied calls must not query it.
+    env: {
+      DB: null!,
+      ADMIN_USER_IDS: "admin",
+      ADMIN_EMAILS: "legacy@example.test",
+    },
+    session: { user: { id: "ordinary", email: "legacy@example.test" } },
+    executionCtx: { waitUntil() {} },
+  };
+  const request = async (method: string, params = {}) => {
+    const response = await Effect.runPromise(
+      handleMcp(
+        new Request("http://test/mcp", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        }),
+        store,
+        false,
+        undefined,
+        "read",
+        feedback,
+      ),
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    return response.json();
+  };
+  expect(JSON.stringify(await request("tools/list"))).not.toContain(
+    '"list_feedback"',
+  );
+  expect(
+    await request("tools/call", {
+      name: "list_feedback",
+      arguments: { limit: "invalid", userId: "admin" },
+    }),
+  ).toMatchObject({
+    error: { code: -32602, message: "unknown tool: list_feedback" },
+  });
+  feedback.session = {
+    user: { id: "admin", email: "not-legacy@example.test" },
+  };
+  const discovery = JSON.stringify(await request("tools/list"));
+  expect(discovery).toContain('"list_feedback"');
+  expect(discovery).not.toContain('"submit_feedback"');
+  feedback.env.ADMIN_USER_IDS = "";
+  feedback.env.ADMIN_EMAILS = "";
+  expect(await request("tools/call", { name: "list_feedback" })).toMatchObject({
+    error: { code: -32602 },
+  });
 });
 
 test("protocol faults map to their JSON-RPC codes and GET is declined", async () => {

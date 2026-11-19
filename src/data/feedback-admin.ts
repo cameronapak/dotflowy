@@ -59,6 +59,35 @@ export const FeedbackInbox = Schema.Struct({
 });
 export type FeedbackInbox = typeof FeedbackInbox.Type;
 
+/** The bounded, read-only agent view omits customer identity and staff threads. */
+export const FeedbackListQuery = Schema.Struct({
+  kind: Schema.optionalKey(FeedbackKind),
+  plan: Schema.optionalKey(Schema.Literals(["free", "unlimited", "founding"])),
+  status: Schema.optionalKey(Schema.Literals(["open", "complete"])),
+  limit: Schema.optionalKey(
+    Schema.Number.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 1, maximum: 100 }),
+    ),
+  ),
+});
+export type FeedbackListQuery = typeof FeedbackListQuery.Type;
+
+export const FeedbackList = Schema.Struct({
+  submissions: Schema.Array(
+    Schema.Struct({
+      id: FeedbackTriage.fields.id,
+      requestId: FeedbackSubmission.fields.id,
+      kind: FeedbackKind,
+      message: FeedbackSubmission.fields.message,
+      plan: Schema.Literals(["free", "unlimited", "founding"]),
+      createdAt: Schema.Number,
+      completedAt: FeedbackTriage.fields.completedAt,
+    }),
+  ),
+});
+export type FeedbackList = typeof FeedbackList.Type;
+
 const ReportId = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0));
 export const FeedbackAdminAction = Schema.Union([
   Schema.Struct({
