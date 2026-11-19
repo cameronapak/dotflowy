@@ -28,11 +28,11 @@ test("reconnect notices preview without sending, then send sequentially with the
     ],
     [
       "text",
-      "a992fc78881594f8c0b561aa26ad01d6856884fb5179740567249549c8e380c6",
+      "8821f2321bb079539cd0320216d9c9be9b7a9a22a46dfd47121bbe6be6de0c5a",
     ],
     [
       "html",
-      "b6c9ec8ec490e541359b474281ddb604a442f37b57ad9a35987fff9f6583d647",
+      "412cada677f0bfcb3dcffd889fe1e8e878e4cbca859941543a1ad8543612251a",
     ],
   ] as const)
     expect(

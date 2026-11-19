@@ -46,15 +46,20 @@ in Settings → Plugins does not disable explicit MCP or CLI daily operations.
 Connected AI agents may need to reconnect once as Dotflowy updates its
 authentication infrastructure to Better Auth 1.7. Existing OAuth credentials
 are reset; personal API keys and browser sessions are unaffected. Use the same
-MCP URL and sign in again (CLI: `dotflowy login`).
+MCP URL: remove the Dotflowy connector in your AI app's settings and add it
+again with `https://app.dotflowy.com/mcp`, then sign in (CLI: `dotflowy login`).
 
 Missing or invalid credentials on `/mcp` and `/api/mcp` return HTTP 401 with
-`error: "unauthorized"` and an `error_description` explaining how to reconnect
-in your AI app's connector settings or run `dotflowy login`. The same message
+`error: "unauthorized"` and an `error_description` explaining how to remove
+and re-add the connector or run `dotflowy login`. The same message
 is used for every invalid credential. The `WWW-Authenticate` protected-resource
 metadata challenge and CORS headers remain available for OAuth discovery.
 This is an HTTP authentication error, not a JSON-RPC response; whether an AI
 app displays the description or starts reauthorization depends on the client.
+
+An OAuth authorization request with an unknown client ID shows a fixed
+remove-and-add instruction page (HTTP 400) rather than the provider's generic
+`invalid_client` error redirect. Other authorization errors are unchanged.
 
 Every new OAuth authorization requires explicit approval in Dotflowy, even if
 the client omits `prompt=consent`. The consent page shows the authenticated
