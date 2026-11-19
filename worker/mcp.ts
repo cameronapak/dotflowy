@@ -7,7 +7,7 @@
  * a follow-up POST can land on a fresh isolate and find no session. So this
  * server is STATELESS by design (the spec's no-session mode): every POST is
  * self-contained, `initialize` returns no `Mcp-Session-Id`, GET streams are
- * declined with 405. All state lives where it already lives — the per-user DO.
+ * declined with 405. Outline state stays in the per-user DO; feedback stays in D1.
  * See docs/adr/0026-agent-native-mcp-server.md.
  *
  * The protocol surface is small on purpose: initialize / ping / tools. Tool
@@ -28,8 +28,10 @@ import {
   Schema,
 } from "effect";
 
+import { isAdminSession } from "./identity";
 import {
   type AfterTextWrite,
+  type McpFeedbackContext,
   type OutlineStore,
   type ToolResult,
   tools,
@@ -117,6 +119,7 @@ type RpcJson = (typeof JsonRpcMessageSchema.Type)["params"];
 /** CORS for browser-based MCP clients (e.g. the inspector). Safe to be open:
  *  the endpoint is bearer-token gated, never cookie-authenticated. */
 const CORS_HEADERS = {
+  "cache-control": "private, no-store",
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, OPTIONS",
   "access-control-allow-headers":
@@ -214,6 +217,9 @@ const toolList: ToolDescriptor[] = tools.map((tool) => {
   if (tool.output) descriptor.outputSchema = publishedSchema(tool.output);
   return descriptor;
 });
+const adminOnlyTools = new Set(
+  tools.filter((tool) => tool.adminOnly).map((tool) => tool.name),
+);
 
 // --- Dispatch --------------------------------------------------------------------
 
@@ -248,6 +254,7 @@ function handleToolCall(
   store: OutlineStore,
   afterTextWrite: AfterTextWrite | undefined,
   permission: "read" | "write",
+  feedback: McpFeedbackContext | undefined,
 ): Effect.Effect<Response> {
   const call = decodeOrNull(CallToolParamsSchema, params);
   if (!call) {
@@ -256,7 +263,11 @@ function handleToolCall(
     );
   }
   const tool = tools.find((t) => t.name === call.name);
-  if (!tool)
+  if (
+    !tool ||
+    (tool.adminOnly &&
+      (!feedback || !isAdminSession(feedback.session, feedback.env)))
+  )
     return Effect.succeed(
       rpcError(id, INVALID_PARAMS, `unknown tool: ${call.name}`),
     );
@@ -275,11 +286,17 @@ function handleToolCall(
       }),
     );
 
-  const decodeInput = Schema.decodeUnknownEffect(tool.input);
+  const decodeInput = Schema.decodeUnknownEffect(
+    tool.input,
+    ["submit_feedback", "list_my_feedback"].includes(tool.name) ||
+      tool.adminOnly
+      ? { onExcessProperty: "error" }
+      : undefined,
+  );
   return decodeInput(call.arguments ?? {}).pipe(
     Effect.mapError((issue) => rpcError(id, INVALID_PARAMS, issue.message)),
     Effect.flatMap((input) =>
-      tool.handle(input, store, afterTextWrite).pipe(
+      tool.handle(input, store, afterTextWrite, feedback).pipe(
         Effect.map((result) =>
           rpcResult(
             id,
@@ -315,6 +332,7 @@ function dispatch(
   agentAccess: boolean,
   afterTextWrite?: AfterTextWrite,
   permission: "read" | "write" = "write",
+  feedback?: McpFeedbackContext,
 ): Effect.Effect<Response> {
   // A notification (no id) never gets a JSON-RPC response body, whatever the
   // method — `notifications/initialized` and friends land here.
@@ -329,19 +347,35 @@ function dispatch(
     case "tools/list":
       return Effect.succeed(
         rpcResult(id, {
-          tools:
-            permission === "read"
-              ? toolList.filter((tool) => tool.annotations.readOnlyHint)
-              : toolList,
+          tools: toolList.filter(
+            (tool) =>
+              (permission !== "read" || tool.annotations.readOnlyHint) &&
+              (!adminOnlyTools.has(tool.name) ||
+                (feedback && isAdminSession(feedback.session, feedback.env))),
+          ),
         }),
       );
     case "tools/call":
       // The entitlement gate: initialize/ping/tools/list stay open so a free
       // connection can handshake and see WHY. Only the read-only trial setup
-      // information is exempt; all outline tools still require Pro (#170).
+      // information and feedback are exempt; feedback enforces its own kind
+      // entitlement, and admin inbox access follows the admin policy, not plan.
       const trialInfo = decodeOrNull(CallToolParamsSchema, message.params);
-      return agentAccess || trialInfo?.name === "get_pro_trial"
-        ? handleToolCall(id, message.params, store, afterTextWrite, permission)
+      return agentAccess ||
+        [
+          "get_pro_trial",
+          "submit_feedback",
+          "list_my_feedback",
+          "list_feedback",
+        ].includes(trialInfo?.name ?? "")
+        ? handleToolCall(
+            id,
+            message.params,
+            store,
+            afterTextWrite,
+            permission,
+            feedback,
+          )
         : Effect.succeed(rpcError(id, UPGRADE_REQUIRED, UPGRADE_MESSAGE));
     default:
       return Effect.succeed(
@@ -357,12 +391,13 @@ function dispatch(
  * Total: every failure mode becomes a well-formed HTTP/JSON-RPC response, so
  * the caller (worker/index.ts) can treat this as infallible routing.
  *
- * Provenance comes from each write tool's required `sourceApp` argument
+ * Outline provenance comes from each node-creating tool's required `sourceApp` argument
  * (ADR 0081), not from the bearer token.
  *
  * `agentAccess` is the caller's entitlement (#170): false for a free plan, which
- * refuses every tools/call with an upgrade error while leaving the handshake +
- * discovery open. worker/index.ts resolves it from the token's plan.
+ * refuses outline tool calls with an upgrade error while leaving the handshake,
+ * discovery, trial information and separately authorized feedback open.
+ * worker/index.ts resolves it from the token's plan.
  */
 export function handleMcp(
   request: Request,
@@ -370,6 +405,7 @@ export function handleMcp(
   agentAccess: boolean,
   afterTextWrite?: AfterTextWrite,
   permission: "read" | "write" = "write",
+  feedback?: McpFeedbackContext,
 ): Effect.Effect<Response> {
   switch (request.method) {
     case "OPTIONS":
@@ -416,6 +452,7 @@ export function handleMcp(
       agentAccess,
       afterTextWrite,
       permission,
+      feedback,
     );
   }).pipe(
     // The typed error channel only ever carries already-built error Responses.

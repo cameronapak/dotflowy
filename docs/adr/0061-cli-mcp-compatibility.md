@@ -15,10 +15,19 @@ to preserve the existing agent boundary: CLI exports are not lossless backups.
 See [ADR 0043](./0043-spoilers-redacted-from-agents.md).
 
 The CLI calls the existing MCP endpoint, preserving server validation, limits,
-and the paid-plan requirement for tool calls. Friendly commands cover every
-current tool. A generic `call` command accepts exact MCP tool names and arguments;
+and the paid-plan requirement for outline tool calls. Friendly commands cover
+outline and feedback tools. A generic `call` command accepts exact MCP tool names and arguments;
 tool discovery exposes server schemas so new tools remain callable without a CLI
 release. No duplicate outline API or local mutation implementation is introduced.
+
+`feedback` calls `submit_feedback` with a reviewed message, kind and stable ID;
+`feedback-history` calls account-scoped `list_my_feedback`, including exact
+reference lookup with `--id`; `feedback-inbox` calls admin-only `list_feedback`.
+These preserve the existing feedback membership rules and admin role, not a new
+permission system. Uncertain
+feedback writes advise retrying the exact same ID, kind and message rather than
+inspecting the outline. Generic `call` supports these tools in older CLI versions.
+See [ADR 0087](./0087-membership-experience.md#agent-feedback-access).
 
 Human output prints MCP text content. JSON output preserves the MCP result object
 instead of parsing prose into invented structured records. Search now includes

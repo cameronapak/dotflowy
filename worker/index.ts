@@ -1183,6 +1183,13 @@ function handleApiRequest(
       // (handleMcp), not a 500. An operator comps themselves with a manual
       // subscription row (getPlan treats it as paid).
       const mcpPlan = yield* Effect.promise(() => getPlan(token.userId, env));
+      // Token ownership gives the real account. Re-read server-owned identity
+      // for current admin policy, including the legacy email fallback.
+      const mcpUser = yield* Effect.promise(() =>
+        env.DB.prepare('SELECT id, email FROM "user" WHERE id = ?')
+          .bind(token.userId)
+          .first<{ id: string; email: string }>(),
+      );
       const classicStub = env.USER_OUTLINE.get(
         env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
       );
@@ -1231,6 +1238,7 @@ function handleApiRequest(
           );
         },
         apiKey?.permission === "read" ? "read" : "write",
+        { env, session: mcpUser ? { user: mcpUser } : null, executionCtx },
       );
     }
 
@@ -1283,6 +1291,7 @@ function handleApiRequest(
               redirectHost: new URL(consent.redirectURI).host,
               scopes: consent.scope,
               email: session.user.email,
+              admin: isAdminSession(session, env),
             },
             200,
             { "cache-control": "private, no-store" },

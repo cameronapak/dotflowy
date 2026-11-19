@@ -64,7 +64,7 @@ export const rpc = Effect.fn("MCP.rpc")(function* (
   method: string,
   params: JsonObject,
   version = "2025-06-18",
-  uncertainWrite = false,
+  uncertainWrite: boolean | "feedback" = false,
 ) {
   const id = randomUUID();
   const raw = yield* requestJson(`${server}/mcp`, {
@@ -109,8 +109,11 @@ export const connect = Effect.fn("MCP.connect")(function* (
     return yield* Effect.fail(
       fail("Unsupported MCP protocol. Update the CLI."),
     );
-  const call = (method: string, params: JsonObject, write = false) =>
-    rpc(server, token, method, params, initialized.protocolVersion, write);
+  const call = (
+    method: string,
+    params: JsonObject,
+    write: boolean | "feedback" = false,
+  ) => rpc(server, token, method, params, initialized.protocolVersion, write);
   return {
     serverInfo: initialized.serverInfo,
     list: () =>
@@ -145,7 +148,7 @@ export const connect = Effect.fn("MCP.connect")(function* (
             arguments:
               name === "search_nodes" ? { numbered: true, ...args } : args,
           },
-          write,
+          name === "submit_feedback" ? "feedback" : write,
         );
         const checked = yield* decode(ToolResult, raw, "tool result");
         return {
@@ -157,7 +160,7 @@ export const connect = Effect.fn("MCP.connect")(function* (
         Effect.mapError((error) =>
           write && error.exitCode === 1 && !error.message.includes("unknown")
             ? fail(
-                `${error.message} Write outcome may be unknown; inspect the outline before retrying. Nothing was retried.`,
+                `${error.message} Write outcome may be unknown; ${name === "submit_feedback" ? "retry feedback with the same id, kind, and message." : "inspect the outline before retrying."} Nothing was retried.`,
               )
             : error,
         ),

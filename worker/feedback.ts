@@ -4,9 +4,15 @@ import { Effect, Schema } from "effect";
 
 import type { PlanName } from "../src/data/plans";
 
-import { FeedbackSubmission } from "../src/data/feedback";
+import {
+  FeedbackSubmission,
+  type FeedbackHistory,
+  type FeedbackHistoryQuery,
+} from "../src/data/feedback";
 import {
   FeedbackAdminAction,
+  type FeedbackInbox,
+  FeedbackListQuery,
   FEEDBACK_REPLY_SUBJECT,
   feedbackReplyText,
   type FeedbackReply,
@@ -185,10 +191,119 @@ const decodeBody = Effect.fn("Feedback.decode")(function* <A>(
   );
 });
 
-/** POST /api/feedback. Caller owns same-origin/CSRF checks and session lookup.
- * Pass the unmodified server session, NOT resolveUserId's outline DO key.
- * Expected failures are already mapped; unexpected defects reach the caller.
- */
+/** Shared persistence, quota, membership and email path. Inputs are decoded at
+ * ingress; identity is the real authenticated account, never its outline alias. */
+export const saveFeedback = Effect.fn("Feedback.save")(
+  (
+    input: FeedbackSubmission,
+    env: FeedbackEnv,
+    session: FeedbackSession,
+    executionCtx: Pick<ExecutionContext, "waitUntil">,
+    source?: "agent",
+  ) =>
+    Effect.gen(function* () {
+      if (!session)
+        return yield* Effect.fail(
+          fail(401, "unauthorized", "Sign in to send feedback."),
+        );
+      const userId = session.user.id;
+      // Canonical key order means JSON whitespace/key order does not affect retries.
+      const canonical = JSON.stringify({
+        kind: input.kind,
+        message: input.message,
+        // Agent metadata is server-owned. A deploy between retries must not
+        // turn the same user-approved report into an idempotency conflict.
+        appVersion: source === "agent" ? "agent" : input.context.appVersion,
+        browser: input.context.browser ?? null,
+        routeCategory: input.context.routeCategory ?? null,
+      });
+      const digest = yield* Effect.promise(() =>
+        crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical)),
+      );
+      const hash = Array.from(new Uint8Array(digest), (b) =>
+        b.toString(16).padStart(2, "0"),
+      ).join("");
+      const existing = () =>
+        database(() =>
+          env.DB.prepare(
+            "SELECT payload_hash FROM feedback_submissions WHERE user_id = ? AND request_id = ?",
+          )
+            .bind(userId, input.id)
+            .first<{ payload_hash: string }>(),
+        );
+      const replay = (stored: { payload_hash: string }) =>
+        stored.payload_hash === hash
+          ? Effect.succeed({ id: input.id, replayed: true })
+          : Effect.fail(
+              fail(
+                409,
+                "idempotency_conflict",
+                "This attempt was already used for different feedback.",
+              ),
+            );
+      const prior = yield* existing();
+      // Confirm already-sent paid feedback even after a downgrade, without re-tagging it.
+      if (prior) return yield* replay(prior);
+      const plan = yield* database(() => getPlan(userId, env));
+      if (input.kind !== "bug" && plan !== "unlimited" && plan !== "founding")
+        return yield* Effect.fail(
+          fail(
+            403,
+            "membership_required",
+            "Ideas and questions require Pro or Founding.",
+          ),
+        );
+      // One SQLite statement makes count+insert atomic under concurrent requests.
+      // Ten accepted submissions per rolling 24h; retries never consume quota.
+      const now = Date.now();
+      const result = yield* database(() =>
+        env.DB.prepare(`
+        INSERT INTO feedback_submissions
+          (user_id, request_id, payload_hash, plan, kind, message, app_version, browser, route_category, created_at)
+        SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+        WHERE (SELECT COUNT(*) FROM feedback_submissions WHERE user_id = ?1 AND created_at > ?11) < 10
+        ON CONFLICT(user_id, request_id) DO NOTHING
+      `)
+          .bind(
+            userId,
+            input.id,
+            hash,
+            plan,
+            input.kind,
+            input.message,
+            input.context.appVersion,
+            input.context.browser ?? null,
+            input.context.routeCategory ?? null,
+            now,
+            now - 86400000,
+          )
+          .run(),
+      );
+      if (result.meta.changes > 0) {
+        executionCtx.waitUntil(
+          sendFeedbackEmails(
+            env,
+            session.user.email,
+            input.id,
+            input.kind,
+            plan,
+          ),
+        );
+        return { id: input.id, replayed: false };
+      }
+      // A concurrent duplicate (even at quota) must return its original receipt.
+      const concurrent = yield* existing();
+      if (concurrent) return yield* replay(concurrent);
+      return yield* Effect.fail(
+        fail(
+          429,
+          "rate_limited",
+          "Feedback limit reached. Wait 24 hours and retry.",
+        ),
+      );
+    }),
+);
+
 export const handleFeedbackRequest = Effect.fn("Feedback.request")(
   (
     request: Request,
@@ -202,102 +317,73 @@ export const handleFeedbackRequest = Effect.fn("Feedback.request")(
         if (request.method !== "POST")
           return json({ error: "method_not_allowed" }, 405);
         const input = yield* decodeBody(request, FeedbackSubmission);
-        const userId = session.user.id;
-        // Canonical key order means JSON whitespace/key order does not affect retries.
-        const canonical = JSON.stringify({
-          kind: input.kind,
-          message: input.message,
-          appVersion: input.context.appVersion,
-          browser: input.context.browser ?? null,
-          routeCategory: input.context.routeCategory ?? null,
-        });
-        const digest = yield* Effect.promise(() =>
-          crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical)),
-        );
-        const hash = Array.from(new Uint8Array(digest), (b) =>
-          b.toString(16).padStart(2, "0"),
-        ).join("");
-        const existing = () =>
-          database(() =>
-            env.DB.prepare(
-              "SELECT payload_hash FROM feedback_submissions WHERE user_id = ? AND request_id = ?",
-            )
-              .bind(userId, input.id)
-              .first<{ payload_hash: string }>(),
-          );
-        const replay = (stored: { payload_hash: string }) =>
-          stored.payload_hash === hash
-            ? Effect.succeed(json({ id: input.id, replayed: true }))
-            : Effect.fail(
-                fail(
-                  409,
-                  "idempotency_conflict",
-                  "This attempt was already used for different feedback.",
-                ),
-              );
-        const prior = yield* existing();
-        // Confirm already-sent paid feedback even after a downgrade, without re-tagging it.
-        if (prior) return yield* replay(prior);
-        const plan = yield* database(() => getPlan(userId, env));
-        if (input.kind !== "bug" && plan !== "unlimited" && plan !== "founding")
-          return yield* Effect.fail(
-            fail(
-              403,
-              "membership_required",
-              "Ideas and questions require Pro or Founding.",
-            ),
-          );
-        // One SQLite statement makes count+insert atomic under concurrent requests.
-        // Ten accepted submissions per rolling 24h; retries never consume quota.
-        const now = Date.now();
-        const result = yield* database(() =>
-          env.DB.prepare(`
-        INSERT INTO feedback_submissions
-          (user_id, request_id, payload_hash, plan, kind, message, app_version, browser, route_category, created_at)
-        SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
-        WHERE (SELECT COUNT(*) FROM feedback_submissions WHERE user_id = ?1 AND created_at > ?11) < 10
-        ON CONFLICT(user_id, request_id) DO NOTHING
-      `)
-            .bind(
-              userId,
-              input.id,
-              hash,
-              plan,
-              input.kind,
-              input.message,
-              input.context.appVersion,
-              input.context.browser ?? null,
-              input.context.routeCategory ?? null,
-              now,
-              now - 86400000,
-            )
-            .run(),
-        );
-        if (result.meta.changes > 0) {
-          executionCtx.waitUntil(
-            sendFeedbackEmails(
-              env,
-              session.user.email,
-              input.id,
-              input.kind,
-              plan,
-            ),
-          );
-          return json({ id: input.id, replayed: false }, 201);
-        }
-        // A concurrent duplicate (even at quota) must return its original receipt.
-        const concurrent = yield* existing();
-        if (concurrent) return yield* replay(concurrent);
-        return yield* Effect.fail(
-          fail(
-            429,
-            "rate_limited",
-            "Feedback limit reached. Wait 24 hours and retry.",
-          ),
-        );
+        const receipt = yield* saveFeedback(input, env, session, executionCtx);
+        return json(receipt, receipt.replayed ? 200 : 201);
       }),
     ),
 );
+
+/** Ownership is fixed by authentication, including exact-reference lookups. */
+export const readMyFeedback = Effect.fn("Feedback.history")(function* (
+  query: FeedbackHistoryQuery,
+  env: FeedbackEnv,
+  session: FeedbackSession,
+) {
+  if (!session)
+    return yield* Effect.fail(
+      fail(401, "unauthorized", "Sign in to view your feedback."),
+    );
+  const limit = query.limit ?? 50;
+  const rows = yield* database(() =>
+    env.DB.prepare(`
+      SELECT request_id AS id, kind, message, created_at AS createdAt
+      FROM feedback_submissions
+      WHERE user_id = ?1 AND (?2 IS NULL OR request_id = ?2)
+        AND (?3 IS NULL OR kind = ?3)
+      ORDER BY created_at DESC, id DESC LIMIT ?4
+    `)
+      .bind(session.user.id, query.id ?? null, query.kind ?? null, limit + 1)
+      .all<FeedbackHistory["submissions"][number]>(),
+  );
+  return {
+    submissions: rows.results.slice(0, limit),
+    hasMore: rows.results.length > limit,
+  };
+});
+
+/** Both browser review and MCP use the same bounded, server-authorized query. */
+export const readFeedbackSubmissions = Effect.fn("Feedback.read")(function* (
+  query: FeedbackListQuery,
+  env: FeedbackEnv,
+  session: FeedbackSession,
+) {
+  if (!isAdminSession(session, env))
+    return yield* Effect.fail(fail(404, "not_found", "Unknown tool."));
+  const rows = yield* database(() =>
+    env.DB.prepare(`
+      SELECT f.id, f.user_id AS userId, f.request_id AS requestId, f.plan, f.kind, f.message,
+        f.app_version AS appVersion, f.browser, f.route_category AS routeCategory, f.created_at AS createdAt,
+        f.completed_at AS completedAt, u.email, u.emailVerified
+      FROM feedback_submissions f JOIN "user" u ON u.id = f.user_id
+      WHERE (?1 IS NULL OR f.kind = ?1) AND (?2 IS NULL OR f.plan = ?2)
+        AND (?3 IS NULL OR (?3 = 'open' AND f.completed_at IS NULL) OR (?3 = 'complete' AND f.completed_at IS NOT NULL))
+      ORDER BY f.created_at DESC, f.id DESC LIMIT ?4
+    `)
+      .bind(
+        query.kind ?? null,
+        query.plan ?? null,
+        query.status ?? null,
+        query.limit ?? 50,
+      )
+      .all<
+        Omit<
+          FeedbackInbox["submissions"][number],
+          "comments" | "replies" | "emailVerified"
+        > & { emailVerified: number }
+      >(),
+  );
+  return rows.results;
+});
 
 // One query for all visible reports, rather than a D1 query per card.
 const readComments = (db: D1Database, ids: readonly number[]) =>
@@ -556,50 +642,36 @@ export const handleFeedbackInboxRequest = Effect.fn("Feedback.inbox")(
         if (request.method !== "GET")
           return json({ error: "method_not_allowed" }, 405);
         const params = new URL(request.url).searchParams;
-        const kind = params.get("kind");
-        const plan = params.get("plan");
-        const status = params.get("status");
-        const limit = Number(params.get("limit") ?? 50);
-        if (
-          (kind !== null && !["bug", "idea", "question"].includes(kind)) ||
-          (plan !== null &&
-            !["free", "unlimited", "founding"].includes(plan)) ||
-          (status !== null && !["open", "complete"].includes(status)) ||
-          !Number.isInteger(limit) ||
-          limit < 1 ||
-          limit > 100
-        )
-          return yield* Effect.fail(
+        const filters = Object.fromEntries(
+          ["kind", "plan", "status"].flatMap((key) => {
+            const value = params.get(key);
+            return value === null ? [] : [[key, value]];
+          }),
+        );
+        const query = yield* Schema.decodeUnknownEffect(FeedbackListQuery)({
+          ...filters,
+          limit: Number(params.get("limit") ?? 50),
+        }).pipe(
+          Effect.mapError(() =>
             fail(
               400,
               "invalid_query",
               "Use a valid kind, plan, status and limit (1–100).",
             ),
-          );
-        const rows = yield* database(() =>
-          env.DB.prepare(`
-        SELECT f.id, f.user_id AS userId, f.request_id AS requestId, f.plan, f.kind, f.message,
-          f.app_version AS appVersion, f.browser, f.route_category AS routeCategory, f.created_at AS createdAt,
-          f.completed_at AS completedAt, u.email, u.emailVerified
-        FROM feedback_submissions f JOIN "user" u ON u.id = f.user_id
-        WHERE (?1 IS NULL OR f.kind = ?1) AND (?2 IS NULL OR f.plan = ?2)
-          AND (?3 IS NULL OR (?3 = 'open' AND f.completed_at IS NULL) OR (?3 = 'complete' AND f.completed_at IS NOT NULL))
-        ORDER BY f.created_at DESC, f.id DESC LIMIT ?4
-      `)
-            .bind(kind, plan, status, limit)
-            .all<{ id: number; emailVerified: number }>(),
+          ),
         );
+        const rows = yield* readFeedbackSubmissions(query, env, session);
         const comments = yield* readComments(
           env.DB,
-          rows.results.map((row) => row.id),
+          rows.map((row) => row.id),
         );
         const replies = yield* readReplies(
           env.DB,
-          rows.results.map((row) => row.id),
+          rows.map((row) => row.id),
         );
         return json({
           replyMode: replyMode(env),
-          submissions: rows.results.map((row) => ({
+          submissions: rows.map((row) => ({
             ...row,
             emailVerified: row.emailVerified === 1,
             replies: replies.results

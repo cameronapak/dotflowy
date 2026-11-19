@@ -9,9 +9,13 @@ export const requestJson = Effect.fn("CLI.requestJson")(
     options: {
       body?: string;
       headers?: Record<string, string>;
-      uncertainWrite?: boolean;
+      uncertainWrite?: boolean | "feedback";
     } = {},
   ) {
+    const retryAdvice =
+      options.uncertainWrite === "feedback"
+        ? "retry feedback with the same id, kind, and message."
+        : "inspect the outline before retrying.";
     const request = (
       options.body === undefined
         ? HttpClientRequest.get(url)
@@ -35,7 +39,7 @@ export const requestJson = Effect.fn("CLI.requestJson")(
           fail(
             response.status === 401
               ? "Authentication expired or invalid. If using DOTFLOWY_TOKEN, replace it with a new API key from Dotflowy Settings → Connections → API keys or a valid OAuth token. Otherwise run dotflowy login."
-              : `Server returned HTTP ${response.status}.${options.uncertainWrite ? " Write outcome may be unknown; inspect the outline before retrying." : ""}`,
+              : `Server returned HTTP ${response.status}.${options.uncertainWrite ? ` Write outcome may be unknown; ${retryAdvice}` : ""}`,
             code,
           ),
         );
@@ -48,7 +52,7 @@ export const requestJson = Effect.fn("CLI.requestJson")(
           ? error
           : fail(
               options.uncertainWrite
-                ? "Request failed. Write outcome is unknown; inspect the outline before retrying. Nothing was retried."
+                ? `Request failed. Write outcome is unknown; ${retryAdvice} Nothing was retried.`
                 : "Request failed or response was invalid. Check your connection and server URL.",
             ),
       ),

@@ -80,9 +80,7 @@ test("API keys select permissions and expiry, reveal once, copy, and clear on cl
   await page
     .getByRole("button", { name: "Read and write", exact: true })
     .click();
-  await expect(
-    page.getByText(/Can edit and delete your outline/),
-  ).toBeVisible();
+  await expect(page.getByText(/edit,? and delete your outline/)).toBeVisible();
   await page.getByLabel("Name").fill("My iPhone");
   await page.getByRole("button", { name: "90 days", exact: true }).click();
   await page.getByRole("button", { name: "Create key" }).click();

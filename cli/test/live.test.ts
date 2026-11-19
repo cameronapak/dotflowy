@@ -96,9 +96,12 @@ test.skipIf(process.env.DOTFLOWY_LIVE_TEST !== "1")(
       expect(
         discovered.tools.map((t: { name: string }) => t.name).sort(),
       ).toEqual(
-        Object.values(commands)
-          .map((c) => c.tool)
-          .sort(),
+        [
+          ...Object.values(commands)
+            .map((c) => c.tool)
+            .filter((name) => name !== "list_feedback"),
+          "get_pro_trial",
+        ].sort(),
       );
       const marker = `CLI e2e ${crypto.randomUUID()}`;
       const root = nodeId(text(await run(["add", marker])));

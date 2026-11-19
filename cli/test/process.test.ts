@@ -30,6 +30,7 @@ const cli = async (
 test("Node executable supports JSON/stdin, future tools, and distinct refusal/plan exit codes", async () => {
   let calls = 0;
   let received: unknown;
+  let receivedTool: string | undefined;
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -53,10 +54,14 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
             "refuse",
             "plan",
             "add_node",
+            "submit_feedback",
+            "list_my_feedback",
+            "list_feedback",
           ].map((name) => ({ name, inputSchema: { type: "object" } })),
         });
       calls++;
       received = body.params.arguments;
+      receivedTool = body.params.name;
       if (body.params.name === "refuse")
         return result({
           content: [
@@ -179,6 +184,54 @@ test("Node executable supports JSON/stdin, future tools, and distinct refusal/pl
       kind: "numbered",
       sourceApp: "Dotflowy CLI",
     });
+    expect(
+      (
+        await cli(server.url.origin, [
+          "feedback",
+          "Reviewed report",
+          "--kind",
+          "bug",
+          "--id",
+          "feedback-fixture-123",
+        ])
+      ).code,
+    ).toBe(0);
+    expect(received).toEqual({
+      message: "Reviewed report",
+      kind: "bug",
+      id: "feedback-fixture-123",
+    });
+    expect(
+      (
+        await cli(server.url.origin, [
+          "feedback-history",
+          "--id",
+          "feedback-fixture-123",
+          "--kind",
+          "bug",
+          "--limit",
+          "1",
+        ])
+      ).code,
+    ).toBe(0);
+    expect(receivedTool).toBe("list_my_feedback");
+    expect(received).toEqual({
+      id: "feedback-fixture-123",
+      kind: "bug",
+      limit: 1,
+    });
+    expect(
+      (
+        await cli(server.url.origin, [
+          "feedback-inbox",
+          "--status",
+          "open",
+          "--limit",
+          "17",
+        ])
+      ).code,
+    ).toBe(0);
+    expect(received).toEqual({ status: "open", limit: 17 });
   } finally {
     server.stop(true);
   }
@@ -201,6 +254,19 @@ test("failed writes are never retried and redirects never receive bearer credent
       ),
     ).rejects.toThrow("unknown");
     expect(requests).toBe(1);
+    const feedbackError = await Effect.runPromise(
+      rpc(
+        server.url.origin,
+        "test-token",
+        "tools/call",
+        {},
+        undefined,
+        "feedback",
+      ).pipe(Effect.flip),
+    );
+    expect(feedbackError.message).toContain("same id, kind, and message");
+    expect(feedbackError.message).not.toContain("outline");
+    expect(requests).toBe(2);
   } finally {
     server.stop(true);
   }

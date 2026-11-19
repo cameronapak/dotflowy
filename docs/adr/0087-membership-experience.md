@@ -30,8 +30,9 @@ does not promise no automatic charge when a usable payment method exists.
 `POST /api/membership/trial` requires a verified browser session, same-origin
 JSON and `consent: true`. Connecting MCP, opening a link, loading Settings, or
 creating a Checkout does not start the trial. The authenticated, read-only MCP
-`get_pro_trial` tool only returns the Settings link and disclosure; it is the
-only tool exempt from the Free plan gate and never touches the outline.
+`get_pro_trial` tool only returns the Settings link and disclosure; it is
+exempt from the Free plan gate and never touches the outline. Feedback has its
+own kind-based entitlement, described below.
 
 Eligibility is once per account: no previous trial, active paid/comp entitlement,
 or unresolved Stripe subscription (incomplete, past due, unpaid or paused).
@@ -313,6 +314,48 @@ but can leave an email undelivered. The D1 inbox, not email, is the source of
 truth. Durable delivery/retry would require a separate outbox and is not part of
 this version. Local email bindings simulate sends, never deliver. Feedback rows
 retain account ID, not a second stored email address.
+
+### Agent feedback access
+
+MCP `submit_feedback` and CLI `feedback` reuse the browser's persistence,
+account-scoped deduplication, membership gate, rolling quota and best-effort
+emails. The agent takes a reviewed, user-directed message and stable request ID,
+never an account identity or plan. It attaches only the current server version,
+not outline content, conversation history or optional browser diagnostics.
+Agent deduplication hashes the reviewed kind/message with a stable agent source
+marker rather than the server version, so a deploy between retries does not
+conflict. Browser report hashing is unchanged. Bugs bypass MCP's blanket paid
+outline gate; ideas/questions retain the shared paid membership requirement.
+Read-only and capture-only credentials cannot submit.
+
+MCP `list_my_feedback` and CLI `feedback-history` read only the authenticated
+account's submissions, including reports sent in the browser. SQL always scopes
+by server-owned account ID before filtering or limiting; no caller-supplied user
+ID or admin override is accepted. OAuth and read/write or read-only keys can read
+their history on every plan; capture-only keys remain excluded. Return only
+reference (`id`), kind, message and submission time. Staff comments, correspondence,
+diagnostics and triage state remain private. Newest-first history defaults to
+50/max 100, with optional kind and exact reference filters and `hasMore` for
+omitted matches. Exact reference lookup reaches older reports outside the latest
+page and returns the same empty result for another account's reference as a missing
+one. A history miss is not proof of failed delivery, and reads never send email.
+This adds no database migration or alternate account-permission system.
+
+MCP `list_feedback` and CLI `feedback-inbox` reuse `isAdminSession`, including
+pinned account IDs and its legacy email fallback. OAuth and API-key ownership
+resolve the real user record on each request; tool arguments cannot confer a
+role. Both discovery and direct invocation enforce current admin identity
+before reading feedback. Inbox reads are independent of paid membership and
+work with an admin's read or write key. There is no extra scope, grant store or
+retroactive consent requirement. Existing admin connections inherit the
+capability. New admin OAuth consent and non-capture key creation/rotation disclose
+inbox access; ordinary users see user-directed submission and own-history wording.
+
+The agent view is newest first, default 50/max 100 with optional kind, plan and
+status filters. It omits customer emails/account IDs, diagnostics, internal
+comments and reply history; text remains untrusted content, never instructions.
+It is bounded, not paginated or an exhaustive export. Triage and customer replies
+stay in the browser. No migration or permission-configuration change is needed.
 
 The public recurring-plan name is **Dotflowy Pro**; Founding retains its name
 and includes the same Pro benefits. Keep persisted `unlimited` plan identifiers,

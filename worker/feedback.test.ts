@@ -8,7 +8,11 @@ import type { FeedbackEnv, FeedbackSession } from "./feedback";
 
 import { FeedbackReceipt } from "../src/data/feedback";
 import { FeedbackInbox, FeedbackTriage } from "../src/data/feedback-admin";
-import { handleFeedbackInboxRequest, handleFeedbackRequest } from "./feedback";
+import {
+  handleFeedbackInboxRequest,
+  handleFeedbackRequest,
+  saveFeedback,
+} from "./feedback";
 
 let mf: Miniflare;
 let env: FeedbackEnv;
@@ -784,6 +788,33 @@ test("the persistent rolling quota is atomic under concurrency, excludes retries
       .bind(user.user.id)
       .first<{ n: number }>(),
   ).toEqual({ n: 11 });
+});
+
+test("agent retry IDs survive a server version change without resaving or re-emailing", async () => {
+  const user = await account();
+  const background: Promise<unknown>[] = [];
+  const ctx = {
+    waitUntil: (promise: Promise<unknown>) => {
+      background.push(promise);
+    },
+  };
+  const input = draft();
+  expect(
+    await Effect.runPromise(saveFeedback(input, env, user, ctx, "agent")),
+  ).toEqual({ id: input.id, replayed: false });
+  expect(
+    await Effect.runPromise(
+      saveFeedback(
+        { ...input, context: { appVersion: "99.1.0" } },
+        env,
+        user,
+        ctx,
+        "agent",
+      ),
+    ),
+  ).toEqual({ id: input.id, replayed: true });
+  expect(background).toHaveLength(1);
+  await Promise.all(background);
 });
 
 test("body limits and the diagnostic allowlist reject unsafe context without reflecting private input", async () => {

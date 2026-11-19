@@ -22,6 +22,8 @@ The existing `capture_key` table remains the one store, with an added permission
 
 API keys and OAuth use the same MCP handler, per-user Durable Object routing through `resolveUserId`, paid-plan gate, node limits, and spoiler redaction. Read-only discovery publishes only the registry's read-only tools. The dispatcher independently rejects direct calls to write tools before validation or execution, including import, mirror, move, and daily-note operations. New tools must declare their read-only status in the registry; metadata is server-owned, not a client assertion.
 
+Feedback extends this surface without a new permission preset or grant. Read and write keys may submit user-directed feedback, with the same kind-based membership rules as the app. Read-only and Read and write keys can view their owner's submitted feedback on every plan, including exact reference lookup; server-owned identity always scopes the query. An admin's Read-only or Read and write key may read the bounded inbox, but only while its owner passes the existing server admin policy. Discovery and direct calls both enforce that role; non-admin keys never gain access to other accounts' feedback. Capture only remains unchanged. See [ADR 0087](./0087-membership-experience.md#agent-feedback-access).
+
 The CLI already passes `DOTFLOWY_TOKEN` as a bearer. It now documents personal API keys and gives replacement guidance on failed authentication. Environment credentials are not saved or refreshed. Browser OAuth login and automatic refresh of saved OAuth credentials remain unchanged. No parallel outline REST API or duplicate mutation implementation is introduced.
 
 ## Shortcut discovery, failures, and icon
