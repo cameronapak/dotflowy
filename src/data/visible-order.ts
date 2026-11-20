@@ -242,13 +242,18 @@ export function buildVisibleRows(
       }
     }
   };
+  const rootSourceId =
+    mirrorsEnabled && rootId
+      ? (index.byId.get(rootId)?.mirrorOf ?? rootId)
+      : rootId;
+  const mirroredRoot = rootSourceId !== rootId;
   walk(
-    rootId,
+    rootSourceId,
     0,
     false,
-    [],
-    false,
-    mirrorsEnabled && rootId ? new Set([rootId]) : EMPTY_EXPANDED,
+    mirroredRoot && rootId ? [rootId] : [],
+    mirroredRoot,
+    mirrorsEnabled && rootSourceId ? new Set([rootSourceId]) : EMPTY_EXPANDED,
   );
   return out;
 }

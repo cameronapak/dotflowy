@@ -4,6 +4,7 @@ import {
   flattenNodeText,
   linkedNodeLabel,
   NODE_LINK_PATTERN,
+  nodeLinkTargetFromUrl,
   parseNodeLinks,
 } from "./node-links";
 import { buildTreeIndex, createNode } from "./tree";
@@ -11,6 +12,41 @@ import { buildTreeIndex, createNode } from "./tree";
 const A = "11111111-2222-3333-4444-555555555555";
 const B = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const FALLBACK = "n_abc123_x9y8z7";
+
+test("node URLs resolve only live, same-origin node routes", () => {
+  const origin = "https://app.dotflowy.com";
+  const index = buildTreeIndex([
+    createNode({ id: A, text: "Project Phoenix" }),
+    createNode({ id: FALLBACK, text: "Fallback" }),
+    createNode({ id: B, text: "", mirrorOf: A }),
+  ]);
+  for (const [path, expected] of [
+    [`/${A}`, A],
+    [`/${A}/`, A],
+    [`/${A}?q=project#note`, A],
+    [`/${A.replace("1", "%31")}`, A],
+    [`/${FALLBACK}`, FALLBACK],
+    [`/${B}`, A],
+  ] as const) {
+    expect(nodeLinkTargetFromUrl(origin + path, origin, index)).toBe(expected);
+  }
+  for (const value of [
+    `${origin}/00000000-0000-0000-0000-000000000000`,
+    `https://other.example/${A}`,
+    `https://app.dotflowy.com.evil.example/${A}`,
+    `http://app.dotflowy.com/${A}`,
+    `https://app.dotflowy.com:444/${A}`,
+    `https://user:password@app.dotflowy.com/${A}`,
+    `${origin}/settings`,
+    `${origin}/nested/${A}`,
+    `${origin}/${A}/children`,
+    `${origin}/%ZZ`,
+    `${origin}/%2f${A}`,
+    `/${A}`,
+    "not a URL",
+  ])
+    expect(nodeLinkTargetFromUrl(value, origin, index)).toBeNull();
+});
 
 test.each([
   [`[[${A}]]`, true],

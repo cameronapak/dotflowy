@@ -392,8 +392,10 @@ export function* walkQueryNodes(
     root && mirrorsEnabled ? trueSourceOf(index, root.id) : rootId;
   const roots =
     root && options.includeRoot ? [root] : childrenOf(index, rootContentId);
+  const rootPrefix =
+    root && !options.includeRoot && rootContentId !== root.id ? root.id : null;
   const stack: Array<{ node: Node; prefix: string | null } | { exit: string }> =
-    roots.reverse().map((node) => ({ node, prefix: null }));
+    roots.reverse().map((node) => ({ node, prefix: rootPrefix }));
   const path: Node[] = [];
   const ancestorKeys: string[] = [];
   const expanded = new Set<string>();

@@ -101,7 +101,9 @@ export function NodeActionsMenu() {
   // Run after the overlay releases focus, so dialogs (Move, Mirror) and the
   // caret handoff in each action are not undone by focus restoration.
   const choose = (action: CommandCenterAction) => {
-    setPending(() => action.run);
+    // Clipboard writes must start in the selecting gesture, not after animation.
+    if (action.executionPhase === "user-activation") action.run();
+    else setPending(() => action.run);
     setOpen(false);
   };
   const afterClose = () => {

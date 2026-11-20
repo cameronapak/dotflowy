@@ -20,6 +20,33 @@ const UUID_SRC =
 const FALLBACK_ID_SRC = "n_[0-9a-z]+_[0-9a-z]+";
 const ID_SRC = `(?:${UUID_SRC}|${FALLBACK_ID_SRC})`;
 
+/** Only this app's node routes with a live target become native links. */
+export function nodeLinkTargetFromUrl(
+  value: string,
+  origin: string,
+  index: TreeIndex,
+): string | null {
+  try {
+    const url = new URL(value);
+    if (
+      !/^https?:$/.test(url.protocol) ||
+      url.origin !== origin ||
+      url.username ||
+      url.password
+    )
+      return null;
+    const match = new RegExp(`^/(${ID_SRC})/?$`).exec(
+      decodeURIComponent(url.pathname),
+    );
+    const id = match?.[1];
+    const node = id ? index.byId.get(id) : undefined;
+    // Like the [[ picker, native links reference content, not mirror locations.
+    return node ? (node.mirrorOf ?? node.id) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Seam A regex fragment (no outer capture group -- the registry wraps it). */
 export const NODE_LINK_PATTERN = `\\[\\[${ID_SRC}\\]\\]`;
 

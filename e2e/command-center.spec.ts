@@ -571,6 +571,88 @@ test("a row's More button and Mod+Shift+. open that bullet's actions", async ({
   await expect(page.locator('li[data-node-id="zephyr"]')).toHaveCount(0);
 });
 
+test("Copy link targets the row, preserves the view, and opens that node", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await seedOutline(page, TREE);
+  await openSeededOutline(page, { path: "/alpha", anchorId: "alpha-1" });
+  await text(page, "alpha-1-a").click();
+  const before = page.url();
+  const row = page.locator('li[data-node-id="alpha-1"] > .outline-row');
+  await row.hover();
+  await row
+    .getByRole("button", { name: "More actions for Alpha one", exact: true })
+    .click();
+  const menu = page.getByRole("menu", { name: "Bullet actions" });
+  await menu
+    .getByRole("menuitem", { name: "Copy link to node", exact: true })
+    .click();
+  const expected = new URL("/alpha-1", before).href;
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(expected);
+  await expect(page.getByText("Link copied", { exact: true })).toBeVisible();
+  await expect(menu).toHaveCount(0);
+  await expect(page).toHaveURL(before);
+  await expect(text(page, "alpha-1-a")).toBeFocused();
+  await openSeededOutline(page, {
+    path: new URL(expected).pathname,
+    anchorId: "alpha-1-a",
+  });
+  await expect(page.locator("h2.zoomed-title .node-text")).toHaveText(
+    "Alpha one",
+  );
+});
+
+test("Copy link keeps a mirror's identity and reports clipboard failure", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await seedOutline(page, [
+    ...TREE,
+    {
+      id: "mirror",
+      parentId: null,
+      prevSiblingId: "zephyr",
+      text: "",
+      mirrorOf: "alpha",
+    },
+  ]);
+  await openSeededOutline(page, { anchorId: "mirror" });
+  await text(page, "mirror").click();
+  await page.keyboard.press("ControlOrMeta+Shift+Period");
+  const copy = page.getByRole("menuitem", {
+    name: "Copy link to node",
+    exact: true,
+  });
+  await copy.focus();
+  await page.keyboard.press("Enter");
+  const expected = new URL("/mirror", page.url()).href;
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(expected);
+  await expect(page.getByRole("menu", { name: "Bullet actions" })).toHaveCount(
+    0,
+  );
+  await expect(text(page, "mirror")).toBeFocused();
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = async () => {
+      throw new Error("Permission denied");
+    };
+  });
+  await page.keyboard.press("ControlOrMeta+Shift+Period");
+  await copy.click();
+  await expect(
+    page.getByText("Couldn't copy to clipboard", { exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(expected);
+});
+
 test("per-result: -> opens a picked node's action sub-view", async ({
   page,
 }) => {

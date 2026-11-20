@@ -45,6 +45,13 @@ export interface NodeCommands {
   // Open the `/mirror` destination picker for this bullet (ADR 0022): same
   // picker, but a pick creates a live mirror under the destination.
   onRequestMirror: (id: string) => void;
+  // Replace a just-pasted standalone node link, only if it is still unchanged.
+  onReplaceWithMirror: (
+    id: string,
+    sourceId: string,
+    expectedText: string,
+    activeKey: string,
+  ) => void;
   onToggleCollapsed: (id: string, collapsed: boolean) => void;
   // `x` is the caret's viewport x at the moment of the keypress, so the
   // landing node can drop the caret at the same column. Omitted for horizontal

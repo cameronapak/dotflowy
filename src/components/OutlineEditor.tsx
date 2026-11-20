@@ -55,6 +55,8 @@ import type {
 } from "../plugins/types";
 import type { NodeCommands } from "./node-commands";
 
+import { waitForPendingWritesE } from "../data/api";
+import { getAppliedSeq, resyncNodes, waitForSeqE } from "../data/collection";
 import { setNodeActionBridge } from "../data/command-bridge";
 import {
   getEditorFeatures,
@@ -71,11 +73,13 @@ import {
   insertChildAtStart,
   insertSibling,
   joinIntoPrevious,
+  mirrorReplacementReason,
   moveDown,
   moveNode,
   moveUp,
   outdent,
   removeNode,
+  replaceWithMirror,
   setIsTask,
   setKind,
   setLocked,
@@ -87,6 +91,7 @@ import {
 import { flattenNodeText } from "../data/node-links";
 import { isQuoteText, QUOTE_MARKER } from "../data/quote";
 import { appRuntime } from "../data/runtime";
+import { notifySaveFailed } from "../data/save-failure";
 import { bootstrapOutline } from "../data/seed";
 import { useSyncSelectionFillRows } from "../data/selection-fill";
 import { clearSelection } from "../data/selection-state";
@@ -95,7 +100,7 @@ import {
   centerAfterNavigation,
   holdSpotlightScroll,
 } from "../data/spotlight";
-import { runStructural } from "../data/structural";
+import { runStructural, runStructuralTracked } from "../data/structural";
 import {
   buildTreeIndex,
   childrenOf,
@@ -2162,9 +2167,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                         });
                         const newId = insertChildAtStart(
                           getTreeIndex(),
+                          isMirrorsEnabled()
+                            ? trueSourceOf(getTreeIndex(), zoomedNode.id)
+                            : zoomedNode.id,
+                        );
+                        pendingFocus.current = focusKeyFor(
+                          newId,
                           zoomedNode.id,
                         );
-                        pendingFocus.current = newId;
                       })
                     }
                     onArrowDown={() =>
@@ -2252,16 +2262,26 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                             capture(getTreeIndex(), null, null, {
                               label: "create",
                             });
-                            const siblings = childrenOf(getTreeIndex(), rootId);
+                            const parentId =
+                              isMirrorsEnabled() && rootId
+                                ? trueSourceOf(getTreeIndex(), rootId)
+                                : rootId;
+                            const siblings = childrenOf(
+                              getTreeIndex(),
+                              parentId,
+                            );
                             const afterId = siblings.length
                               ? siblings[siblings.length - 1]!.id
                               : null;
                             const newId = insertSibling(
                               getTreeIndex(),
-                              rootId,
+                              parentId,
                               afterId,
                             );
-                            pendingFocus.current = newId;
+                            pendingFocus.current = focusKeyFor(
+                              newId,
+                              rootId ?? newId,
+                            );
                           })
                         }
                       >
@@ -2816,6 +2836,7 @@ function useNodeCommands({
       return {
         onTextChange: (id, text) => {
           const idx = getTreeIndex();
+          if (isMirrorsEnabled()) id = trueSourceOf(idx, id);
           if (guardLocked(idx, id, rowOf(findFocusedId() ?? id))) return;
           if (idx.byId.get(id)?.text === text) return;
           captureTextHistory(id);
@@ -3396,6 +3417,40 @@ function useNodeCommands({
         // chosen destination instead of reparenting (ADR 0022).
         onRequestMirror: (id) => openMoveDialog(id, "mirror"),
 
+        onReplaceWithMirror: (id, sourceId, expectedText, activeKey) => {
+          if (!isMirrorsEnabled()) return;
+          appRuntime.runFork(
+            Effect.gen(function* () {
+              // Drain the paste first; compare-and-set then refuses unseen
+              // remote children or edits arriving while conversion is in flight.
+              yield* waitForSeqE(yield* waitForPendingWritesE);
+              const idx = getTreeIndex();
+              if (guardLocked(idx, id, rowOf(id))) return;
+              const reason = getProtection(id)
+                ? "This node is protected and can't be replaced by a mirror."
+                : mirrorReplacementReason(idx, id, sourceId, expectedText);
+              if (reason) {
+                toast.error(reason);
+                return;
+              }
+              const drop = capture(idx, activeKey, null, { label: "mirror" });
+              const { result, persisted } = runStructuralTracked(
+                () => replaceWithMirror(idx, id, sourceId, expectedText),
+                getAppliedSeq(),
+              );
+              if (result) {
+                pendingFocus.current = activeKey;
+                pendingFocusAtStart.current = false;
+              } else drop();
+              persisted.catch((error) => {
+                drop();
+                notifySaveFailed(error);
+                resyncNodes();
+              });
+            }),
+          );
+        },
+
         onToggleCollapsed: (id, collapsed) => {
           toggleCollapsed(id, collapsed);
           // The windowed list toggles instantly (ADR 0019 dropped the reveal
@@ -3523,7 +3578,13 @@ const StreamSectionTitle = memo(function StreamSectionTitle({
         onAddChild={() =>
           runStructural(() => {
             capture(getTreeIndex(), node.id, null, { label: "create" });
-            pendingFocus.current = insertChildAtStart(getTreeIndex(), node.id);
+            const newId = insertChildAtStart(
+              getTreeIndex(),
+              isMirrorsEnabled()
+                ? trueSourceOf(getTreeIndex(), node.id)
+                : node.id,
+            );
+            pendingFocus.current = focusKeyFor(newId, node.id);
           })
         }
         onArrowDown={() => commands.onMoveFocus(node.id, "down")}
@@ -3539,7 +3600,7 @@ const StreamSectionTitle = memo(function StreamSectionTitle({
  * contentEditable text-sync so the caret is never clobbered during typing.
  */
 function ZoomedTitle({
-  node,
+  node: instance,
   isPivot,
   registerRef,
   getCtx,
@@ -3564,6 +3625,10 @@ function ZoomedTitle({
   /** Hand the caret to the seam bullet a structural paste created (ADR 0044). */
   setPendingFocus: (key: string, offset: number) => void;
 }) {
+  const mirrorsOn = isMirrorsEnabled();
+  const node =
+    useNode(mirrorsOn ? (instance.mirrorOf ?? instance.id) : instance.id) ??
+    instance;
   const ref = useRef<HTMLSpanElement | null>(null);
   const {
     syncedRef,
@@ -3585,9 +3650,8 @@ function ZoomedTitle({
   // Mirror "appears in N places" badge on the zoomed title too (ADR 0022, slice
   // 1d), so a mirrored node shows the chrome whether it's a list bullet or the
   // page title. Session-fixed flag -> no reactive work when mirrors are off.
-  const mirrorsOn = isMirrorsEnabled();
   const mirrorCount = useMirrorCount(node.id, mirrorsOn);
-  const ordinal = useNodeOrdinal(node.id);
+  const ordinal = useNodeOrdinal(instance.id);
 
   // Plugin slots for the zoomed title (Seam F) plus the two core decorations
   // (protected lock, mirror badge), in ONE list -- the same composition as
@@ -3651,7 +3715,14 @@ function ZoomedTitle({
   // is gated on `!slash.isOpen` so the menu's Enter/Arrow/Escape win while it's
   // open, exactly as OutlineRow gates useBulletKeymap.
   const slash = useSlashMenu({
-    node,
+    // Commands move/delete the location; their text and kind read the source.
+    node: {
+      ...instance,
+      text: node.text,
+      isTask: node.isTask,
+      completed: node.completed,
+      kind: node.kind,
+    },
     ctx: getCtx,
     getEl: () => ref.current,
     onTextChange,
@@ -3729,7 +3800,7 @@ function ZoomedTitle({
           <span
             ref={(el) => {
               ref.current = el;
-              registerRef(node.id, el);
+              registerRef(instance.id, el);
             }}
             className={`node-text zoomed-title-text${isPivot ? " vt-morph" : ""}`}
             data-kind={node.kind ?? undefined}
@@ -3743,7 +3814,7 @@ function ZoomedTitle({
             aria-readonly={locked}
             aria-multiline="true"
             data-completed={node.completed}
-            data-history-key={node.id}
+            data-history-key={instance.id}
             data-history-node-id={node.id}
             onInput={(e) => {
               const el = e.currentTarget;
@@ -3770,7 +3841,7 @@ function ZoomedTitle({
                   // view, so inserting one would make it vanish. Remaining pasted
                   // roots become the title's prepended children instead.
                   placement: "child-prepend",
-                  activeKey: node.id,
+                  activeKey: instance.id,
                   rowEl: el.closest(".zoomed-title"),
                   focus: {
                     setPendingFocus,

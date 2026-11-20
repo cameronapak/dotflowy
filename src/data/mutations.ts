@@ -1,4 +1,5 @@
 import { nodesCollection } from "./collection";
+import { walkQueryNodes } from "./filter-query";
 import { getLiveNodes } from "./live-nodes";
 import {
   type Node,
@@ -279,6 +280,57 @@ export function mirrorNode(
     }),
   );
   return id;
+}
+
+/**
+ * A pasted link may become a mirror only while it still owns no other content.
+ * Refuse incoming mirrors too: changing their source into a mirror would make
+ * mirror chains. The caller additionally enforces plugin protection and flags.
+ */
+export function mirrorReplacementReason(
+  index: TreeIndex,
+  nodeId: string,
+  sourceId: string,
+  expectedText: string,
+): string | null {
+  const node = index.byId.get(nodeId);
+  const source = index.byId.get(trueSourceOf(index, sourceId));
+  if (!node || !source) return "The node is no longer available.";
+  if (wouldMirrorCycle(index, source.id, nodeId))
+    return "A mirror here would create a cycle.";
+  // An existing mirror can reach this location without a physical ancestor.
+  for (const { node: descendant } of walkQueryNodes(index, source.id, {
+    deduplicate: true,
+  })) {
+    if (descendant.id === nodeId) return "A mirror here would create a cycle.";
+  }
+  if (node.mirrorOf || index.mirrorsBySource.get(nodeId)?.length)
+    return "This node already has mirrors.";
+  if (node.text !== expectedText || index.childrenByParent.get(nodeId)?.length)
+    return "This node has changed since you pasted the link.";
+  if (isNodeLocked(index, nodeId))
+    return "Unlock this subtree before replacing the node.";
+  return null;
+}
+
+/** Replace the pasted link in place, preserving its id and position. */
+export function replaceWithMirror(
+  index: TreeIndex,
+  nodeId: string,
+  sourceId: string,
+  expectedText: string,
+): boolean {
+  if (mirrorReplacementReason(index, nodeId, sourceId, expectedText))
+    return false;
+  const source = index.byId.get(trueSourceOf(index, sourceId))!;
+  update(nodeId, {
+    mirrorOf: source.id,
+    text: source.text,
+    isTask: false,
+    completed: false,
+    kind: null,
+  });
+  return true;
 }
 
 /**
