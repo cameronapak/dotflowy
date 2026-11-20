@@ -62,3 +62,10 @@ FEEDBACK_REPLY_MODE=simulate
 # ADMIN_USER_IDS to the production admin's id, so locally no account is an
 # admin until you set your LOCAL Better Auth user.id here.
 # ADMIN_USER_IDS=
+
+# Personal plugins beta (ADR 0095). Off unless exactly "true". Needs a paid
+# plan; locally, comp your account with a manual subscription row. Optional
+# PERSONAL_PLUGINS_USERS limits it to comma-separated Better Auth user.ids.
+# Local dev stores plugin repos in the Artifacts simulator (needs git 2.32+).
+# PERSONAL_PLUGINS=true
+# PERSONAL_PLUGINS_USERS=
