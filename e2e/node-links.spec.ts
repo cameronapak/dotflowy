@@ -421,11 +421,12 @@ test("an empty zoomed title can become a mirror without navigating away", async 
   const move = page.getByRole("dialog");
   await move.getByPlaceholder("Move under...").fill("kickoff");
   await move.getByRole("option").filter({ hasText: "kickoff" }).click();
+  await expect(move).not.toBeVisible();
+  await page.goto("/");
   await expect(page.locator('li[data-node-id="blank"]')).toHaveAttribute(
     "data-parent-id",
     REF,
   );
-  await page.goto("/");
   await text(page, TARGET).waitFor({ state: "visible" });
   await expect(
     page.locator(`li[data-node-id="${TARGET}"]`),
