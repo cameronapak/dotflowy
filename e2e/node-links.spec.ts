@@ -387,6 +387,8 @@ test("an empty zoomed title can become a mirror without navigating away", async 
   await expect(
     page.locator(".outline-list .node-text", { hasText: "New shared child" }),
   ).toBeVisible();
+  // Writing hides navigation chrome until the pointer or keyboard reveals it.
+  await page.mouse.move(600, 300);
   await page.getByRole("button", { name: "Add node", exact: true }).click();
   await expect(page.locator(".outline-list .node-text:focus")).toBeVisible();
   await page.keyboard.type("Appended shared child");
