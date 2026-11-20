@@ -31,6 +31,29 @@ on selected nodes. Ordinary text-range copy yields the `[[id]]` source slice, wh
 pasted back into Dotflowy. Export resolves nested links without expanding children, using `missing
 link` for deleted targets and `…` for cycles; see ADR 0017.
 
+**Pasted node URLs become native links when the target exists.** Copy link to node
+keeps an absolute web URL on the clipboard for agents and other apps. For a
+single bare URL pasted into an editor, the links plugin checks the current
+origin and the loaded outline before its ordinary URL handling. A matching
+`/$nodeId` route becomes `[[nodeId]]`, including when replacing selected text;
+the existing chip, live label, same-tab zoom, and backlinks apply. Query and hash
+view state are not part of the node reference. Like the `[[` picker, a pasted
+mirror URL references its source, not the mirror's location. Missing targets, other origins,
+and non-node routes keep ordinary web-link handling. No network lookup or
+permission change is involved. Literal paste bypasses conversion, as it does
+other paste transformations. Rows, zoomed titles, and Quick-add share this path.
+
+**An empty node offers a link-or-mirror paste choice.** When a standalone native
+link lands in a row or zoomed title with no prior text and no children, a
+nonmodal **Paste as** menu offers **Link to node** and **Mirror node**. The link
+is already saved: choosing Link, Escape, or clicking away leaves it inline.
+Pasting into existing text or a node with children stays inline without a menu.
+Quick-add stays inline because it captures a draft, not an existing outline
+location. Literal paste and the mirrors-off rollback path do not open the menu.
+The existing overlay and `NodeCommands` mutation boundary own the interaction;
+no new plugin seam or persisted preference is introduced. See ADR 0022 for the
+guarded, undoable in-place mirror conversion.
+
 **The chip is a BibleChip-class atom, not a revealing token.** Rendered as a Seam A **widget** token
 ([ADR 0006](./0006-react-token-widgets.md)): the mounted component subscribes via `useNode(targetId)`,
 which is what makes the live label possible at all — a plain `El` token can't, because the decorate

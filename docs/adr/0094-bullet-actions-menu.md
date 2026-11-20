@@ -46,7 +46,13 @@ chose the ⋯ button.
    keyboard accessory (0066), so the software keyboard stays up.
 7. **Desktop actions run after close.** An action runs when the menu finishes
    closing, so the Move and Mirror pickers and each action's own caret
-   handoff are not undone by focus restoration.
+   handoff are not undone by focus restoration. Actions that declare
+   `executionPhase: "user-activation"` run in the selecting gesture instead,
+   so clipboard access keeps browser user activation. Copy link to node uses this
+   phase and copies an absolute `/$nodeId` URL on the current origin, with no
+   view query or hash. It targets the row's instance, including mirrors,
+   without navigating or changing access permissions. It also appears in
+   Find through the shared action list.
 
 ## Not changed
 

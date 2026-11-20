@@ -83,6 +83,27 @@ selection actions menu via `runMany` (mirror several subtrees at once, [ADR 0018
 and daily's **"Mirror to Today"** (no picker, target = today's note). Daily keeps **both** "Move to Today"
 (the current move) and "Mirror to Today" — relocating and "this also matters today" are different intents.
 
+**Pasted node links can become mirrors in place.** The empty-node paste choice
+([ADR 0032](./0032-node-links-and-backlinks.md)) replaces only the just-inserted
+link, preserving the node id, parent, sibling order, and local view state. This
+avoids deleting/recreating a location that may already have URLs or backlinks.
+`NodeCommands.onReplaceWithMirror` rechecks the live tree, effective lock,
+plugin protection, unchanged pasted text, and absence of children. The menu
+disables Mirror with a reason if replacement would cycle, or if the destination
+already has mirrors: converting such a source would introduce mirror chains.
+These guards update while the menu is open and are checked again on selection.
+The stored mirror snapshots the source text, as ordinary mirror creation does.
+One history capture and one `runStructuralTracked` batch make conversion undoable
+back to the inline link, without changing the source or navigating away. The
+command drains older writes before planning and sends `expectedSeq`; an unseen
+remote edit or child arriving in flight rejects conversion rather than hiding
+content. Failure rolls back, drops its history capture, reports the failed save,
+and resyncs the outline.
+For a zoomed mirror, the title subscribes to the source's live content while
+retaining the instance's focus/history key. Text edits and new children target
+the source; the shared visible-row walk starts at that source and preserves the
+instance prefix on descendant render keys. This also applies after reload.
+
 **Visual — legible, low-noise (core chrome, both render paths).** Mirrors are a core concept (they rewrite
 the render walk), not a plugin seam, so the chrome renders in both the list row and the zoomed title (the
 dual-path rule). Always-on: a mirror icon + subtle tint on instances, a "mirrored ×N" count badge on the

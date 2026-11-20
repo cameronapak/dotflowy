@@ -1125,6 +1125,7 @@ function QuickAddOverlay({
       onSetLocked: noop,
       onRequestMove: noop,
       onRequestMirror: noop,
+      onReplaceWithMirror: noop,
       onToggleCollapsed: noop,
       onMoveFocus: noop,
       onZoom: noop,

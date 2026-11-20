@@ -578,7 +578,10 @@ function SwitcherDialog({
 
   function runAction(action: CommandCenterAction) {
     if (action.disabled) return;
-    if (mobile || action.executionPhase === "after-editor-restore") {
+    if (
+      (mobile && action.executionPhase !== "user-activation") ||
+      action.executionPhase === "after-editor-restore"
+    ) {
       // Native sheets must release modality before another overlay opens.
       // Spotlight also needs its original editor focus restored first.
       afterClose.current = () => {

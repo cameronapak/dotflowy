@@ -13,6 +13,6 @@ export interface CommandCenterAction {
   /** Display-only shortcut, one string per key cap (e.g. `["⌘", "⇧", "↑"]`). */
   hotkey?: string[];
   disabled?: boolean;
-  executionPhase?: "after-editor-restore";
+  executionPhase?: "after-editor-restore" | "user-activation";
   run: () => void;
 }

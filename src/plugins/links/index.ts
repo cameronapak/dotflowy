@@ -24,6 +24,7 @@ import {
   LINK_PATTERN,
   safeLinkHref,
 } from "../../data/links";
+import { nodeLinkTargetFromUrl } from "../../data/node-links";
 import { getTreeIndex } from "../../data/tree-store";
 import { isRevealed, resolveNodeId } from "../token-kit";
 import { definePlugin, type PluginContext } from "../types";
@@ -32,6 +33,7 @@ import {
   openLinkCreatePopover,
   openLinkEditPopover,
 } from "./link-edit-popover";
+import { offerNodePasteChoice } from "./node-paste-choice";
 import {
   editButtonEl,
   foldedLinkEl,
@@ -296,14 +298,18 @@ export default definePlugin({
   // an existing SELECTION keeps the old end-of-link caret (no stray space).
   input: {
     onPaste: ({ plain, html, selectedText, hasSelection }) => {
+      const selUrl = bareHttpUrl(plain);
+      const targetId = selUrl
+        ? nodeLinkTargetFromUrl(selUrl, window.location.origin, getTreeIndex())
+        : null;
+      if (targetId) return `[[${targetId}]] `;
       const preferences = getEditorFeatures();
       const choiceUrl =
         !hasSelection && (!preferences.ready || preferences.embeds)
-          ? bareHttpUrl(plain)
+          ? selUrl
           : null;
       // Standalone URLs wait for an explicit display choice before any lookup.
       if (choiceUrl) return choiceUrl;
-      const selUrl = bareHttpUrl(plain);
       const anchor = hasSelection ? null : singleAnchor(html);
       if (hasSelection && selUrl)
         return `[${selectedText}](${encodeUrlForMarkdown(selUrl)})`;
@@ -315,7 +321,9 @@ export default definePlugin({
     },
 
     // Full source supplies code/spoiler context; the old source prevents backfill.
-    afterPaste: ({ before, text, nodeId, el }, ctx) => {
+    afterPaste: (input, ctx) => {
+      if (offerNodePasteChoice(input, ctx)) return;
+      const { before, text, nodeId, el } = input;
       const preferences = getEditorFeatures();
       if (
         !before.trim() &&

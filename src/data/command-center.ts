@@ -1,3 +1,5 @@
+import { toast } from "sonner";
+
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -7,6 +9,7 @@ import {
   ExpandIcon,
   GitForkIcon,
   IndentIcon,
+  LinkIcon,
   MaximizeIcon,
   MoveIcon,
   OutdentIcon,
@@ -76,6 +79,25 @@ export function buildNodeVerbActions(
   const id = node.id;
   const hasChildren = childrenOf(index, id).length > 0;
   const actions: CommandCenterAction[] = [
+    {
+      id: "node:copy-link",
+      label: "Copy link to node",
+      description: "Copy a URL to this node",
+      icon: LinkIcon,
+      scope: "node",
+      keywords: ["copy", "link", "url", "agent"],
+      executionPhase: "user-activation",
+      run: async () => {
+        try {
+          await navigator.clipboard.writeText(
+            new URL(`/${encodeURIComponent(id)}`, window.location.origin).href,
+          );
+          toast.success("Link copied");
+        } catch {
+          toast.error("Couldn't copy to clipboard");
+        }
+      },
+    },
     {
       id: "node:indent",
       label: "Indent",

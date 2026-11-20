@@ -99,6 +99,17 @@ describe("buildVisibleRows — mirrors enabled (ADR 0022)", () => {
       ["a2", "M\u0001a2", "a2", 2, false, false, false],
     ]);
     expect(new Set(rows.map((r) => r.key)).size).toBe(7);
+    expect(
+      buildVisibleRows(index, "M", show, null, true).map((row) => [
+        row.id,
+        row.key,
+        row.depth,
+      ]),
+    ).toEqual([
+      ["a1", "M\u0001a1", 0],
+      ["a2", "M\u0001a2", 0],
+    ]);
+    expect(buildVisibleRows(index, "M", show)).toEqual([]);
   });
 
   test("two mirrors of the same source keep distinct keys", () => {
