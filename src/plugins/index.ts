@@ -16,6 +16,7 @@ import focus from "./focus";
 import highlight from "./highlight";
 import links from "./links";
 import nodeLinks from "./node-links";
+import personal from "./personal";
 import provenance from "./provenance";
 import quote from "./quote";
 import routeBible from "./route-bible";
@@ -44,6 +45,8 @@ export const plugins: PluginDef[] = [
   daily,
   scribble,
   focus,
+  // Inert until the server reports an eligible, opted-in account (ADR 0095).
+  personal,
 ];
 
 // Only these reviewed plugins have optional editor conveniences (ADR 0064).

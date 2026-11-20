@@ -32,6 +32,7 @@ import {
   hasFoldingToken,
   renderToken,
   inlineTokenMatches,
+  usePluginSeamVersion,
 } from "../plugins/registry";
 import { WIDGET_TAG } from "./plugin-widget";
 
@@ -43,12 +44,13 @@ export function useEditorFeatureDecoration(
   composing: RefObject<boolean>,
 ) {
   const { bible, daily, ready } = useEditorFeatures();
+  const tokenSet = usePluginSeamVersion();
   useEffect(() => {
     const el = ref.current;
     if (!el || composing.current) return;
     const focused = document.activeElement === el;
     decorate(el, readSource(el), focused ? getCaretOffset(el) : null, focused);
-  }, [bible, daily, ready, ref, composing]);
+  }, [bible, daily, ready, tokenSet, ref, composing]);
 }
 
 /** True for a widget descriptor (Seam A's React mode -- ADR 0006) vs an `El`. */

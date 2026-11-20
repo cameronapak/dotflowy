@@ -157,6 +157,7 @@ import {
   hasFoldingToken,
   keymapSpecs,
   pluginPreloads,
+  usePluginSeamVersion,
   usePluginChrome,
   useIsProtected,
   useViewFilter,
@@ -385,9 +386,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     () => ({ q: routeSearch.q, focus: routeSearch.focus }),
     [routeSearch.q, routeSearch.focus],
   );
+  // A runtime-gated plugin (personal plugins, ADR 0095) can change what it
+  // hides without the route changing.
+  const pluginSeams = usePluginSeamVersion();
   const viewCtx = useMemo<ViewContext>(
-    () => ({ showCompleted, search: viewSearch, rootId }),
-    [showCompleted, viewSearch, rootId],
+    () => ({ showCompleted, search: viewSearch, rootId, pluginSeams }),
+    [showCompleted, viewSearch, rootId, pluginSeams],
   );
   const isHidden = useMemo(() => composeHidden(viewCtx), [viewCtx]);
   // Mirror the live view state (zoom root + visibility prune) into view-state's
