@@ -284,6 +284,9 @@ export interface ViewContext {
   search: RouteSearch;
   /** The current zoom root, or null at the top. */
   rootId: string | null;
+  /** Changes when a runtime-gated plugin (ADR 0095) changes what it hides, so
+   *  predicates memoized on this context rebuild. */
+  pluginSeams?: number;
 }
 
 /** The string-valued search params the shell carries into the view pipe. */
@@ -755,6 +758,13 @@ export interface PluginDef {
   /** Notify when global actions or editorFont change. Account preferences are
    * already observed by the registry; browser-local modes supply this signal. */
   chromeChanged?(notify: () => void): () => void;
+  /** Runtime gate for a plugin whose seams depend on server state, such as
+   *  personal plugins (ADR 0095). While it returns false, the registry leaves
+   *  out the plugin's tokens, slots, commands, and other optional seams, as it
+   *  does for a switched-off editor feature. Its globalActions stay reachable
+   *  so it can offer an opt-in. Its chromeChanged must fire when this flips or
+   *  its contributions change; the registry then rebuilds the seams. */
+  isActive?(): boolean;
   // NOTE: there is deliberately NO `styles` seam (ADR 0031 retired raw plugin
   // CSS -- a plugin could restyle the whole app through it). A plugin styles its
   // own tokens/slots with Tailwind utility classes on the `El`/JSX it returns

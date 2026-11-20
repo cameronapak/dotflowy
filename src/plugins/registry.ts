@@ -739,20 +739,50 @@ function publishChrome() {
 // registered, and protection/preloads still use ALL plugins, so an off switch
 // cannot expose Daily structure to deletion. Rebuild once per preference change,
 // not per node or keystroke; live exports keep event-time consumers current.
+// Bumped whenever the composed token set changes or a runtime-gated plugin
+// (ADR 0095) changes what it renders or hides, so already-decorated text and
+// the memoized visibility predicate catch up.
+let tokenSetVersion = 0;
+const tokenSetListeners = new Set<() => void>();
+function subscribeTokenSet(notify: () => void) {
+  tokenSetListeners.add(notify);
+  return () => {
+    tokenSetListeners.delete(notify);
+  };
+}
+/** A number that changes when decorated text or hidden rows may change. */
+export function usePluginSeamVersion(): number {
+  return useSyncExternalStore(
+    subscribeTokenSet,
+    () => tokenSetVersion,
+    () => 0,
+  );
+}
+
+let lastEnabled: Readonly<Partial<Record<EditorFeature, boolean>>> = {};
 function refreshOptionalSeams(
   enabled: Readonly<Partial<Record<EditorFeature, boolean>>>,
+  /** A runtime-gated plugin changed what its tokens render. */
+  tokensChanged = false,
 ) {
+  lastEnabled = enabled;
   const active = plugins.filter((p) => {
+    if (p.isActive?.() === false) return false;
     const feature = editorFeaturePlugins.get(p);
     return feature === undefined || enabled[feature];
   });
   const enabledTokens = new Set(active.flatMap((p) => p.tokens ?? []));
   tokenSpecs = allTokenSpecs.filter((spec) => enabledTokens.has(spec));
+  const previousSource = tokenRegex.source;
   tokenRegex = new RegExp(
     tokenSpecs.map((spec, i) => `(?<_t${i}>${spec.pattern})`).join("|") ||
       "(?!)",
     "gu",
   );
+  if (tokensChanged || tokenRegex.source !== previousSource) {
+    tokenSetVersion++;
+    for (const notify of tokenSetListeners) notify();
+  }
   folding = tokenSpecs.filter((s) => s.folds);
   foldingRegex = new RegExp(
     folding.map((s) => s.pattern).join("|") || "(?!)",
@@ -794,4 +824,11 @@ subscribeEditorFeatures(() => {
 // Do not expose write-intent Daily controls before the account read settles.
 // This initialization is inert: it never fetches before the signed-in AuthGate.
 refreshOptionalSeams({});
-for (const plugin of plugins) plugin.chromeChanged?.(publishChrome);
+// A runtime-gated plugin's change can add or remove seams (its token patterns
+// and commands follow the account's installed plugins), so it rebuilds them.
+for (const plugin of plugins)
+  plugin.chromeChanged?.(
+    plugin.isActive
+      ? () => refreshOptionalSeams(lastEnabled, true)
+      : publishChrome,
+  );

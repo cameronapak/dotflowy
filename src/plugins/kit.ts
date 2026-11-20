@@ -30,6 +30,7 @@ export * from "@/components/ui/dialog";
 export * from "@/components/ui/dropdown-menu";
 export * from "@/components/ui/field";
 export * from "@/components/ui/input";
+export * from "@/components/ui/native-select";
 export * from "@/components/ui/popover";
 export * from "@/components/ui/responsive-popover";
 export * from "@/components/ui/separator";
