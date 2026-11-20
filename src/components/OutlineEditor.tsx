@@ -2262,16 +2262,26 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
                             capture(getTreeIndex(), null, null, {
                               label: "create",
                             });
-                            const siblings = childrenOf(getTreeIndex(), rootId);
+                            const parentId =
+                              isMirrorsEnabled() && rootId
+                                ? trueSourceOf(getTreeIndex(), rootId)
+                                : rootId;
+                            const siblings = childrenOf(
+                              getTreeIndex(),
+                              parentId,
+                            );
                             const afterId = siblings.length
                               ? siblings[siblings.length - 1]!.id
                               : null;
                             const newId = insertSibling(
                               getTreeIndex(),
-                              rootId,
+                              parentId,
                               afterId,
                             );
-                            pendingFocus.current = newId;
+                            pendingFocus.current = focusKeyFor(
+                              newId,
+                              rootId ?? newId,
+                            );
                           })
                         }
                       >
@@ -3705,7 +3715,14 @@ function ZoomedTitle({
   // is gated on `!slash.isOpen` so the menu's Enter/Arrow/Escape win while it's
   // open, exactly as OutlineRow gates useBulletKeymap.
   const slash = useSlashMenu({
-    node,
+    // Commands move/delete the location; their text and kind read the source.
+    node: {
+      ...instance,
+      text: node.text,
+      isTask: node.isTask,
+      completed: node.completed,
+      kind: node.kind,
+    },
     ctx: getCtx,
     getEl: () => ref.current,
     onTextChange,

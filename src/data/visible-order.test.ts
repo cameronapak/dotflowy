@@ -109,6 +109,19 @@ describe("buildVisibleRows — mirrors enabled (ADR 0022)", () => {
       ["a1", "M\u0001a1", 0],
       ["a2", "M\u0001a2", 0],
     ]);
+    const filter = buildQueryFilter(
+      index,
+      "M",
+      "-absent",
+      show,
+      queryOperators,
+    );
+    expect(
+      buildVisibleRows(index, "M", show, filter, true).map((row) => row.key),
+    ).toEqual(["M\u0001a1", "M\u0001a2"]);
+    expect(
+      findVisibleNeighbor(index, "M", "M", "down", show, filter, true),
+    ).toBe("M\u0001a1");
     expect(buildVisibleRows(index, "M", show)).toEqual([]);
   });
 

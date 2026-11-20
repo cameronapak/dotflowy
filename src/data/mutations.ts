@@ -1,4 +1,5 @@
 import { nodesCollection } from "./collection";
+import { walkQueryNodes } from "./filter-query";
 import { getLiveNodes } from "./live-nodes";
 import {
   type Node,
@@ -297,6 +298,12 @@ export function mirrorReplacementReason(
   if (!node || !source) return "The node is no longer available.";
   if (wouldMirrorCycle(index, source.id, nodeId))
     return "A mirror here would create a cycle.";
+  // An existing mirror can reach this location without a physical ancestor.
+  for (const { node: descendant } of walkQueryNodes(index, source.id, {
+    deduplicate: true,
+  })) {
+    if (descendant.id === nodeId) return "A mirror here would create a cycle.";
+  }
   if (node.mirrorOf || index.mirrorsBySource.get(nodeId)?.length)
     return "This node already has mirrors.";
   if (node.text !== expectedText || index.childrenByParent.get(nodeId)?.length)

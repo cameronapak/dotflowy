@@ -91,6 +91,8 @@ avoids deleting/recreating a location that may already have URLs or backlinks.
 plugin protection, unchanged pasted text, and absence of children. The menu
 disables Mirror with a reason if replacement would cycle, or if the destination
 already has mirrors: converting such a source would introduce mirror chains.
+Replacement checks reachable source descendants through existing mirrors too,
+not only physical ancestry, so an indirect expansion cycle is refused.
 These guards update while the menu is open and are checked again on selection.
 The stored mirror snapshots the source text, as ordinary mirror creation does.
 One history capture and one `runStructuralTracked` batch make conversion undoable
@@ -102,7 +104,9 @@ and resyncs the outline.
 For a zoomed mirror, the title subscribes to the source's live content while
 retaining the instance's focus/history key. Text edits and new children target
 the source; the shared visible-row walk starts at that source and preserves the
-instance prefix on descendant render keys. This also applies after reload.
+instance prefix on descendant render keys. Query filtering uses that same prefix.
+Both Enter and Add node insert into the source, while positional slash commands
+keep targeting the mirror instance. This also applies after reload.
 
 **Visual — legible, low-noise (core chrome, both render paths).** Mirrors are a core concept (they rewrite
 the render walk), not a plugin seam, so the chrome renders in both the list row and the zoomed title (the

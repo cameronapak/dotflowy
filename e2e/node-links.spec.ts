@@ -214,6 +214,20 @@ test("paste choices disable cyclic mirrors and leave child-bearing nodes inline"
       prevSiblingId: null,
       text: "Keep this child",
     },
+    {
+      id: "other",
+      parentId: null,
+      prevSiblingId: "blank",
+      text: "Other source",
+    },
+    {
+      id: "bridge",
+      parentId: TARGET,
+      prevSiblingId: REF,
+      text: "",
+      mirrorOf: "other",
+    },
+    { id: "indirect", parentId: "other", prevSiblingId: null, text: "" },
   ]);
   await openSeededOutline(page, { anchorId: TARGET });
   const url = new URL(`/${TARGET}`, page.url()).href;
@@ -235,6 +249,18 @@ test("paste choices disable cyclic mirrors and leave child-bearing nodes inline"
   await expect(menu).toHaveCount(0);
   await expect(chipIn(page, "blank")).toBeVisible();
   await expect(text(page, "child")).toHaveText("Keep this child");
+
+  // TARGET windows "other", so replacing its child would close an indirect cycle.
+  await page.goto("/other");
+  await text(page, "indirect").waitFor({ state: "visible" });
+  await caretAtEnd(page, "indirect");
+  await page.keyboard.press("ControlOrMeta+v");
+  await expect(
+    menu.getByRole("menuitem", { name: "Mirror node" }),
+  ).toBeDisabled();
+  await expect(menu).toContainText("A mirror here would create a cycle.");
+  await page.keyboard.press("Escape");
+  await expect(chipIn(page, "indirect")).toBeVisible();
 });
 
 test("remote edits and in-flight children prevent mirror replacement", async ({
@@ -346,6 +372,14 @@ test("an empty zoomed title can become a mirror without navigating away", async 
   ).toBeVisible();
   await expect(text(page, "child")).toHaveText("Shared child");
   await expect(page).toHaveURL(/\/blank$/);
+  await page.goto("/blank?q=Shared");
+  await title.waitFor({ state: "visible" });
+  await expect(text(page, "child")).toHaveText("Shared child");
+  await placeCaret(title, "end");
+  await page.keyboard.press("ArrowDown");
+  await expect(text(page, "child")).toBeFocused();
+  await page.goto("/blank");
+  await title.waitFor({ state: "visible" });
   await placeCaret(title, "end");
   await page.keyboard.type(" revised");
   await page.keyboard.press("Enter");
@@ -353,12 +387,59 @@ test("an empty zoomed title can become a mirror without navigating away", async 
   await expect(
     page.locator(".outline-list .node-text", { hasText: "New shared child" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Add node", exact: true }).click();
+  await expect(page.locator(".outline-list .node-text:focus")).toBeVisible();
+  await page.keyboard.type("Appended shared child");
+  await expect(
+    page.locator(".outline-list .node-text", {
+      hasText: "Appended shared child",
+    }),
+  ).toBeVisible();
   await page.goto("/");
   await expect(text(page, TARGET)).toHaveText("Project Phoenix revised");
   await expect(text(page, "blank")).toHaveText("Project Phoenix revised");
   await expect(
     page.locator(".outline-list .node-text", { hasText: "New shared child" }),
   ).toHaveCount(2);
+  await expect(
+    page.locator(".outline-list .node-text", {
+      hasText: "Appended shared child",
+    }),
+  ).toHaveCount(2);
+
+  // Positional slash commands act on the mirror, never its source.
+  await page.goto("/blank");
+  await title.waitFor({ state: "visible" });
+  await placeCaret(title, "end");
+  await page.keyboard.type(" /move");
+  await page
+    .getByRole("option")
+    .filter({ hasText: "Move under another node" })
+    .click();
+  const move = page.getByRole("dialog");
+  await move.getByPlaceholder("Move under...").fill("kickoff");
+  await move.getByRole("option").filter({ hasText: "kickoff" }).click();
+  await expect(page.locator('li[data-node-id="blank"]')).toHaveAttribute(
+    "data-parent-id",
+    REF,
+  );
+  await page.goto("/");
+  await text(page, TARGET).waitFor({ state: "visible" });
+  await expect(
+    page.locator(`li[data-node-id="${TARGET}"]`),
+  ).not.toHaveAttribute("data-parent-id");
+  await page.goto("/blank");
+  await title.waitFor({ state: "visible" });
+  await placeCaret(title, "end");
+  await page.keyboard.type(" /delete");
+  await page
+    .getByRole("option")
+    .filter({ hasText: "Delete this node and its subtree" })
+    .click();
+  await page.goto("/");
+  await text(page, TARGET).waitFor({ state: "visible" });
+  await expect(text(page, TARGET)).toHaveText("Project Phoenix revised");
+  await expect(text(page, "blank")).toHaveCount(0);
 });
 
 test("pasted URLs keep normal handling for missing or other-origin targets, and literal paste", async ({
