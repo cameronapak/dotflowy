@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  placeCaret,
+  seedOutline,
+  text,
+  type SeedNode,
+} from "./fixtures";
 
 // The /settings page (#171): the home for plan & billing, account, connections,
 // data, and appearance — and the reason the header More menu slimmed down.
@@ -39,6 +45,106 @@ async function openSettings(page: Page) {
   // Route loading uses the test budget; behavior assertions keep their 5s budget.
   await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
 }
+
+const isSettingsModule = (url: URL) =>
+  (url.pathname === "/src/routes/settings.tsx" &&
+    url.searchParams.has("tsr-split")) ||
+  /^\/assets\/settings-[\w-]+\.js$/.test(url.pathname);
+
+test("a missing Settings module lets you return to an outline with a pending edit", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  await openSeededOutline(page, { anchorId: "alpha" });
+  let reloads = 0;
+  page.on("request", (request) => {
+    if (request.resourceType() === "document") reloads++;
+  });
+  let lazyUrl: string | undefined;
+  // The bundle also has an eager Settings route stub, already fetched. Keep
+  // serving that stub on reload; only the lazy component should be missing.
+  await page.route(isSettingsModule, (route) => {
+    const url = route.request().url();
+    lazyUrl ??= url;
+    return url === lazyUrl
+      ? route.fulfill({ contentType: "text/html", body: "<!doctype html>" })
+      : route.fallback();
+  });
+
+  // The edit hasn't reached the server while recovery is on screen.
+  let releaseSave!: () => void;
+  const save = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  await page.route("**/api/nodes", async (route) => {
+    if (route.request().method() === "PATCH") await save;
+    await route.fallback();
+  });
+  const pending = page.waitForRequest(
+    (request) =>
+      request.method() === "PATCH" && request.url().endsWith("/api/nodes"),
+  );
+  const account = page.getByRole("button", { name: /Account and help/ });
+  const settings = page.getByRole("menuitem", { name: "Settings" });
+  const recovery = page.getByRole("heading", {
+    name: "This page couldn’t load",
+  });
+  try {
+    await placeCaret(text(page, "alpha"), "end");
+    await page.keyboard.insertText(" edited");
+    await account.press("Enter");
+    await pending;
+    await settings.click();
+    await expect(
+      recovery.or(page.getByRole("heading", { name: "Something went wrong" })),
+    ).toBeVisible();
+    expect(reloads).toBe(0);
+    await expect(recovery).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(
+      page.getByRole("link", { name: "Open outline" }),
+    ).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(text(page, "alpha")).toHaveText("Alpha edited");
+    expect(reloads).toBe(0);
+  } finally {
+    releaseSave();
+  }
+  await expect
+    .poll(async () => {
+      const nodes: SeedNode[] = await page.evaluate(async () =>
+        (await fetch("/api/nodes")).json(),
+      );
+      return nodes.find((node) => node.id === "alpha")?.text;
+    })
+    .toBe("Alpha edited");
+
+  await account.click();
+  await settings.click();
+  const reload = page.getByRole("button", { name: "Reload page" });
+  await Promise.all([page.waitForEvent("domcontentloaded"), reload.click()]);
+  await expect(recovery).toBeVisible();
+  expect(reloads).toBe(1);
+});
+
+test("an exception evaluating the Settings module keeps the generic error screen", async ({
+  page,
+}) => {
+  await seedOutline(page, TREE);
+  await openSeededOutline(page, { anchorId: "alpha" });
+  await page.route(isSettingsModule, (route) =>
+    route.fulfill({
+      contentType: "text/javascript",
+      body: 'throw new TypeError("Failed to fetch");',
+    }),
+  );
+  await page.getByRole("button", { name: /Account and help/ }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Something went wrong" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+});
 
 test("the App avatar shows a photo without a referrer and falls back when it fails", async ({
   page,

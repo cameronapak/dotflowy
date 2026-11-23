@@ -142,6 +142,17 @@ file the affected user will never load. It also forces the fix for `SERVER_INFO.
 construction: adopting semver without it ships `2.0.0` to humans and `0.1.0` to every agent on the
 same deploy.
 
+### When a route module fails to load
+
+A failed import can mean an old asset URL is gone, but it can also mean a network
+failure. The route error screen reports the original error and offers a way back
+to the outline in the same document when the outline is not the failing route.
+Reloading is explicit and asks the user to save changes first. The Bun patch for
+TanStack Router removes its built-in automatic reload, which would otherwise
+run before Dotflowy's error screen and could interrupt pending edits. Keep the
+browser regression when upgrading the router; remove the patch once the router
+offers a supported way to disable that reload.
+
 ## The branded public changelog is the landing site
 
 `dotflowy.com/changelog` (and a homepage teaser of the latest three releases) is the
