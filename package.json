@@ -167,6 +167,7 @@
   },
   "packageManager": "bun@1.4.2",
   "patchedDependencies": {
-    "@onlymoein/liquidglass@0.16.4": "patches/@onlymoein%2Fliquidglass@0.16.4.patch"
+    "@onlymoein/liquidglass@0.16.4": "patches/@onlymoein%2Fliquidglass@0.16.4.patch",
+    "@tanstack/react-router@1.170.45": "patches/@tanstack%2Freact-router@1.170.45.patch"
   }
 }

@@ -1,0 +1,110 @@
+diff --git a/dist/cjs/lazyRouteComponent.cjs b/dist/cjs/lazyRouteComponent.cjs
+index b2a3d8b8ab098d94c610cfbc00dc025557c13af9..356edeaac5b65254cf1460c1ce8ed64050aa2efd 100644
+--- a/dist/cjs/lazyRouteComponent.cjs
++++ b/dist/cjs/lazyRouteComponent.cjs
+@@ -1,13 +1,12 @@
+ const require_runtime = require("./_virtual/_rolldown/runtime.cjs");
+ const require_utils = require("./utils.cjs");
+-let _tanstack_router_core = require("@tanstack/router-core");
+ let react = require("react");
+ react = require_runtime.__toESM(react, 1);
+ let _tanstack_router_core_isServer = require("@tanstack/router-core/isServer");
+ //#region src/lazyRouteComponent.tsx
+ /**
+ * Wrap a dynamic import to create a route component that supports
+-* `.preload()` and friendly reload-on-module-missing behavior.
++* `.preload()`.
+ *
+ * @param importer Function returning a module promise
+ * @param exportName Named export to use (default: `default`)
+@@ -36,14 +35,7 @@ function lazyRouteComponent(importer, exportName) {
+ 	};
+ 	const lazyComp = function Lazy(props) {
+ 		if (error) {
+-			if ((0, _tanstack_router_core.isModuleNotFoundError)(error) && !(_tanstack_router_core_isServer.isServer ?? typeof window === "undefined") && typeof sessionStorage !== "undefined") {
+-				const storageKey = `tanstack_router_reload:${error.message}`;
+-				if (!sessionStorage.getItem(storageKey)) {
+-					sessionStorage.setItem(storageKey, "1");
+-					window.location.reload();
+-					throw new Promise(() => {});
+-				}
+-			}
++			// Dotflowy lets its error boundary offer recovery without discarding the tab.
+ 			throw error;
+ 		}
+ 		if (!comp) {
+diff --git a/dist/esm/lazyRouteComponent.js b/dist/esm/lazyRouteComponent.js
+index 7788648a35e73af6625769575ec15596b4abe2ee..489053aba473fca324946cb4b0550df051ea1f2d 100644
+--- a/dist/esm/lazyRouteComponent.js
++++ b/dist/esm/lazyRouteComponent.js
+@@ -1,11 +1,10 @@
+ import { reactUse } from "./utils.js";
+-import { isModuleNotFoundError } from "@tanstack/router-core";
+ import * as React$1 from "react";
+ import { isServer } from "@tanstack/router-core/isServer";
+ //#region src/lazyRouteComponent.tsx
+ /**
+ * Wrap a dynamic import to create a route component that supports
+-* `.preload()` and friendly reload-on-module-missing behavior.
++* `.preload()`.
+ *
+ * @param importer Function returning a module promise
+ * @param exportName Named export to use (default: `default`)
+@@ -34,14 +33,7 @@ function lazyRouteComponent(importer, exportName) {
+ 	};
+ 	const lazyComp = function Lazy(props) {
+ 		if (error) {
+-			if (isModuleNotFoundError(error) && !(isServer ?? typeof window === "undefined") && typeof sessionStorage !== "undefined") {
+-				const storageKey = `tanstack_router_reload:${error.message}`;
+-				if (!sessionStorage.getItem(storageKey)) {
+-					sessionStorage.setItem(storageKey, "1");
+-					window.location.reload();
+-					throw new Promise(() => {});
+-				}
+-			}
++			// Dotflowy lets its error boundary offer recovery without discarding the tab.
+ 			throw error;
+ 		}
+ 		if (!comp) {
+diff --git a/src/lazyRouteComponent.tsx b/src/lazyRouteComponent.tsx
+index a7b58c449914f93cffa02233cb95324efc660309..f2e66a0ca1fc9603bb7a7bd54f6f8f1e6b08ddc8 100644
+--- a/src/lazyRouteComponent.tsx
++++ b/src/lazyRouteComponent.tsx
+@@ -1,12 +1,11 @@
+ import * as React from 'react'
+-import { isModuleNotFoundError } from '@tanstack/router-core'
+ import { isServer } from '@tanstack/router-core/isServer'
+ import { reactUse } from './utils'
+ import type { AsyncRouteComponent } from './route'
+ 
+ /**
+  * Wrap a dynamic import to create a route component that supports
+- * `.preload()` and friendly reload-on-module-missing behavior.
++ * `.preload()`.
+  *
+  * @param importer Function returning a module promise
+  * @param exportName Named export to use (default: `default`)
+@@ -51,22 +50,7 @@ export function lazyRouteComponent<
+   }
+   const lazyComp = function Lazy(props: any) {
+     if (error) {
+-      // A missing module can mean that a newer deployment replaced the URL.
+-      // Reload only for the error that is still current at render time, so a
+-      // successful retry cannot leave a stale reload request armed.
+-      if (
+-        isModuleNotFoundError(error) &&
+-        !(isServer ?? typeof window === 'undefined') &&
+-        typeof sessionStorage !== 'undefined'
+-      ) {
+-        const storageKey = `tanstack_router_reload:${error.message}`
+-        if (!sessionStorage.getItem(storageKey)) {
+-          sessionStorage.setItem(storageKey, '1')
+-          window.location.reload()
+-          // Suspend forever while the document reloads.
+-          throw new Promise(() => {})
+-        }
+-      }
++      // Dotflowy lets its error boundary offer recovery without discarding the tab.
+       throw error
+     }
+ 
