@@ -1,5 +1,11 @@
 # dotflowy
 
+## 3.15.1
+
+### Patch Changes
+
+- 057f854: If a page fails to load, you can return to your outline without reloading the app or reload after your changes are saved.
+
 ## 3.15.0
 
 ### Minor Changes
