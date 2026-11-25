@@ -82,6 +82,15 @@ import { handleMcpAuthRequest } from "./mcp-provider";
 import { acknowledgeWelcome, canSaveTheme, readMembership } from "./membership";
 import { legacyNumberedNode } from "./numbered-compat";
 import { UserOutlineDO as BaseUserOutlineDO } from "./outline-do";
+import {
+  handlePersonalPluginsRequest,
+  isOptedIn,
+  personalPluginsDeployed,
+  personalPluginsEligible,
+  type PersonalPluginsEnv,
+  personalPluginTools,
+  pluginContext,
+} from "./personal-plugins";
 import { FREE_NODE_LIMIT, getPlan, nodeLimitForPlan } from "./plan";
 import { handleRewards } from "./pro-reward";
 import { trialCheckout } from "./pro-trial";
@@ -123,7 +132,7 @@ type UserOutlineDO = BaseUserOutlineDO;
 // Preserve the deployed storage class without the retired backend runtime.
 export { ShardDO } from "./retained-shard";
 
-interface Env extends AuthEnv {
+interface Env extends AuthEnv, PersonalPluginsEnv {
   RECONNECT_NOTICE_TOKEN?: string;
   /** Public Sentry DSN (a wrangler.jsonc var, not a secret; it ships in the
    *  client bundle too). Unset => error monitoring is dormant. See worker/
@@ -1235,6 +1244,23 @@ function handleApiRequest(
       const classicStub = env.USER_OUTLINE.get(
         env.USER_OUTLINE.idFromName(resolveUserId(token.userId, env)),
       );
+      // Personal-plugin authoring tools (ADR 0095): listed only for an
+      // eligible account, and only the guide until the account opts in.
+      const pluginTools =
+        personalPluginsDeployed(env) &&
+        personalPluginsEligible(env, token.userId, mcpPlan)
+          ? yield* Effect.gen(function* () {
+              const ctx = pluginContext(
+                env,
+                classicStub,
+                resolveUserId(token.userId, env),
+              );
+              const optedIn = yield* isOptedIn(classicStub).pipe(
+                Effect.orElseSucceed(() => false),
+              );
+              return personalPluginTools(ctx, optedIn);
+            })
+          : [];
       if (apiKey)
         executionCtx.waitUntil(
           env.DB.prepare("UPDATE capture_key SET lastUsedAt = ? WHERE id = ?")
@@ -1280,6 +1306,7 @@ function handleApiRequest(
           );
         },
         apiKey?.permission === "read" ? "read" : "write",
+        pluginTools,
       );
     }
 
@@ -1347,6 +1374,23 @@ function handleApiRequest(
     }
 
     const userId = resolveUserId(session.user.id, env);
+
+    // Personal plugins (ADR 0095): 404 unless deployed with the flag and the
+    // Artifacts binding, 403 unless this paid account is eligible. The opt-in
+    // and per-route checks live in the handler.
+    if (url.pathname.startsWith("/api/personal-plugins/")) {
+      if (!personalPluginsDeployed(env))
+        return yield* Effect.fail(new RouteNotFound({ path: url.pathname }));
+      const plan = yield* Effect.promise(() => getPlan(session.user.id, env));
+      if (!personalPluginsEligible(env, session.user.id, plan))
+        return json({ error: "Personal plugins need an eligible plan." }, 403);
+      const stub = env.USER_OUTLINE.get(env.USER_OUTLINE.idFromName(userId));
+      return yield* handlePersonalPluginsRequest(
+        request,
+        pluginContext(env, stub, userId),
+      );
+    }
+
     if (url.pathname === "/api/feedback") {
       if (
         request.headers.has("origin") &&

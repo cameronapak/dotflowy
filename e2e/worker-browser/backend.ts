@@ -36,7 +36,14 @@ export async function startBackend() {
       format: "esm",
       platform: "browser",
       conditions: ["workerd", "browser"],
-      external: ["cloudflare:*", "node:*"],
+      // Personal plugins load isomorphic-git lazily, only to save a version;
+      // its CommonJS deps need Wrangler's nodejs_compat bundling.
+      external: [
+        "cloudflare:*",
+        "node:*",
+        "isomorphic-git",
+        "isomorphic-git/*",
+      ],
       target: "es2022",
     });
     const reservation = createServer();

@@ -150,6 +150,21 @@
       "simple": { "limit": 60, "period": 60 },
     },
   ],
+  // Personal plugins (ADR 0095): one Artifacts repo per plugin holds its
+  // definition history. Inert unless PERSONAL_PLUGINS is "true" (unset here, so
+  // off in production). Local dev uses the simulator. BEFORE turning the flag on
+  // in production, create this namespace with jurisdiction "us" (dashboard or
+  // REST API; this config can't set it): the first repo otherwise creates it
+  // unrestricted, and a jurisdiction can't change later. Enable the beta with
+  // PERSONAL_PLUGINS and PERSONAL_PLUGINS_USERS in "vars" above, not in the
+  // dashboard, which a deploy overwrites. Artifacts needs Workers Paid and is billed.
+  "artifacts": [
+    {
+      "binding": "ARTIFACTS",
+      "namespace": "dotflowy-personal-plugins",
+      "remote": false,
+    },
+  ],
   "observability": {
     "logs": {
       "enabled": true,

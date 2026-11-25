@@ -37,6 +37,7 @@ import {
 import { isRedeemableInvite, redeemInvite } from "./invites";
 import { mcpProvider } from "./mcp-provider";
 import { recordWelcome } from "./membership";
+import { deleteAllPluginRepos } from "./personal-plugins";
 import { FOUNDING_SEAT_LIMIT, countFoundingSeats } from "./plan";
 import {
   giftCheckoutParams,
@@ -61,6 +62,9 @@ const isString = (v: AuthBodyField): v is string => typeof v === "string";
 /** The slice of the Worker env Better Auth needs. */
 export interface AuthEnv {
   DB: D1Database;
+  /** Personal-plugin version storage (ADR 0095). Optional: absent wherever
+   *  the namespace is not provisioned. */
+  ARTIFACTS?: Artifacts;
   /** The `send_email` binding (worker/email.ts). Optional: absent in plain
    *  local dev, where sends fall back to console logging. */
   EMAIL?: SendEmail;
@@ -273,6 +277,10 @@ export function createAuth(
           const stub = env.USER_OUTLINE.get(
             env.USER_OUTLINE.idFromName(user.id),
           );
+          // Personal-plugin repos live outside the DO, so delete them while
+          // the DO still lists them (ADR 0095). Not gated on the release flag:
+          // repos made before a flag change must still go.
+          if (env.ARTIFACTS) await deleteAllPluginRepos(env.ARTIFACTS, stub);
           await stub.wipe();
           // Retained storage uses the original user.id namespace, not 'default'.
           // A failure aborts deletion before identity rows vanish (ADR 0051).

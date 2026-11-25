@@ -1335,6 +1335,38 @@ export class UserOutlineDO extends DurableObject<Env> {
     return row ? JSON.parse(row.value) : value;
   }
 
+  /**
+   * Atomic multi-key compare-and-set on one kv collection. Every `expected` row
+   * must still hold exactly the value the caller read (null = absent);
+   * otherwise nothing is written and this returns false. Atomic for the same
+   * reason as getOrCreateKv: a synchronous method on a single-threaded DO.
+   * Personal plugins use it so a save, an activation, and a component-name
+   * claim either all land or none do (ADR 0095).
+   */
+  compareAndSetKv(
+    collection: string,
+    expected: readonly { key: string; value: unknown }[],
+    upserts: readonly { key: string; value: unknown }[],
+    deletes: readonly string[],
+  ): boolean {
+    this.assertWritable();
+    for (const e of expected) {
+      const row = this.sql
+        .exec<{ value: string }>(
+          "SELECT value FROM kv WHERE collection = ? AND key = ?",
+          collection,
+          e.key,
+        )
+        .toArray()[0];
+      const current = row ? JSON.stringify(JSON.parse(row.value)) : null;
+      const wanted = e.value === null ? null : JSON.stringify(e.value);
+      if (current !== wanted) return false;
+    }
+    this.upsertKv(collection, upserts);
+    this.deleteKv(collection, deletes);
+    return true;
+  }
+
   // --- account deletion ------------------------------------------------------
 
   /**

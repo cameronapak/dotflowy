@@ -31,6 +31,7 @@ import {
 import {
   type AfterTextWrite,
   type OutlineStore,
+  type ToolDef,
   type ToolResult,
   tools,
 } from "./mcp-tools";
@@ -199,7 +200,7 @@ function publishedSchema(schema: Schema.Top): EffectJsonSchema.JsonSchema {
   return jsonSchema;
 }
 
-const toolList: ToolDescriptor[] = tools.map((tool) => {
+const describe = (tool: ToolDef): ToolDescriptor => {
   const descriptor: ToolDescriptor = {
     name: tool.name,
     description: tool.description,
@@ -213,7 +214,8 @@ const toolList: ToolDescriptor[] = tools.map((tool) => {
   };
   if (tool.output) descriptor.outputSchema = publishedSchema(tool.output);
   return descriptor;
-});
+};
+const toolList: ToolDescriptor[] = tools.map(describe);
 
 // --- Dispatch --------------------------------------------------------------------
 
@@ -248,6 +250,7 @@ function handleToolCall(
   store: OutlineStore,
   afterTextWrite: AfterTextWrite | undefined,
   permission: "read" | "write",
+  extraTools: ReadonlyArray<ToolDef>,
 ): Effect.Effect<Response> {
   const call = decodeOrNull(CallToolParamsSchema, params);
   if (!call) {
@@ -255,7 +258,7 @@ function handleToolCall(
       rpcError(id, INVALID_PARAMS, "expected params {name, arguments}"),
     );
   }
-  const tool = tools.find((t) => t.name === call.name);
+  const tool = [...tools, ...extraTools].find((t) => t.name === call.name);
   if (!tool)
     return Effect.succeed(
       rpcError(id, INVALID_PARAMS, `unknown tool: ${call.name}`),
@@ -315,6 +318,7 @@ function dispatch(
   agentAccess: boolean,
   afterTextWrite?: AfterTextWrite,
   permission: "read" | "write" = "write",
+  extraTools: ReadonlyArray<ToolDef> = [],
 ): Effect.Effect<Response> {
   // A notification (no id) never gets a JSON-RPC response body, whatever the
   // method — `notifications/initialized` and friends land here.
@@ -326,22 +330,31 @@ function dispatch(
       return Effect.succeed(handleInitialize(id, message.params));
     case "ping":
       return Effect.succeed(rpcResult(id, {}));
-    case "tools/list":
+    case "tools/list": {
+      const listed = [...toolList, ...extraTools.map(describe)];
       return Effect.succeed(
         rpcResult(id, {
           tools:
             permission === "read"
-              ? toolList.filter((tool) => tool.annotations.readOnlyHint)
-              : toolList,
+              ? listed.filter((tool) => tool.annotations.readOnlyHint)
+              : listed,
         }),
       );
+    }
     case "tools/call":
       // The entitlement gate: initialize/ping/tools/list stay open so a free
       // connection can handshake and see WHY. Only the read-only trial setup
       // information is exempt; all outline tools still require Pro (#170).
       const trialInfo = decodeOrNull(CallToolParamsSchema, message.params);
       return agentAccess || trialInfo?.name === "get_pro_trial"
-        ? handleToolCall(id, message.params, store, afterTextWrite, permission)
+        ? handleToolCall(
+            id,
+            message.params,
+            store,
+            afterTextWrite,
+            permission,
+            extraTools,
+          )
         : Effect.succeed(rpcError(id, UPGRADE_REQUIRED, UPGRADE_MESSAGE));
     default:
       return Effect.succeed(
@@ -370,6 +383,8 @@ export function handleMcp(
   agentAccess: boolean,
   afterTextWrite?: AfterTextWrite,
   permission: "read" | "write" = "write",
+  /** Per-account tools, such as personal-plugin authoring (ADR 0095). */
+  extraTools: ReadonlyArray<ToolDef> = [],
 ): Effect.Effect<Response> {
   switch (request.method) {
     case "OPTIONS":
@@ -416,6 +431,7 @@ export function handleMcp(
       agentAccess,
       afterTextWrite,
       permission,
+      extraTools,
     );
   }).pipe(
     // The typed error channel only ever carries already-built error Responses.

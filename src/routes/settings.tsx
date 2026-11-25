@@ -103,6 +103,8 @@ import {
 } from "../lib/auth-client";
 import { cn } from "../lib/utils";
 import { FocusSettings } from "../plugins/focus/settings";
+import { PersonalPluginsSettings } from "../plugins/personal/settings";
+import { usePersonalPluginsAccess } from "../plugins/personal/store";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -1101,6 +1103,22 @@ function anchoredPlugin(anchor: string): string[] {
   return PLUGINS.some((p) => p.Options && p.anchor === anchor) ? [anchor] : [];
 }
 
+/** Personal plugins (ADR 0095): only for an account the server reports as
+ *  eligible (flag, paid plan, beta list). Everyone else never sees it. */
+function PersonalPluginsSection() {
+  if (usePersonalPluginsAccess() !== "eligible") return null;
+  return (
+    <div id="personal-plugins" className="scroll-mt-20">
+      <Section
+        title="Personal plugins"
+        description="Made by your agent, visible only to you. Your notes stay as readable text whatever you turn off or delete."
+      >
+        <PersonalPluginsSettings />
+      </Section>
+    </div>
+  );
+}
+
 /** Every optional plugin as one row: name, description, and an account-wide
  *  switch. A plugin with options opens them in place; only one opens at a
  *  time, and all start closed unless the URL names one. */
@@ -1529,6 +1547,7 @@ function SettingsPage() {
         </div>
         <ConnectionsSection plan={plan} />
         <PluginsSection />
+        <PersonalPluginsSection />
         <AppearanceSection />
         <details className="border-t pt-4">
           <summary className="cursor-pointer text-sm text-muted-foreground">
