@@ -556,6 +556,33 @@ E2E tests use Chromium, plus a WebKit regression for touch selection in typing
 suggestions. Install both with `bunx playwright install chromium webkit`.
 Linux WebKit does not reproduce the iPhone keyboard or safe-area behavior.
 
+### Focused Effect feedback
+
+When changing Effect code, capture advisory diagnostics before editing and rerun the same scope afterward. Keep the errors-only `bun run check:effect` gate; the advisory scan exposes warnings and suggestions for review without making them failures.
+
+From the repository root, set `target` to the source file you will change and run this block with `phase=before`. After editing, run it again with `phase=after`, keeping the target and plugin options unchanged. Use a task-specific output directory so another task's captures stay intact. If you already edited without a baseline, say that the before capture is unavailable rather than claiming a before/after improvement.
+
+```sh
+phase=before
+target=src/data/effect-bridge.ts
+out=.amp/in/orb-backup/effect-review
+mkdir -p "$out"
+exit_code=0
+bun scripts/heavy-lane.ts bunx --package @effect/tsgo@0.70.0 \
+  effect-tsgo diagnostics --file "$target" --format json --list-files \
+  --lspconfig '{"name":"@effect/language-service","diagnostics":true}' \
+  > "$out/$phase.json" 2> "$out/$phase.stderr" || exit_code=$?
+printf '%s\n' "$exit_code" > "$out/$phase.exit"
+printf 'Effect diagnostics exit=%s; output=%s\n' "$exit_code" "$out/$phase.json"
+```
+
+Keep the CLI version and inline plugin options aligned with `scripts/check-effect.ts`. Our tsconfigs do not enable the plugin, so omitting `--lspconfig` can skip checking. Omitting `--severity error` exposes all enabled severities, not rules that are off by default. Leave `--strict` off: warnings remain advisory, while Effect errors still return a nonzero status. The `.exit` file records that status even though the block continues so you can inspect the result; read `.stderr` if execution fails or JSON is missing.
+
+- **Check coverage first.** Read `summary.filesChecked`, `totalFiles`, and `filesWithoutPlugin`, then the `files` list and its detected/supported Effect versions. Confirm the intended files were checked with a supported version and no plugin skips. A zero exit status alone is insufficient.
+- **Choose the owning program.** `--file` checks that file, not every dependency or consumer. For test files, shared changes, or program-specific types, replace `--file "$target"` with `--project tsconfig.test.json`, `--project worker/tsconfig.json`, or the other owning tsconfig, then inspect findings on the touched paths. Combining `--file` and `--project` adds the project's files; it does not filter to the file. The regular gate covers app, Worker, unit tests, and CLI source/tests. Use an owning project or a focused file scan for Effect code elsewhere, such as e2e or standalone scripts, and confirm membership rather than assuming coverage.
+- **Compare findings, not offsets.** Compare before/after entries by file, rule `name`, and `message`; line numbers can move. Inspect new or changed findings on touched paths, including shared consumers when applicable. Prioritize schema acceptance, error-channel specificity, and runtime/lifetime boundaries. Suggestions about spelling or unstable APIs are not proof of a bug. Check the surrounding contract before changing an intentional throw adapter, `waitUntil` boundary, or guarded sync decoder; record why retained findings are acceptable. JSON provides source ranges and explanations, not automatic edits.
+- **Close the loop.** Run `bun run check:effect`, the affected ordinary typechecks, and behavioral tests for the change. Report the scope and tool version, before/after findings and exit statuses, which checks passed or failed, retained findings with reasons, coverage gaps, and the next action (or none). Separate checks you ran from checks you could not run. Diagnostics mode emits only Effect findings, not ordinary TypeScript errors; a clean scan does not establish persistence, cancellation, concurrency, authorization, or product behavior. Those still need tests and review.
+
 ### Package checks
 
 Run the root gate above, plus the checks for the package you changed. Commands
