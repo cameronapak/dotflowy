@@ -60,6 +60,8 @@ Writing, reviewing, or pruning a test: read [`CONTRIBUTING.md#testing`](./CONTRI
 
 **The typed-error channel in Effect is the error model.** Opensrc path and `kv-api.ts` throw: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
+When changing Effect code, use [focused Effect feedback](./CONTRIBUTING.md#focused-effect-feedback) for before/after diagnostics, coverage checks, and the verification handoff. Keep `check:effect` as the errors-only gate.
+
 ## Billing
 
 Entitlements and checkout: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
