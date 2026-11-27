@@ -710,6 +710,29 @@ Rules of thumb:
   in the same change. Ask first before changing policy, philosophy, or
   positioning.
 
+## CLI release handoff
+
+An app deploy does not publish the CLI. After packaged CLI changes merge, inspect
+that merge's `CLI Release` run and its summary. A successful `release-pr` job
+means the version PR was prepared, not that npm was updated.
+
+1. Follow the summary's release PR link. Report that URL as **awaiting publish
+   approval**. If the workflow failed or produced no PR, report the failure
+   instead of calling the CLI released. Development-only changes can correctly
+   select `none` and need no publication.
+2. Ask for explicit approval before merging the release PR. Approval to merge
+   the source change or deploy the app is not approval to publish npm. Review
+   all changes accumulated in the release PR, not just the latest source PR.
+3. After an approved release PR merges, follow its `CLI Release` publish job.
+   Verify the exact version from the merged `cli/package.json` with
+   `npm view dotflowy@<version> version` and verify the matching
+   `dotflowy@<version>` GitHub Release. Report **published** only after those
+   checks succeed; otherwise report the failed or pending stage. For partial
+   release recovery, use [ADR 0062](./docs/adr/0062-automated-cli-releases.md).
+
+This keeps the existing human publication approval and removes the need to
+rediscover the separate release PR after an otherwise successful app deploy.
+
 ## CLI release setup
 
 The repository contains the whole pipeline, but these account-level settings

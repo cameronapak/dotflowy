@@ -32,6 +32,13 @@ separate `CLI / changeset` check on ordinary PRs so the packaged-behavior gate
 cannot be merged around. That check runs on the bot's release branch too; its
 content-based version-only exemption succeeds without a new fragment.
 
+The version job reports the release PR URL in a warning and workflow summary,
+explicitly marking the CLI as not published. Source-change delivery follows the
+[CLI release handoff](../../CONTRIBUTING.md#cli-release-handoff): report the
+pending approval or verify publication, rather than treating a green version
+job or an app deployment as an npm release. The PR merge remains the approval;
+this visibility change adds no automatic merge or publication authority.
+
 ## Compatibility CI is wider than the package directory
 
 The CLI speaks the Worker's MCP contract and shares concepts with client data

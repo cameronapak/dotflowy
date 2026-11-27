@@ -58,12 +58,29 @@ jobs:
           bun-version: "1.4.2"
       - run: bun install --cwd cli --frozen-lockfile
       - uses: changesets/action/version@v2.1.1
+        id: version
         with:
           cwd: cli
           github-token: ${{ steps.app-token.outputs.token }}
           script: bun run version
           commit-message: "chore(cli): release"
           pr-title: "chore(cli): release"
+      - name: Report pending publish approval
+        env:
+          PR_NUMBER: ${{ steps.version.outputs.pr-number }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::Changesets did not return a release PR number; inspect the version step before retrying."
+            exit 1
+          }
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$PR_NUMBER"
+          echo "::warning title=CLI not published::Release PR awaits publish approval: $url"
+          {
+            echo '## CLI not published: approval pending'
+            echo
+            echo "[Review the CLI release PR]($url). Merging it approves npm publication."
+            echo 'After approval, verify the publish job and the exact npm version before reporting the CLI released.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     needs: select
